@@ -25,3 +25,18 @@ def load_dict(path: Path) -> dict:
 
 def load_record(path: Path) -> Record:
     return Record.from_dict(load_dict(path))
+
+
+def earlier_persona() -> Record:
+    """The 0003 persona that the 0004 fixture supersedes: an earlier L3 profile,
+    current (no valid_until) and superseding nothing. Shared by the mneme-backend
+    and declared-drops tests so both build the same predecessor, and mneme can
+    link a supersession to a row that is actually present."""
+    d = load_dict(RECORD_FILES["synthesized-persona-l3"])
+    d["id"] = "persona-operator-0003"
+    d["provenance"]["native_id"] = "mneme:persona-operator-0003"
+    d["provenance"]["create_ord"] = 190
+    d["provenance"]["source_hash"] = "3" * 64
+    d["data"]["text"] = "Earlier operator persona."
+    d["temporal"] = {"valid_until": None, "supersedes": None}
+    return Record.from_dict(d)

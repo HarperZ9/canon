@@ -124,11 +124,14 @@ class Provenance:
 @dataclass(frozen=True, slots=True)
 class Temporal:
     """The supersede/valid_until block. `valid_until` is the ordinal at which
-    this record stopped being current (None means it is current);
-    `supersedes` is the id of the record this one replaces (None means it
-    replaces nothing). Both mirror mneme's temporal columns so an
-    episodic-memory or persona record round-trips its history through the
-    mneme backend without loss."""
+    this record stopped being current (None means it is current); `supersedes`
+    is the id of the record this one replaces (None means it replaces nothing).
+    Both mirror mneme's temporal columns. The supersession pairing round-trips
+    through the mneme backend; the ordinal does not carry a caller-supplied
+    value, because mneme assigns `valid_until` from its own clock on supersede.
+    The mneme backend refuses an incoming `valid_until` rather than storing it
+    as current (see F1-BACKENDS.md). A zero-drop store (SqliteBackend) holds
+    both fields verbatim."""
 
     valid_until: int | None = None
     supersedes: str | None = None

@@ -18,7 +18,7 @@ cross-provider transport. canon adds the one envelope they aim at, the per-scope
 layering that resolves the block set, and the deterministic renderer.
 
 ## Build state
-F0 (this slice) ships the record of record and nothing that writes a file:
+F0 ships the record of record and nothing that writes a file:
 - `src/canon/schema.py` — the canonical envelope, five kinds, provenance,
   temporal block, `to_dict`/`from_dict` (field-identical round-trip).
 - `src/canon/validator.py` — `validate_record(rec) -> list[str]`, semantic rules.
@@ -26,8 +26,21 @@ F0 (this slice) ships the record of record and nothing that writes a file:
 - `project-docs/` — the F0 specs: schema, layering, section-ownership,
   declared-drops (cited to real code), decisions.
 
-Later phases (storage backends, renderer, verifier, migration legs) aim at this
-envelope. They are planned in the workspace assessment, not built here yet.
+F1 adds the storage seam and nothing that renders a file:
+- `src/canon/backends/base.py` — the `MemoryBackend` Protocol, the five
+  capability tokens, `record_key`/`split_key`, and `guard_put` (refuse on kind
+  mismatch or a record-enforceable dropped capability).
+- `src/canon/backends/{files,sqlite,mneme,flywheel}.py` — the four adapters.
+  sqlite is the zero-drop reference with a re-verifiable audit chain; mneme and
+  flywheel map onto an injected, duck-typed store handle and import no engine.
+- `project-docs/F1-BACKENDS.md`, `F1-DECISIONS.md` (D-7 encryption-at-rest null,
+  D-8 refuse-not-flatten, D-9 injected handle, D-10 mneme's temporal boundary as a
+  loud put-time refusal, D-11 the fake mirrors mneme's INSERT OR REPLACE); Drop 4
+  and the Status note in `F0-DECLARED-DROPS.md`.
+
+Later phases (renderer, verifier, migration legs) aim at this envelope. They are
+planned in the workspace assessment, not built here yet. R0, the block round-trip
+go/no-go gate, is the next band-1 sibling and lands on its own branch.
 
 ## Working rules
 - Python 3.11+. Standard library only in F0; no runtime dependencies.
