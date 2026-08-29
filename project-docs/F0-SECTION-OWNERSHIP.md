@@ -43,8 +43,8 @@ write only to this fixed list; the R1 write-surface assertion and the R2/M2
 scope-guard fail any write outside it.
 
 - `~/.claude/CLAUDE.md` — global
-- `c:/dev/CLAUDE.md` — workspace
-- `c:/dev/AGENTS.md` — workspace
+- `<workspace>/CLAUDE.md` — workspace
+- `<workspace>/AGENTS.md` — workspace
 - `GEMINI.md` — global and workspace
 - `SOUL.md` — global and workspace (a projection of the block set, not a second
   persona canon; see the decisions doc, ruling b)

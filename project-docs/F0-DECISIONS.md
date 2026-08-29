@@ -34,12 +34,12 @@ canon. The reverse leg reads it back into the same block records.
 **Consequence:** No record kind is "a SOUL.md"; there is one
 `personality-block` kind, and SOUL.md is one of its render targets.
 
-## D-4 — Name canon; standalone repo under c:/dev/public
+## D-4 — Name canon; give it a standalone public repo
 **Status:** accepted (operator, 2026-08-28).
 **Context:** The container is a net-new assembly and needed a name and a home
 before F0's first file, respecting the never-rename-without-a-plan rule.
-**Decision:** Name it **canon**. Home it at a new standalone repo,
-`c:/dev/public/canon`, self-contained (does not inherit workspace canon).
+**Decision:** Name it **canon**. Home it at a new standalone public repository,
+self-contained (it does not inherit a workspace-level canon).
 **Consequence:** Container code stays out of `project-docs`. The assessment doc
 in the workspace remains the plan; this repo is the build.
 

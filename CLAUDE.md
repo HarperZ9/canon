@@ -1,7 +1,7 @@
 # CLAUDE.md — canon
 
 > Model-facing, self-contained. This repo is cloned and operated on its own; it
-> does not inherit the `c:\dev` workspace canon. Anything from the workspace or
+> does not inherit a workspace-level canon. Anything from the workspace or
 > global standards this repo needs is copied here in this repo's own register.
 
 ## What canon is

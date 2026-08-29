@@ -7,7 +7,7 @@
     "title": "Name the container canon; give it a standalone repo",
     "status": "accepted",
     "context": "The container is a net-new assembly and needs a home and a name before F0 lands.",
-    "decision": "Name it canon. Home it at a new standalone repo under c:/dev/public.",
+    "decision": "Name it canon. Home it at a new standalone public repository.",
     "consequences": [
       "Container code stays out of project-docs.",
       "F0 schema, validator, and fixtures land in the new repo."
