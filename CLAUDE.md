@@ -111,6 +111,29 @@ MEMORY.md index, and adds the SOUL.md instruction surface:
   marker, D-35 the vault is not a registry root-kind, D-36 SOUL reuses the R0
   grammar with no banner.
 
+V2 is the first verify band over the render legs. It writes nothing; it ships two
+read-only gates a build keys on:
+- `src/canon/drift.py` — the rendered-surface drift check. `surface_drift`
+  re-derives a managed surface from the pool (R1's clock-free render composition,
+  so byte-stable) and compares the derived region interior to what is on disk, a
+  sha256-keyed verdict per surface (match, drift, off-limits, refused, missing).
+  It scores canon-owned bytes (the interior between the markers), so an edit to
+  the host's own prose outside the markers is never drift, and it mirrors the
+  batch writer `write_surfaces` through `pool_for`, so a merged workspace file is
+  flagged. `drift_report` maps the catalog and `drift_exit_code` gates a build.
+- `src/canon/writing_gate.py` — the injected STE seam. canon is stdlib-only and
+  the linter (`check_writing.py`) lives outside this repo, so the caller wires
+  the checker; canon owns the `WritingChecker` shape, the per-surface profile
+  register, and the `gate_text` pipeline. A file passes iff the checker reports
+  an empty `hard` list, the exact signal `check_writing --gate` keys on. The
+  register binds each surface to a profile (instruction files `readme`, SOUL.md
+  `chat`); the strict `procedure` profile is unused here (an honest null).
+- `project-docs/V2-DECISIONS.md` — D-37 the profile-per-surface register, D-38
+  the injected gate seam, D-39 the empty-hard-list pass signal, D-40 drift scores
+  the interior and mirrors the batch writer (and why `pool_for` went public),
+  D-41 the sha256-keyed verdict with the catalog as manifest, D-42 both gates
+  total and read-only.
+
 Later phases (verifier, migration legs, region installation, the global SOUL.md
 and GEMINI.md surfaces) aim at this same envelope. Each lands on its own branch.
 
