@@ -33,6 +33,8 @@ from canon.backends.base import record_key
 from canon.vault import VaultError, derive_note_name, render_note
 from canon.vault_mirror import (
     VaultResult,
+    _HUB_CAP,
+    _escape_hub_title,
     assert_under_vault_root,
     is_vault_write_allowed,
     plan_vault,
@@ -158,6 +160,24 @@ def test_render_hub_escapes_title_link_injection():
     # the `]` in the title is backslash-escaped so it cannot close the markdown
     # link early; the real target is the canon-derived relpath, not hijack.md.
     assert f"[X\\](hijack.md) danger]({rp})" in hub
+
+
+# 24b -- Root D-25: the hub escaper must double a backslash BEFORE escaping
+# brackets. A title `\](url)` otherwise folds to `\\](url)` -- an escaped
+# backslash plus a LIVE `]` that closes the hub link early and makes the url its
+# destination. Doubling the backslash first keeps the bracket its own `\]`.
+def test_escape_hub_title_escapes_backslash_first():
+    assert _escape_hub_title("\\]") == "\\\\\\]"
+    assert _escape_hub_title("a\\[b") == "a\\\\\\[b"
+
+
+# 24c -- Root D-25: the cap applies to the visible title, so truncation must run
+# BEFORE escaping. Escaping first then cutting can slice a `\]` pair in half and
+# leave a dangling backslash that mangles the appended ellipsis.
+def test_escape_hub_title_truncates_before_escaping():
+    out = _escape_hub_title("a" * (_HUB_CAP - 1) + "]")
+    assert not out.endswith("\\...")  # no dangling backslash from a split pair
+    assert out.endswith("\\]")  # the boundary bracket stays escaped
 
 
 # 25

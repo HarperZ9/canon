@@ -19,6 +19,7 @@ render-superset invariant (D-13) carried to the vault leg (D-33).
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 import unicodedata
 
@@ -129,6 +130,17 @@ def _link_token(target_id: str) -> str:
     return target_id
 
 
+def _alias_list(record: Record) -> list[str]:
+    """The note's `aliases`: the raw id, plus its wikilink-safe fallback token
+    when the id is hostile. A link to this record from another note emits
+    `_link_token(id)` (D-25); advertising that same token here is what makes the
+    `[[token]]` link resolve. A clean id is its own token, so the list is just
+    the id and no duplicate is added.
+    """
+    token = _link_token(record.id)
+    return [record.id] if token == record.id else [record.id, token]
+
+
 def emit_links(record: Record) -> str:
     """The `## canon links` trailer, or `""` when the record holds no relation.
 
@@ -208,21 +220,40 @@ def _render_body(record: Record, title: str) -> str:
     return "\n".join(parts) + "\n"
 
 
-def _refuse_unprojectable(record: Record, title: str) -> None:
-    """Refuse residue the frontmatter emitter cannot carry, so render_note stays
-    the fail-closed choke point (D-33).
+def _refuse_if_non_list(label: str, value: object) -> None:
+    """Refuse a present-but-non-list `value` an emitter iterates. A non-iterable
+    raises a raw TypeError in the body/links loop, and a string or dict projects a
+    garbage bullet list, so neither can be faithfully projected. Truthy-gated so a
+    missing or empty field is a no-op, matching the emitters' own `if value:`."""
+    if value and not isinstance(value, list):
+        raise NoteRefused(
+            f"{label} must be a list to project, got {type(value).__name__}")
 
-    Two failure modes slip past the CR gate and the validator but crash the
-    emitter: a bare LF in a single-line scalar (`id`, `title`), which
-    `emit_frontmatter` rejects with a raw FrontmatterError; and data the `canon:`
-    JSON cannot encode, which `record.to_json()` rejects with a raw TypeError.
-    Both become NoteRefused here, before a byte is emitted.
+
+def _refuse_unprojectable(record: Record, title: str) -> None:
+    """Refuse residue the projection cannot faithfully carry, so render_note
+    stays the fail-closed choke point (D-33).
+
+    Four failure modes slip past the CR gate and the validator but break the
+    projection, and each becomes NoteRefused here before a byte is emitted:
+
+    - a bare LF in a single-line scalar (`id`, `title`), which `emit_frontmatter`
+      would otherwise reject with a raw FrontmatterError;
+    - a present, non-list `consequences` (only the adr body iterates it) or
+      `source_ids` (the links trailer iterates it), via `_refuse_if_non_list`;
+    - data the strict `canon:` JSON cannot encode -- a non-serializable value, or
+      a NaN/Infinity that `json.dumps` would emit as a non-portable bareword that
+      never equals itself on round-trip and silently fails the fidelity verdict.
     """
     for label, value in (("id", record.id), ("title", title)):
         if "\n" in value or "\r" in value:
             raise NoteRefused(f"{label} scalar is not a single physical line")
+    data = record.data
+    if record.kind == KIND_ADR_DECISION:
+        _refuse_if_non_list("consequences", data.get("consequences"))
+    _refuse_if_non_list("source_ids", data.get("source_ids"))
     try:
-        record.to_json()
+        json.dumps(record.to_dict(), sort_keys=True, allow_nan=False)
     except (TypeError, ValueError) as exc:
         raise NoteRefused(f"record data is not JSON-serializable: {exc}") from exc
 
@@ -244,7 +275,8 @@ def render_note(record: Record) -> str:
         raise NoteRefused("record is not valid: " + "; ".join(problems))
     title = _display_title(record)
     _refuse_unprojectable(record, title)
-    return emit_frontmatter(record, title=title) + _render_body(record, title) + emit_links(record)
+    frontmatter = emit_frontmatter(record, title=title, aliases=_alias_list(record))
+    return frontmatter + _render_body(record, title) + emit_links(record)
 
 
 def ingest_note(text: str) -> Record:

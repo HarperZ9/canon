@@ -11,6 +11,7 @@ from __future__ import annotations
 import pytest
 
 from canon.frontmatter import (
+    FRONTMATTER_KEYS,
     FrontmatterError,
     emit_alias_list,
     emit_frontmatter,
@@ -78,9 +79,20 @@ def test_emit_alias_list_single_element_flow_seq():
 
 def test_emit_frontmatter_fixed_key_order():
     fm = emit_frontmatter(_pb(), title="Voice")
-    assert _keys(fm) == [
-        "canon_schema", "kind", "id", "scope", "title", "aliases", "canon",
-    ]
+    assert _keys(fm) == list(FRONTMATTER_KEYS)
+
+
+# Root D-28: `FRONTMATTER_KEYS` must actually DRIVE the emission order, not just
+# document it. If the emitter hardcodes its own sequence, the constant is a dead
+# maintenance trap that can silently diverge. Reorder the constant and the
+# emitted block must follow it.
+def test_emit_frontmatter_order_is_driven_by_the_constant(monkeypatch):
+    import canon.frontmatter as fm_mod
+
+    reordered = ("kind", "canon_schema", "id", "scope", "title", "aliases", "canon")
+    monkeypatch.setattr(fm_mod, "FRONTMATTER_KEYS", reordered)
+    keys = _keys(fm_mod.emit_frontmatter(_pb(), title="Voice"))
+    assert keys == list(reordered)
 
 
 def test_canon_value_is_single_physical_line():

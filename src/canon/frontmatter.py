@@ -61,28 +61,35 @@ def _require_single_line(label: str, value: str) -> None:
         raise FrontmatterError(f"{label} scalar must be a single physical line")
 
 
-def emit_frontmatter(record: Record, *, title: str) -> str:
+def emit_frontmatter(
+    record: Record, *, title: str, aliases: list[str] | None = None
+) -> str:
     """Emit the fenced frontmatter block for ``record``.
 
     ``title`` is the display label the caller also uses for the note heading; it
-    is a projection, never read back. The ``canon:`` line is the authoritative
-    carrier and is asserted single-line.
+    is a projection, never read back. ``aliases`` defaults to the record id
+    alone; the note codec passes a longer list when an id needs a wikilink-safe
+    fallback token (D-25). The ``canon:`` line is the authoritative carrier and
+    is asserted single-line.
+
+    ``FRONTMATTER_KEYS`` drives the emission order (D-28): each key's value is
+    produced here and the block is written in the constant's sequence, so the two
+    cannot drift.
     """
     payload = record.to_json()
     _require_single_line("canon", payload)
     _require_single_line("id", record.id)
     _require_single_line("title", title)
-    lines = [
-        FENCE,
-        f"canon_schema: {emit_scalar(SCHEMA)}",
-        f"kind: {emit_scalar(record.kind)}",
-        f"id: {emit_scalar(record.id)}",
-        f"scope: {emit_scalar(record.scope)}",
-        f"title: {emit_scalar(title)}",
-        f"aliases: {emit_alias_list([record.id])}",
-        f"canon: {emit_scalar(payload)}",
-        FENCE,
-    ]
+    values = {
+        "canon_schema": emit_scalar(SCHEMA),
+        "kind": emit_scalar(record.kind),
+        "id": emit_scalar(record.id),
+        "scope": emit_scalar(record.scope),
+        "title": emit_scalar(title),
+        "aliases": emit_alias_list([record.id] if aliases is None else aliases),
+        "canon": emit_scalar(payload),
+    }
+    lines = [FENCE, *(f"{key}: {values[key]}" for key in FRONTMATTER_KEYS), FENCE]
     return "\n".join(lines) + "\n"
 
 

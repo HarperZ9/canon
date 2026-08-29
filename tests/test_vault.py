@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from dataclasses import replace
 
 import pytest
 
@@ -210,6 +211,52 @@ def test_derive_note_name_refuses_non_string_or_empty_id():
         derive_note_name(_pb(id=None))
     with pytest.raises(VaultError):
         derive_note_name(_pb(id=""))
+
+
+# 16d -- Root D-33: `consequences` is not type-checked by the validator, so an
+# adr-decision carrying a non-list `consequences` passes validation and reaches
+# `_body_adr`, which iterates it. A truthy non-list (int, str, dict) crashes the
+# body emitter with a raw TypeError. render must refuse it as NoteRefused, not
+# let a bare TypeError escape the fail-closed choke point.
+def test_render_note_refuses_non_list_consequences():
+    adr = load_record(RECORD_FILES["adr-decision"])
+    bad = replace(adr, data={**adr.data, "consequences": 5})
+    with pytest.raises(NoteRefused):
+        render_note(bad)
+
+
+# 16e -- Root D-33: `source_ids` is type-checked as a list only for the two
+# memory kinds; on a personality-block it is unvalidated, so a truthy non-list
+# passes validation and reaches `emit_links`, which iterates it -- a raw
+# TypeError. render must refuse it as NoteRefused.
+def test_render_note_refuses_non_list_source_ids():
+    with pytest.raises(NoteRefused):
+        render_note(_pb(data={"title": "Voice", "body": "ok", "source_ids": 5}))
+
+
+# 16f -- Root D-33: a NaN (or Infinity) in data survives `json.dumps` as a
+# non-portable bareword and never equals itself, so the carrier would round-trip
+# to a record that silently fails the fidelity verdict. render must refuse it up
+# front so the `canon:` carrier is always strict, portable JSON.
+def test_render_note_refuses_nan_in_data():
+    with pytest.raises(NoteRefused):
+        render_note(_pb(data={"title": "Voice", "body": "ok", "n": float("nan")}))
+    with pytest.raises(NoteRefused):
+        render_note(_pb(data={"title": "Voice", "body": "ok", "n": float("inf")}))
+
+
+# 16g -- Root D-25: a wikilink-hostile id cannot ride inside `[[...]]`, so a link
+# to it falls back to a safe `{slug}-{digest}` token. That token resolves only if
+# the target note advertises it as an alias -- otherwise the link dangles. The
+# hostile-id note must carry its own fallback token in `aliases`.
+def test_hostile_id_note_advertises_fallback_link_token_alias():
+    from canon.vault import _link_token
+
+    a = _pb(id="topic#v2")  # '#' is wikilink-hostile
+    token = _link_token("topic#v2")
+    assert token != "topic#v2"  # a real fallback token, not the id verbatim
+    note = render_note(a)
+    assert f"'{token}'" in note  # advertised as an alias so [[token]] resolves
 
 
 # 17

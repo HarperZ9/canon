@@ -116,10 +116,11 @@ def _truncate(text: str, cap: int) -> str:
 
 
 def _escape_hub_title(title: str) -> str:
-    """Fold a title to one hub-safe line: newlines to spaces, `[`/`]` escaped so
-    the title cannot close the markdown link early, capped."""
-    flat = _flatten_ws(title).replace("[", "\\[").replace("]", "\\]")
-    return _truncate(flat, _HUB_CAP)
+    """One hub-safe line: cap, then escape `\\`/`[`/`]`. Truncate before escaping
+    (the cap counts visible chars, never leaving a dangling `\\`); escape `\\`
+    first so `\\](url)` cannot fold to a live link-closing `]` (D-33, hub leg)."""
+    flat = _truncate(_flatten_ws(title), _HUB_CAP)
+    return flat.replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]")
 
 
 def _hook(record: Record) -> str:
