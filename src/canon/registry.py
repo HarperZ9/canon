@@ -16,6 +16,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
+from canon.region import extract_region
 from canon.schema import Record
 from canon.surface import SurfaceError, apply_surface
 
@@ -96,3 +97,72 @@ def write_surface(surface: Surface, pool: list[Record], *, home: str,
     if new != host:
         write_text(path, new)
     return new
+
+
+@dataclass(frozen=True, slots=True)
+class SurfaceResult:
+    """The outcome of rendering one surface: written, unchanged, or off-limits
+    (the host had no canon region and was left untouched)."""
+
+    surface: Surface
+    path: str
+    status: str
+    content: str | None
+
+
+def _has_global_surface(harness: str) -> bool:
+    return any(s.harness == harness and s.scope == "global"
+               for s in SURFACE_CATALOG)
+
+
+def _pool_for(surface: Surface, pool: list[Record]) -> list[Record]:
+    """The block subset a surface renders under the authored-split rule.
+
+    A global surface renders the pool (layering resolves it to the globals). A
+    workspace surface renders only the workspace-authored blocks when the same
+    harness also owns a global surface -- the globals live in that sibling file,
+    so folding them in here would duplicate them where a harness reads both. A
+    workspace surface with no global sibling renders the full merged set, so its
+    lone file stays self-sufficient.
+    """
+    if surface.scope == "global":
+        return pool
+    if _has_global_surface(surface.harness):
+        return [r for r in pool if r.scope == "workspace"]
+    return pool
+
+
+def write_surfaces(pool: list[Record], *, home: str, workspace: str,
+                   read_text, write_text,
+                   surfaces: tuple[Surface, ...] | None = None
+                   ) -> list[SurfaceResult]:
+    """Render every surface in `surfaces` (default: the whole catalog) from one
+    pool, each by the authored-split rule. A host with no canon region is
+    skipped and reported off-limits, never mutated; a surface whose region is
+    present but mis-scoped still fails closed through apply_surface. Only a
+    changed region is written back.
+    """
+    chosen = SURFACE_CATALOG if surfaces is None else surfaces
+    # Validate the whole set before writing a single file, so one bad surface
+    # never leaves a partial write behind.
+    for surface in chosen:
+        if surface not in SURFACE_CATALOG:
+            raise SurfaceError(
+                f"surface is not in the write allow-list: {surface!r}")
+        assert_writable(resolve_surface_path(surface, home=home,
+                                             workspace=workspace),
+                        home=home, workspace=workspace)
+    results: list[SurfaceResult] = []
+    for surface in chosen:
+        path = resolve_surface_path(surface, home=home, workspace=workspace)
+        host = read_text(path)
+        if not extract_region(host).present:
+            results.append(SurfaceResult(surface, path, "off-limits", None))
+            continue
+        new = apply_surface(host, _pool_for(surface, pool), surface.scope)
+        if new != host:
+            write_text(path, new)
+            results.append(SurfaceResult(surface, path, "written", new))
+        else:
+            results.append(SurfaceResult(surface, path, "unchanged", new))
+    return results
