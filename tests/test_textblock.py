@@ -164,13 +164,13 @@ def test_render_refuses_wrong_kind() -> None:
         render_region([r], "workspace")
 
 
-@pytest.mark.parametrize("bad", ['a"b', "a<b", "a>b", "a\nb"])
+@pytest.mark.parametrize("bad", ['a"b', "a<b", "a>b", "a\nb", "a\rb", ""])
 def test_render_refuses_id_injection(bad: str) -> None:
     with pytest.raises(RenderRefused):
         render_region([block(id=bad)], "workspace")
 
 
-@pytest.mark.parametrize("bad", ['a"b', "a<b", "a>b", "a\nb"])
+@pytest.mark.parametrize("bad", ['a"b', "a<b", "a>b", "a\nb", "a\rb", ""])
 def test_render_refuses_sup_injection(bad: str) -> None:
     with pytest.raises(RenderRefused):
         render_region([block(id="ok", sup=bad)], "workspace")
@@ -186,6 +186,36 @@ def test_render_refuses_duplicate_id() -> None:
 def test_render_refuses_negative_create_ord() -> None:
     with pytest.raises(RenderRefused):
         render_region([block(create_ord=-1)], "workspace")
+
+
+# ---- render refuses un-representable records (R0 adversarial audit) ------------
+# render_region must reject every record it cannot emit with a loud RenderRefused,
+# never a bare TypeError/AttributeError and never text ingest would refuse. These
+# reproduce the five confirmed audit findings at the render leg.
+
+@pytest.mark.parametrize("bad_data", [None, ["title", "body"], 5])
+def test_render_refuses_non_dict_data(bad_data: object) -> None:
+    r = Record(
+        kind=KIND_PERSONALITY_BLOCK, id="x", scope="workspace", data=bad_data,
+        provenance=Provenance(harness="claude-code", source_hash="a" * 64,
+                              create_ord=1),
+        temporal=None)
+    with pytest.raises(RenderRefused):
+        render_region([r], "workspace")
+
+
+def test_render_refuses_none_provenance() -> None:
+    r = Record(
+        kind=KIND_PERSONALITY_BLOCK, id="x", scope="workspace",
+        data={"title": "T", "body": "B"}, provenance=None, temporal=None)
+    with pytest.raises(RenderRefused):
+        render_region([r], "workspace")
+
+
+@pytest.mark.parametrize("bad_ord", ["5", 1.5, True])
+def test_render_refuses_non_int_create_ord(bad_ord: object) -> None:
+    with pytest.raises(RenderRefused):
+        render_region([block(create_ord=bad_ord)], "workspace")
 
 
 # ---- ingest refusal cases -----------------------------------------------------

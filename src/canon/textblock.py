@@ -11,11 +11,13 @@ sentinel into a body line" injection the design flagged -- and leaves no CR->LF
 content drop to declare, because a CRLF host terminator is the only CR ever
 normalized and it is not content.
 
-render's refusal set is a strict superset of ingest's parse constraints. render
-additionally refuses a duplicate id and a negative create_ord (records it must
-never emit); ingest additionally refuses a sentinel whose id/sup carries a
-marker token (its regex excludes '<' and '>', so '-->' cannot appear). Both
-fail loudly rather than silently mangle.
+render's refusal set is a strict superset of ingest's parse constraints: every
+record render emits re-ingests. render refuses, up front, any record it cannot
+represent -- non-dict data, a missing provenance, a non-int or negative
+create_ord, a duplicate id, or an empty / CR-bearing / marker-bearing id or sup
+-- rather than emit text the ingest leg would then reject. ingest additionally
+refuses a sentinel whose id/sup carries a marker token (its regex excludes '<'
+and '>', so '-->' cannot appear). Both fail loudly rather than silently mangle.
 """
 from __future__ import annotations
 
@@ -90,6 +92,8 @@ def _check_render_record(rec: Record, scope: str, seen: set[str]) -> None:
     t = rec.temporal
     if t is not None and t.valid_until is not None:
         raise RenderRefused(rid, "record is non-current (valid_until set)")
+    if not isinstance(rec.data, dict):
+        raise RenderRefused(rid, f"data is not a dict: {type(rec.data).__name__}")
     extra = set(rec.data) - {"title", "body"}
     if extra:
         raise RenderRefused(rid, f"unexpected data keys {sorted(extra)}")
@@ -111,7 +115,11 @@ def _check_render_record(rec: Record, scope: str, seen: set[str]) -> None:
     sup = t.supersedes if t is not None else None
     if sup is not None:
         _check_token(rid, "sup", sup)
+    if rec.provenance is None:
+        raise RenderRefused(rid, "record has no provenance")
     ord_ = rec.provenance.create_ord
+    if ord_ is not None and (not isinstance(ord_, int) or isinstance(ord_, bool)):
+        raise RenderRefused(rid, f"create_ord must be an int: {ord_!r}")
     if ord_ is not None and ord_ < 0:
         raise RenderRefused(rid, f"negative create_ord {ord_}")
     if rid in seen:
@@ -120,7 +128,9 @@ def _check_render_record(rec: Record, scope: str, seen: set[str]) -> None:
 
 
 def _check_token(rid: str, name: str, value: str) -> None:
-    for ch in ('"', "<", ">", "\n"):
+    if value == "":
+        raise RenderRefused(rid, f"empty {name}")
+    for ch in ('"', "<", ">", "\n", "\r"):
         if ch in value:
             raise RenderRefused(rid, f"illegal character in {name}: {value!r}")
 

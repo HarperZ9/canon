@@ -214,3 +214,51 @@ def test_file_text_leg_requires_a_writable_region() -> None:
     no_region = roundtrip_report([block(id="x")], "workspace",
                                  file_text="prose with no markers\n")
     assert no_region.outside_preserved is False
+
+
+# ---- the gate never raises: any constructible record yields a verdict ----------
+# fidelity.py promises "the verdict never propagates an exception." A malformed
+# but type-constructible Record (drawn from a store or a deserialized export)
+# must come back as ok=False with a render Refusal, not a traceback out of the
+# R0 gate. These reproduce the confirmed audit findings at the verdict leg.
+
+@pytest.mark.parametrize("bad_data", [None, ["title", "body"], 5])
+def test_roundtrip_report_non_dict_data_is_a_verdict(bad_data: object) -> None:
+    r = Record(
+        kind=KIND_PERSONALITY_BLOCK, id="x", scope="workspace", data=bad_data,
+        provenance=Provenance(harness="claude-code", source_hash="a" * 64,
+                              create_ord=1),
+        temporal=None)
+    v = roundtrip_report([r], "workspace")
+    assert v.ok is False
+    assert any(ref.where == "render" for ref in v.refusals)
+
+
+def test_roundtrip_report_none_provenance_is_a_verdict() -> None:
+    r = Record(
+        kind=KIND_PERSONALITY_BLOCK, id="x", scope="workspace",
+        data={"title": "T", "body": "B"}, provenance=None, temporal=None)
+    v = roundtrip_report([r], "workspace")
+    assert v.ok is False
+    assert any(ref.where == "render" for ref in v.refusals)
+
+
+def test_roundtrip_report_non_int_create_ord_is_a_verdict() -> None:
+    v = roundtrip_report([block(create_ord="5")], "workspace")
+    assert v.ok is False
+    assert any(ref.where == "render" for ref in v.refusals)
+
+
+def test_roundtrip_report_cr_in_id_is_a_render_refusal() -> None:
+    # render must OWN the refusal (strict-superset invariant), not defer to ingest
+    v = roundtrip_report([block(id="a\rb")], "workspace")
+    assert v.ok is False
+    assert any(ref.where == "render" for ref in v.refusals)
+    assert not any(ref.where == "ingest" for ref in v.refusals)
+
+
+def test_roundtrip_report_empty_id_is_a_render_refusal() -> None:
+    v = roundtrip_report([block(id="")], "workspace")
+    assert v.ok is False
+    assert any(ref.where == "render" for ref in v.refusals)
+    assert not any(ref.where == "ingest" for ref in v.refusals)
