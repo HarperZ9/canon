@@ -29,6 +29,7 @@ WS = os.path.join("fake", "ws")
 CLAUDE_GLOBAL = Surface("claude-code", "global", ROOT_HOME, ".claude/CLAUDE.md")
 CLAUDE_WS = Surface("claude-code", "workspace", ROOT_WORKSPACE, "CLAUDE.md")
 AGENTS_WS = Surface("codex", "workspace", ROOT_WORKSPACE, "AGENTS.md")
+SOUL_WS = Surface("hermes", "workspace", ROOT_WORKSPACE, "SOUL.md")
 
 
 def _block(id: str, scope: str, body: str, create_ord: int) -> Record:
@@ -76,6 +77,8 @@ def _seed_all() -> FakeFS:
         resolve_surface_path(CLAUDE_WS, home=HOME, workspace=WS):
             _host("workspace"),
         resolve_surface_path(AGENTS_WS, home=HOME, workspace=WS):
+            _host("workspace"),
+        resolve_surface_path(SOUL_WS, home=HOME, workspace=WS):
             _host("workspace"),
     })
 
@@ -167,12 +170,12 @@ def test_a_mis_scope_on_the_last_surface_writes_nothing():
     from canon.surface import SurfaceError
 
     fs = _seed_all()
-    # mis-scope the LAST catalog surface (AGENTS.md): the two surfaces ahead of
-    # it are valid, so a mid-loop write would commit both before the refusal.
-    # A fail-closed batch plans every host before committing any, so nothing
-    # is written when a later surface refuses.
-    agents = resolve_surface_path(AGENTS_WS, home=HOME, workspace=WS)
-    fs.files[agents] = _host("global")
+    # mis-scope the LAST catalog surface (SOUL.md): the surfaces ahead of it are
+    # valid, so a mid-loop write would commit them before the refusal. A
+    # fail-closed batch plans every host before committing any, so nothing is
+    # written when a later surface refuses.
+    soul = resolve_surface_path(SOUL_WS, home=HOME, workspace=WS)
+    fs.files[soul] = _host("global")
 
     with pytest.raises(SurfaceError):
         _run(fs)
