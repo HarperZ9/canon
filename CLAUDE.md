@@ -58,10 +58,27 @@ bytes and reads it back:
   refusal of constructible-but-malformed records, and the recorded audit (six
   findings checked, five confirmed and folded in TDD-style, one refuted).
 
-Later phases (renderer, verifier, migration legs) aim at this same envelope. R1,
-the next band, layers the resolved block set into a live host file through the
-render leg (multi-scope, SOUL.md among the surfaces). It is planned in the
-workspace assessment, not built here yet, and lands on its own branch.
+R1 is the surface renderer, the first band that reaches a live host file and
+rewrites it:
+- `src/canon/surface.py` — the render composition. `render_surface` resolves the
+  pool for a scope, projects the effective (mixed-origin) set onto that scope,
+  and renders the region interior; `apply_surface` splices it into a host file
+  and refuses before writing if the host has no canon region (off-limits) or its
+  region's declared scope does not match the target scope.
+- `src/canon/registry.py` — the write-surface allow-list and the orchestrator. A
+  fixed, path-clean catalog binds each `(harness, scope)` to a root-kind and a
+  relative path, with the absolute roots injected at call time. `write_surface`
+  renders one surface through injected IO and writes only a changed region;
+  `write_surfaces` renders a harness's whole set by the authored-split rule and
+  fails closed on a non-catalog surface or a disallowed path before any write.
+- `project-docs/R1-DECISIONS.md` — D-17 project-before-render, D-18 the
+  off-limits and mis-scope refusals, D-19 the path-clean injected-root catalog,
+  D-20 the lexical allow-list guard, D-21 the authored-split rule for a two-file
+  harness (operator ruling), D-22 off-limits as a reported skip with a
+  fail-closed batch.
+
+Later phases (verifier, migration legs, region installation, GEMINI.md and
+SOUL.md surfaces) aim at this same envelope. Each lands on its own branch.
 
 ## Working rules
 - Python 3.11+. Standard library only in F0; no runtime dependencies.

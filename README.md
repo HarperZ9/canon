@@ -38,9 +38,16 @@ file, a record-to-text renderer and its inverse, and a go/no-go verdict that
 proves a block set round-trips to its canonical form with every dropped field
 declared.
 
-canon does not yet reach into your real instruction files and rewrite them. That
-renderer is the next phase. Everything shipped is proven by a full test suite and
-aims at the one envelope.
+R1 renders your files from the record. It resolves the block set for a file's
+scope and rewrites only the region canon owns, every byte outside it preserved.
+It writes only a fixed allow-list of files, and only a file you have opted in
+with a canon region. Where a tool reads both a global and a workspace file, the
+workspace file carries just your workspace blocks, so a shared block is never
+duplicated; where a tool reads one file, that file carries the full resolved set.
+
+Installing a region into a fresh file, the verifier, and the GEMINI.md and
+SOUL.md surfaces are later phases. Everything shipped is proven by a full test
+suite and aims at the one envelope.
 
 ## Run it
 
@@ -57,9 +64,10 @@ src/canon/
   schema.py, validator.py, layering.py   the record, its rules, per-scope resolve
   backends/                              the storage seam and four adapters
   region.py, textblock.py, fidelity.py   the byte boundary, the text codec, the gate
+  surface.py, registry.py                the render composition, the write allow-list
 tests/                                   round-trip, validator, layering, backend,
-                                         and fidelity proofs, with fixtures
-project-docs/                            the F0, F1, and R0 specs and decisions
+                                         fidelity, surface, and orchestration proofs
+project-docs/                            the F0, F1, R0, and R1 specs and decisions
 ```
 
 See `project-docs/` for the schema reference, the layering derivation, the
