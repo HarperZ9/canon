@@ -134,6 +134,31 @@ read-only gates a build keys on:
   D-41 the sha256-keyed verdict with the catalog as manifest, D-42 both gates
   total and read-only.
 
+V3 is the second verify band. It writes nothing; it ships one read-only adapter
+that hands a persona's basis to the external crucible engine for a witnessed
+drift verdict:
+- `src/canon/persona_thesis.py` — the persona-as-crucible-thesis drift adapter. A
+  `synthesized-persona-l3` record is a synthesis claim (this text faithfully
+  summarizes these source memories), and canon has no model to re-run that
+  synthesis, so it measures drift structurally from the pool on two clock-free
+  axes: basis-present (every source id still resolves to a record) and
+  basis-current (no source id is superseded by a newer record). `persona_thesis`
+  frames the two axes as falsifiable claims carrying model-free measurements,
+  `thesis_payload` serializes the thesis for the injected assessor, and
+  `assess_persona` runs the assessor and folds crucible's counts into a headline
+  `DriftVerdict` (any drift reads DRIFT, else any unverifiable reads UNVERIFIABLE,
+  else MATCH), read by direct index so a malformed assessment is a wiring fault,
+  not a silent MATCH. The assessor is an injected seam, so canon imports no
+  engine; the basis is a set, so a repeated source id is one source.
+- `project-docs/V3-DECISIONS.md` — D-43 persona drift measured from the basis
+  model-free (never re-synthesized), D-44 the injected crucible-assessor seam,
+  D-45 the strict basis tolerance encodes integer-zero as 0.5, D-46 a proven
+  drift outranks an honest null (counts read fail-closed), D-47 an empty basis is
+  UNVERIFIABLE not MATCH, D-48 the surface-drift-as-thesis bridge scoped out
+  (honest null), D-49 the basis is a set (duplicate source ids deduped), D-50 the
+  documented caller-wiring corrected and verified out-of-suite, plus the recorded
+  audit.
+
 Later phases (verifier, migration legs, region installation, the global SOUL.md
 and GEMINI.md surfaces) aim at this same envelope. Each lands on its own branch.
 
