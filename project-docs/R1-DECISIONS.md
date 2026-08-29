@@ -98,7 +98,8 @@ self-sufficient. The operator ruled for authored-split, on the record that no
 consumer is handed a workspace file alone that would need it merged.
 **Consequence:** a two-file harness sees each global once, not twice, with the
 override behavior unchanged. A single-file surface keeps a complete standalone
-context. The choice is reversible at one function, `_pool_for`.
+context. The choice is reversible at one function, `pool_for` (public since V2,
+so the drift check and writing gate resolve the same authored-split).
 
 ## D-22 — off-limits is a reported skip; the batch fails closed before any write
 **Status:** accepted (this build). The all-or-nothing guarantee was hardened
