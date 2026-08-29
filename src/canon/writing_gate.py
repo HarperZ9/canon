@@ -75,13 +75,15 @@ def gate_text(text: str, profile: str, *, checker: WritingChecker,
     first when a pre_clean is given. Passes iff the checker reports an empty
     hard list.
 
-    The gate trusts the checker's contract: it reads the `hard` key and does not
-    catch a checker that raises, since a raising checker is a wiring fault for
-    the caller to see, not a canon refusal to absorb.
+    The gate trusts the checker's contract: it reads the `hard` key directly and
+    does not catch a checker that raises. A raising checker, or a score with no
+    `hard` key, is a wiring fault for the caller to see, not a canon refusal to
+    absorb. Reading the key directly fails closed on a malformed score rather
+    than green-lighting when the pass/fail signal is absent.
     """
     cleaned = pre_clean(text) if pre_clean is not None else text
     score = checker(cleaned, profile)
-    hard = tuple(score.get(HARD_KEY, ()))
+    hard = tuple(score[HARD_KEY])
     return GateResult(ok=not hard, profile=profile, hard=hard,
                       cleaned=cleaned, label=label)
 

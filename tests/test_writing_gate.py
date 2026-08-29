@@ -105,6 +105,20 @@ def test_gate_surface_uses_the_registered_profile_and_path_label():
     assert checker.calls == [("voice prose", "chat")]
 
 
+def test_gate_surfaces_a_malformed_score_missing_hard():
+    # The gate reads the checker's pass/fail signal, the `hard` list. A checker
+    # that returns a score without it is broken, and the gate must surface that
+    # wiring fault (D-39), not silently green-light. Fail closed, not open.
+    def broken(text: str, profile: str):
+        return {"em_dash": 0}  # no `hard` key
+
+    try:
+        gate_text("text", "readme", checker=broken)
+    except KeyError:
+        return
+    raise AssertionError("gate must raise on a score with no hard key")
+
+
 def test_rendered_surface_fails_then_passes():
     # The exit criterion: the gate runs on the actual rendered file. Render a
     # surface interior, gate it with a checker that flags a hard violation

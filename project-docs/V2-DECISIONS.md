@@ -62,11 +62,15 @@ the wrong field would disagree with the linter's own CLI.
 **Decision:** the gate passes iff the checker's `hard` list is empty, the exact
 signal `check_writing --gate` keys on (`return 1 if (args.gate and any_hard)
 else 0`). `GateResult.ok` is `not hard`, and `hard` carries the categories for a
-caller that wants to report them. The gate reads the checker's contract and does
-not catch a checker that raises: a raising checker is a wiring fault for the
-caller to see, not a canon refusal to absorb.
+caller that wants to report them. The gate reads the `hard` key directly and does
+not catch a checker that raises: a raising checker, or a score with no `hard`
+key, is a wiring fault for the caller to see, not a canon refusal to absorb.
+Reading the key directly also fails closed on a malformed score, rather than
+green-lighting when the pass/fail signal is absent (which a defaulted lookup
+would do).
 **Consequence:** the gate and the linter CLI never disagree on a verdict. The gate
-is a thin, honest projection of the checker's own signal.
+is a thin, honest projection of the checker's own signal, and a broken checker
+surfaces as a fault instead of a silent pass.
 
 ## D-40 — drift scores the region interior, and mirrors the batch writer
 **Status:** accepted (this build).
