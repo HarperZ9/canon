@@ -45,8 +45,16 @@ with a canon region. Where a tool reads both a global and a workspace file, the
 workspace file carries just your workspace blocks, so a shared block is never
 duplicated; where a tool reads one file, that file carries the full resolved set.
 
-Installing a region into a fresh file, the verifier, and the GEMINI.md and
-SOUL.md surfaces are later phases. Everything shipped is proven by a full test
+R2 mirrors your whole record set into an Obsidian vault. Each record becomes one
+markdown note you can read, search, and link, and a MEMORY.md index lists them
+all. The full record rides inside every note, so a rebuild is exact and editing a
+note's prose never rewrites the record behind it. canon writes only inside its own
+vault, never touches a file it did not write, and when you drop a record it
+reports the note left behind rather than deleting it. R2 also adds SOUL.md to the
+rendered surfaces.
+
+Installing a region into a fresh file, the verifier, and the global SOUL.md and
+GEMINI.md surfaces are later phases. Everything shipped is proven by a full test
 suite and aims at the one envelope.
 
 ## Run it
@@ -65,14 +73,16 @@ src/canon/
   backends/                              the storage seam and four adapters
   region.py, textblock.py, fidelity.py   the byte boundary, the text codec, the gate
   surface.py, registry.py                the render composition, the write allow-list
+  frontmatter.py, vault.py               the note frontmatter codec, the one-record note
+  vault_mirror.py, vault_fidelity.py     the whole-vault mirror and its round-trip gate
 tests/                                   round-trip, validator, layering, backend,
-                                         fidelity, surface, and orchestration proofs
-project-docs/                            the F0, F1, R0, and R1 specs and decisions
+                                         fidelity, surface, orchestration, and vault proofs
+project-docs/                            the F0, F1, R0, R1, and R2 specs and decisions
 ```
 
 See `project-docs/` for the schema reference, the layering derivation, the
 section-ownership contract, the declared drops each storage backend must
-announce, and the R0 decisions behind the round-trip gate.
+announce, and the R0 and R2 decisions behind the round-trip and vault gates.
 
 ## License
 

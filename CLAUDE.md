@@ -77,8 +77,42 @@ rewrites it:
   harness (operator ruling), D-22 off-limits as a reported skip with a
   fail-closed batch.
 
-Later phases (verifier, migration legs, region installation, GEMINI.md and
-SOUL.md surfaces) aim at this same envelope. Each lands on its own branch.
+R2 is the vault band. R1 splices a scope's blocks into a shared instruction file;
+R2 mirrors the whole pool into an Obsidian vault of one note per record, plus a
+MEMORY.md index, and adds the SOUL.md instruction surface:
+- `src/canon/frontmatter.py` — a constrained frontmatter codec. It emits a fixed
+  set of single-quoted scalars and one authoritative `canon:` key carrying
+  `record.to_json()` verbatim, and it reads only that key back. No YAML loader
+  runs on ingest, so the `!!python/object` trap is inert.
+- `src/canon/vault.py` — the one-record note codec. `render_note` projects a
+  record to a whole markdown file (frontmatter carrier, heading, per-kind body,
+  `## canon links` trailer) and refuses any record it cannot faithfully project;
+  `ingest_note` reconstructs the record from the carrier JSON alone, so a
+  hand-edited body never changes the record. Identity, not content, names the
+  file: the path digests the `(scope, id)` key, so a hostile id cannot forge one.
+- `src/canon/vault_mirror.py` — the whole-vault orchestrator. `plan_vault`
+  renders the pool into contained note paths plus the hub, plans the whole set
+  against what is on disk, and commits only once nothing refuses. A file that is
+  not a canon note is off-limits and never clobbered; a stale note is reported as
+  an orphan and never deleted.
+- `src/canon/vault_fidelity.py` — the vault round-trip verdict. The note carrier
+  is lossless, so its declared-drop ledger is empty and any field difference is
+  an undeclared loss that fails the verdict closed.
+- `src/canon/registry.py` — extended with the SOUL.md surface (a fourth catalog
+  row, harness `hermes`), a lone workspace surface that renders the merged set
+  through the R1 authored-split renderer unchanged, with no banner.
+- `project-docs/R2-DECISIONS.md` — D-23 the constrained codec (no YAML loader),
+  D-24 the whole-file note carried by one JSON line, D-25 links from relations not
+  body prose, D-26 the hub reuses the surface sort key, D-27 the authoritative
+  carrier and one-way body, D-28 the fixed frontmatter key order, D-29
+  identity-not-content names the file, D-30 the off-limits and spoof refusals,
+  D-31 the lexical vault containment, D-32 orphan reported never deleted, D-33 the
+  render-superset invariant carried to the vault leg, D-34 the non-durable hub
+  marker, D-35 the vault is not a registry root-kind, D-36 SOUL reuses the R0
+  grammar with no banner.
+
+Later phases (verifier, migration legs, region installation, the global SOUL.md
+and GEMINI.md surfaces) aim at this same envelope. Each lands on its own branch.
 
 ## Working rules
 - Python 3.11+. Standard library only in F0; no runtime dependencies.

@@ -35,13 +35,19 @@ class Surface:
     relative_path: str
 
 
-# The confirmed instruction surfaces. GEMINI.md and SOUL.md at both scopes are
-# further confirmed surfaces whose global-path conventions are not yet pinned;
-# they extend this catalog once those conventions are settled.
+# The confirmed instruction surfaces. SOUL.md (harness "hermes") is a lone
+# workspace surface: no global sibling, so it renders the full merged set like
+# AGENTS.md, and it reuses the R0 block-region grammar with no banner. GEMINI.md
+# at both scopes and the GLOBAL SOUL.md are further confirmed surfaces whose
+# global-path conventions are not yet pinned; they extend this catalog once those
+# conventions are settled. The vault is not listed here: it is a whole-directory
+# mirror with its own containment (vault_mirror.is_vault_write_allowed), not a
+# single-file region-splice surface, so it is deliberately not a root-kind (D-35).
 SURFACE_CATALOG: tuple[Surface, ...] = (
     Surface("claude-code", "global", ROOT_HOME, ".claude/CLAUDE.md"),
     Surface("claude-code", "workspace", ROOT_WORKSPACE, "CLAUDE.md"),
     Surface("codex", "workspace", ROOT_WORKSPACE, "AGENTS.md"),
+    Surface("hermes", "workspace", ROOT_WORKSPACE, "SOUL.md"),
 )
 
 
