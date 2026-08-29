@@ -121,3 +121,10 @@ past R1.
 at any position aborts the plan before the first byte is written, so the batch is
 all-or-nothing. Each surface's outcome is reported back to the caller. The
 renderer is safe to point at the real allow-list before every file has a region.
+The guarantee covers canon's own refusals: catalog membership, an allow-listed
+path, an off-limits host, and a mis-scoped region all resolve in the plan pass,
+before any write. It does not extend to a filesystem fault during the commit
+pass. Should a `write_text` fail on one file after earlier files have written,
+those writes stand and the error propagates unrolled. Disk-level multi-file
+atomicity is out of R1's scope, and a later band owns it if a real deployment
+needs it.

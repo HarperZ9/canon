@@ -179,6 +179,27 @@ def test_a_mis_scope_on_the_last_surface_writes_nothing():
     assert fs.writes == []
 
 
+def test_a_commit_pass_io_error_leaves_earlier_writes_and_propagates():
+    import pytest
+
+    # Honest scope of the all-or-nothing guarantee (D-22): the plan pass makes
+    # canon's own refusals atomic, but the commit pass writes each planned file
+    # in a loop with no rollback. A real filesystem fault on a later file leaves
+    # the earlier files written and propagates the error. This pins that scope,
+    # so a later change that silently swallows a commit-pass IO error is caught.
+    class FailOnSecondWrite(FakeFS):
+        def write_text(self, path: str, text: str) -> None:
+            if len(self.writes) >= 1:
+                raise OSError("disk full")
+            super().write_text(path, text)
+
+    fs = FailOnSecondWrite(_seed_all().files)
+    with pytest.raises(OSError):
+        _run(fs)
+    # exactly one file committed before the fault, and it was not rolled back.
+    assert len(fs.writes) == 1
+
+
 def test_write_surfaces_refuses_a_non_catalog_surface():
     import pytest
 

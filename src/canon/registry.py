@@ -146,7 +146,9 @@ def write_surfaces(pool: list[Record], *, home: str, workspace: str,
     (catalog membership, allow-listed path) and every per-host refusal
     (off-limits skip, mis-scope raise) resolve in this pass, before a single
     write. Only once the whole set plans clean are the changed regions committed,
-    so a later surface's refusal never leaves an earlier one half-written.
+    so a later surface's refusal never leaves an earlier one half-written. This
+    covers canon's own refusals; a filesystem fault inside the commit pass (a
+    write_text that fails after earlier files wrote) is not rolled back.
     """
     chosen = SURFACE_CATALOG if surfaces is None else surfaces
     planned: list[tuple[str, str]] = []
