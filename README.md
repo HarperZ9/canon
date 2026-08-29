@@ -30,9 +30,17 @@ to draw from and write back to, and renders each tool's file from that record.
 ## Status
 
 F0 is the record of record: the canonical schema, its validator, and the
-per-scope layering, with a full test suite. It writes no files yet — storage
-backends, the renderer, the verifier, and the migration legs are the phases
-that follow, each aiming at this envelope.
+per-scope layering. F1 adds the storage seam: a `MemoryBackend` protocol with
+capability tokens and four adapters, among them a zero-drop SQLite reference and
+injected-handle adapters for a memory fact-engine and an authored-block store.
+R0 adds the block round-trip gate: a byte-exact region boundary inside a managed
+file, a record-to-text renderer and its inverse, and a go/no-go verdict that
+proves a block set round-trips to its canonical form with every dropped field
+declared.
+
+canon does not yet reach into your real instruction files and rewrite them. That
+renderer is the next phase. Everything shipped is proven by a full test suite and
+aims at the one envelope.
 
 ## Run it
 
@@ -45,11 +53,21 @@ No runtime dependencies. Python 3.11 or newer.
 ## Layout
 
 ```
-src/canon/         schema.py, validator.py, layering.py
-tests/             round-trip, validator, and layering proofs + fixtures
-project-docs/      the F0 specs: schema, layering, ownership, drops, decisions
+src/canon/
+  schema.py, validator.py, layering.py   the record, its rules, per-scope resolve
+  backends/                              the storage seam and four adapters
+  region.py, textblock.py, fidelity.py   the byte boundary, the text codec, the gate
+tests/                                   round-trip, validator, layering, backend,
+                                         and fidelity proofs, with fixtures
+project-docs/                            the F0, F1, and R0 specs and decisions
 ```
 
 See `project-docs/` for the schema reference, the layering derivation, the
-section-ownership contract, and the declared drops each storage backend must
-announce.
+section-ownership contract, the declared drops each storage backend must
+announce, and the R0 decisions behind the round-trip gate.
+
+## License
+
+FSL-1.1-MIT. Functional Source License, source-available now for any purpose
+other than a competing product, and it converts to the MIT license two years
+after each version is released. See `LICENSE`.

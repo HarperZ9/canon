@@ -1,7 +1,7 @@
 # CLAUDE.md — canon
 
 > Model-facing, self-contained. This repo is cloned and operated on its own; it
-> does not inherit the `c:\dev` workspace canon. Anything from the workspace or
+> does not inherit a workspace-level canon. Anything from the workspace or
 > global standards this repo needs is copied here in this repo's own register.
 
 ## What canon is
@@ -38,9 +38,30 @@ F1 adds the storage seam and nothing that renders a file:
   loud put-time refusal, D-11 the fake mirrors mneme's INSERT OR REPLACE); Drop 4
   and the Status note in `F0-DECLARED-DROPS.md`.
 
-Later phases (renderer, verifier, migration legs) aim at this envelope. They are
-planned in the workspace assessment, not built here yet. R0, the block round-trip
-go/no-go gate, is the next band-1 sibling and lands on its own branch.
+R0 is the block round-trip go/no-go gate, the first band that turns a record into
+bytes and reads it back:
+- `src/canon/region.py` — the byte boundary. `extract_region`/`splice_region`
+  partition a managed file into `prefix + inner + suffix` with a byte-exact
+  identity; only `inner` is canon's to rewrite, and a file with no marker is
+  off-limits, not an error.
+- `src/canon/textblock.py` — the record-to-text layer. `render_region` projects a
+  scope-homogeneous block set into the region interior and refuses any record it
+  cannot represent; `ingest_region` reads records back and speaks the same
+  grammar. render's refusal set is a strict superset of ingest's constraints.
+- `src/canon/fidelity.py` — `roundtrip_report`, the go/no-go verdict: round-trip
+  to canonical form, render idempotence, outside-byte preservation across the
+  host encoding matrix, and a structural drop ledger that fails closed on any
+  undeclared loss. The gate returns a verdict for any constructible record and
+  never propagates an exception.
+- `project-docs/R0-DECISIONS.md` — D-12 one-LF line model, D-13 render-superset
+  invariant, D-14 total gate, D-15 diff-against-raw ledger, D-16 the audit-driven
+  refusal of constructible-but-malformed records, and the recorded audit (six
+  findings checked, five confirmed and folded in TDD-style, one refuted).
+
+Later phases (renderer, verifier, migration legs) aim at this same envelope. R1,
+the next band, layers the resolved block set into a live host file through the
+render leg (multi-scope, SOUL.md among the surfaces). It is planned in the
+workspace assessment, not built here yet, and lands on its own branch.
 
 ## Working rules
 - Python 3.11+. Standard library only in F0; no runtime dependencies.
