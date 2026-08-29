@@ -156,7 +156,27 @@ def test_mis_scoped_catalog_host_fails_closed():
 
     with pytest.raises(SurfaceError):
         _run(fs)
-    assert ws_path not in fs.writes
+    # all-or-nothing: the mis-scope is at catalog index 1, so index 0 (the
+    # global CLAUDE.md) must not have been written before the refusal fires.
+    assert fs.writes == []
+
+
+def test_a_mis_scope_on_the_last_surface_writes_nothing():
+    import pytest
+
+    from canon.surface import SurfaceError
+
+    fs = _seed_all()
+    # mis-scope the LAST catalog surface (AGENTS.md): the two surfaces ahead of
+    # it are valid, so a mid-loop write would commit both before the refusal.
+    # A fail-closed batch plans every host before committing any, so nothing
+    # is written when a later surface refuses.
+    agents = resolve_surface_path(AGENTS_WS, home=HOME, workspace=WS)
+    fs.files[agents] = _host("global")
+
+    with pytest.raises(SurfaceError):
+        _run(fs)
+    assert fs.writes == []
 
 
 def test_write_surfaces_refuses_a_non_catalog_surface():

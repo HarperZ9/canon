@@ -139,30 +139,34 @@ def write_surfaces(pool: list[Record], *, home: str, workspace: str,
     """Render every surface in `surfaces` (default: the whole catalog) from one
     pool, each by the authored-split rule. A host with no canon region is
     skipped and reported off-limits, never mutated; a surface whose region is
-    present but mis-scoped still fails closed through apply_surface. Only a
-    changed region is written back.
+    present but mis-scoped fails closed through apply_surface. Only a changed
+    region is written back.
+
+    The batch is all-or-nothing. Every surface is planned first -- static guards
+    (catalog membership, allow-listed path) and every per-host refusal
+    (off-limits skip, mis-scope raise) resolve in this pass, before a single
+    write. Only once the whole set plans clean are the changed regions committed,
+    so a later surface's refusal never leaves an earlier one half-written.
     """
     chosen = SURFACE_CATALOG if surfaces is None else surfaces
-    # Validate the whole set before writing a single file, so one bad surface
-    # never leaves a partial write behind.
+    planned: list[tuple[str, str]] = []
+    results: list[SurfaceResult] = []
     for surface in chosen:
         if surface not in SURFACE_CATALOG:
             raise SurfaceError(
                 f"surface is not in the write allow-list: {surface!r}")
-        assert_writable(resolve_surface_path(surface, home=home,
-                                             workspace=workspace),
-                        home=home, workspace=workspace)
-    results: list[SurfaceResult] = []
-    for surface in chosen:
         path = resolve_surface_path(surface, home=home, workspace=workspace)
+        assert_writable(path, home=home, workspace=workspace)
         host = read_text(path)
         if not extract_region(host).present:
             results.append(SurfaceResult(surface, path, "off-limits", None))
             continue
         new = apply_surface(host, _pool_for(surface, pool), surface.scope)
         if new != host:
-            write_text(path, new)
+            planned.append((path, new))
             results.append(SurfaceResult(surface, path, "written", new))
         else:
             results.append(SurfaceResult(surface, path, "unchanged", new))
+    for path, content in planned:
+        write_text(path, content)
     return results

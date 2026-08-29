@@ -101,19 +101,23 @@ override behavior unchanged. A single-file surface keeps a complete standalone
 context. The choice is reversible at one function, `_pool_for`.
 
 ## D-22 — off-limits is a reported skip; the batch fails closed before any write
-**Status:** accepted (this build).
+**Status:** accepted (this build). The all-or-nothing guarantee was hardened
+after a pre-publish adversarial check found the first cut planned only the static
+faults up front and left the mis-scope refusal inside the write loop, so two
+valid surfaces committed before a third mis-scoped one raised.
 **Context:** On a first run the operator's real files carry no canon region.
-`write_surfaces` renders the whole catalog, and a host that has not opted in must
-not be silently mutated into a managed file, nor must one bad surface abort a
-batch after it has already written others.
-**Decision:** the batch validates the whole chosen set first, refusing any
-surface outside the catalog or resolving outside the allow-listed paths, before a
-single file is written, so a bad surface leaves no partial write. Then, per
-surface, a host with no region is recorded `off-limits` and left untouched; a
-host whose region is present but mis-scoped still fails closed through
-`apply_surface`; only a changed region is written, an unchanged one is recorded
-`unchanged`. Installing a region into a virgin file is a separate, deliberate act
-and is deferred past R1.
-**Consequence:** canon never adopts a file that did not opt in, and never leaves
-a half-written batch. Each surface's outcome is reported back to the caller. The
+`write_surfaces` renders the whole catalog. A host that has not opted in must stay
+untouched, and a single bad surface must not commit some files before it aborts
+the batch on a later one.
+**Decision:** the batch plans every surface before it commits any write. The plan
+pass checks each surface for catalog membership and an allow-listed path, reads
+its host, and computes its render through `apply_surface`. That is where a host
+with no region becomes a recorded `off-limits` skip and a host whose region is
+mis-scoped raises. Only once the whole set plans clean does the commit pass write
+the changed regions; an unchanged region is recorded `unchanged` and left alone.
+Installing a region into a virgin file is a separate, deliberate act, deferred
+past R1.
+**Consequence:** a file that did not opt in stays untouched, and a mis-scoped host
+at any position aborts the plan before the first byte is written, so the batch is
+all-or-nothing. Each surface's outcome is reported back to the caller. The
 renderer is safe to point at the real allow-list before every file has a region.
