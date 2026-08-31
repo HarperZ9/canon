@@ -282,16 +282,25 @@ def pin_from_schema_field(schema_str: str) -> SchemaPin:
 
 @contextmanager
 def pin_registry_scope() -> Iterator[dict[str, SchemaPin]]:
-    """Per-context registry override. Snapshots the current registry into a
-    fresh mutable dict, yields it, and restores the prior context on exit
-    (including on exception). Uses `contextvars.ContextVar`, so a test that
-    installs a fake pin does not affect a concurrent task in another context
-    (D-96). Not thread-safe; per-context isolation only."""
-    prior = _REGISTRY_OVERRIDE.get()
-    scratch = dict(_active_registry())
-    token = _REGISTRY_OVERRIDE.set(scratch)
+    """Per-context registry override. Snapshots the current pin registry AND
+    the migrator registry into fresh mutable dicts, yields the pin dict, and
+    restores the prior context on exit (including on exception). Uses
+    `contextvars.ContextVar`, so a test that installs a fake pin (or a fake
+    migrator) does not affect a concurrent task in another context (D-96). Not
+    thread-safe; per-context isolation only. The migrator snapshot is applied
+    via a late import from `versions_migrate` to avoid a module-level cycle."""
+    from canon import versions_migrate as _vm
+
+    prior_pins = _REGISTRY_OVERRIDE.get()
+    prior_migs = _vm._MIGRATORS_OVERRIDE.get()
+    scratch_pins = dict(_active_registry())
+    scratch_migs = dict(_vm._active_migrators())
+    pin_token = _REGISTRY_OVERRIDE.set(scratch_pins)
+    mig_token = _vm._MIGRATORS_OVERRIDE.set(scratch_migs)
     try:
-        yield scratch
+        yield scratch_pins
     finally:
-        _REGISTRY_OVERRIDE.reset(token)
-        assert _REGISTRY_OVERRIDE.get() is prior
+        _vm._MIGRATORS_OVERRIDE.reset(mig_token)
+        _REGISTRY_OVERRIDE.reset(pin_token)
+        assert _REGISTRY_OVERRIDE.get() is prior_pins
+        assert _vm._MIGRATORS_OVERRIDE.get() is prior_migs

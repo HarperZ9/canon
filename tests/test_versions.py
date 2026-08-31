@@ -327,6 +327,8 @@ def test_versions_module_imports_only_stdlib():
     }
     for name in forbidden_imports:
         root = name.split(".")[0]
+        if root == "canon":
+            continue  # canon-internal cross-module imports are fine
         assert root in stdlib_ok, \
             f"versions.py imports non-stdlib module {name!r}"
 

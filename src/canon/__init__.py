@@ -50,6 +50,15 @@ from .schema import (
     is_sha256,
 )
 from .validator import is_valid, validate_record
+from .versions_migrate import (
+    MigrationError,
+    MigrationFn,
+    MigratorConflict,
+    MigratorRaised,
+    migrate,
+    register_migrator,
+    unregister_migrator,
+)
 from .versions import (
     PIN_BACKEND_SEAM,
     PIN_DRIFT_VERDICT,
@@ -151,4 +160,11 @@ __all__ = [
     "UnknownPin",
     "IncompatiblePin",
     "MalformedPin",
+    "MigrationError",
+    "MigratorConflict",
+    "MigratorRaised",
+    "MigrationFn",
+    "migrate",
+    "register_migrator",
+    "unregister_migrator",
 ]
