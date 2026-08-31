@@ -224,12 +224,30 @@ def test_source_state_requires_records_digest():
 
 @pytest.mark.parametrize(
     "field",
-    ("records_digest", "inventory_digest", "context_envelope_digest", "mneme_snapshot_digest", "worktree_digest"),
+    (
+        "records_digest",
+        "inventory_digest",
+        "context_envelope_digest",
+        "mneme_snapshot_digest",
+        "relay_checkpoint",
+        "worktree_digest",
+    ),
 )
 def test_source_state_validates_known_digest_fields(field: str):
     state = {"records_digest": HASH_C, field: "not-a-sha256-ref"}
     witness = fixture_witness(source_state=state)
     assert any(f"source_state.{field}" in p for p in validate_bootstrap_witness(witness))
+
+
+@pytest.mark.parametrize("state", ({"records_digest": HASH_C}, {"records_digest": HASH_C, "relay_checkpoint": None}))
+def test_source_state_allows_absent_or_none_relay_checkpoint(state: dict):
+    assert validate_bootstrap_witness(fixture_witness(source_state=state)) == []
+
+
+def test_capsule_manifest_sha256_must_match_capsule_id():
+    mismatch = fixture_witness(capsule_id=HASH_A, capsule_manifest_sha256=HASH_B)
+    assert any("capsule_manifest_sha256" in p and "match capsule_id" in p for p in validate_bootstrap_witness(mismatch))
+    assert validate_bootstrap_witness(fixture_witness(capsule_id=HASH_A, capsule_manifest_sha256=HASH_A)) == []
 
 
 @pytest.mark.parametrize("target", ({}, {"adapter": "", "surface": "CANON.md"}, {"adapter": "codex-cli", "surface": ""}))

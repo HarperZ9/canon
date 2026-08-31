@@ -6,6 +6,7 @@ from typing import Callable, ClassVar
 
 from .adapter import INTEGRATION_TIERS
 from .canonical_json import canonical_json_text, is_sha256_ref
+from .capsule_types import SOURCE_STATE_DIGEST_KEYS
 from .omission import Omission, validate_omission
 from .readiness import ReadinessResult, validate_readiness_result
 from .transform import TransformReceipt, validate_transform_receipt
@@ -13,13 +14,6 @@ from .transform import TransformReceipt, validate_transform_receipt
 BOOTSTRAP_WITNESS_SCHEMA = "canon.bootstrap-witness/v1"
 BOOTSTRAP_CHECK_NAMES = ("freshness", "conflicts", "secrets", "budget", "reachability", "readiness")
 BOOTSTRAP_CHECK_VERDICTS = ("pass", "fail", "warn", "blocked", "unknown")
-SOURCE_STATE_DIGEST_KEYS = (
-    "records_digest",
-    "inventory_digest",
-    "context_envelope_digest",
-    "mneme_snapshot_digest",
-    "worktree_digest",
-)
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,6 +129,8 @@ def validate_bootstrap_witness(witness: BootstrapWitness) -> list[str]:
     _check_non_empty_string("run_id", witness.run_id, problems)
     _check_sha256("capsule_id", witness.capsule_id, problems)
     _check_sha256("capsule_manifest_sha256", witness.capsule_manifest_sha256, problems)
+    if _valid_hashes_differ(witness.capsule_id, witness.capsule_manifest_sha256):
+        problems.append("capsule_manifest_sha256 must match capsule_id")
     _check_dict("source_state", witness.source_state, problems)
     _check_dict("target", witness.target, problems)
     _check_source_state(witness.source_state, problems)
@@ -203,6 +199,10 @@ def _check_non_empty_string(name: str, value: object, problems: list[str]) -> No
 def _check_sha256(name: str, value: object, problems: list[str]) -> None:
     if not is_sha256_ref(value):
         problems.append(f"{name} must be a sha256: reference")
+
+
+def _valid_hashes_differ(left: object, right: object) -> bool:
+    return is_sha256_ref(left) and is_sha256_ref(right) and left != right
 
 
 def _check_member(name: str, value: object, allowed: tuple[str, ...], problems: list[str]) -> None:
