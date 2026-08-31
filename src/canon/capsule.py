@@ -21,14 +21,7 @@ from .validator import validate_record
 CAPSULE_SCHEMA = "canon.capsule/v1"
 CAPSULE_PROFILES = ("needle", "handoff", "archive", "custom")
 CANONICALIZATION = JSON_CANONICALIZATION
-SOURCE_STATE_DIGEST_KEYS = (
-    "records_digest",
-    "inventory_digest",
-    "context_envelope_digest",
-    "mneme_snapshot_digest",
-    "relay_checkpoint",
-    "worktree_digest",
-)
+SOURCE_STATE_DIGEST_KEYS = ("records_digest", "inventory_digest", "context_envelope_digest", "mneme_snapshot_digest", "relay_checkpoint", "worktree_digest")
 class CapsuleError(ValueError): pass
 class CapsuleBuildError(CapsuleError): pass
 @dataclass(frozen=True, slots=True)
@@ -58,26 +51,12 @@ class SourceState:
     relay_checkpoint: str | None = None
     worktree_digest: str | None = None
     def to_dict(self) -> dict:
-        return {
-            "records_digest": self.records_digest,
-            "inventory_digest": self.inventory_digest,
-            "context_envelope_digest": self.context_envelope_digest,
-            "mneme_snapshot_digest": self.mneme_snapshot_digest,
-            "relay_checkpoint": self.relay_checkpoint,
-            "worktree_digest": self.worktree_digest,
-        }
+        return {"records_digest": self.records_digest, "inventory_digest": self.inventory_digest, "context_envelope_digest": self.context_envelope_digest, "mneme_snapshot_digest": self.mneme_snapshot_digest, "relay_checkpoint": self.relay_checkpoint, "worktree_digest": self.worktree_digest}
     @classmethod
     def from_dict(cls, d: dict) -> "SourceState":
         if not isinstance(d, dict):
             raise TypeError(f"source state JSON must be an object, got {type(d).__name__}")
-        return cls(
-            d["records_digest"],
-            d.get("inventory_digest"),
-            d.get("context_envelope_digest"),
-            d.get("mneme_snapshot_digest"),
-            d.get("relay_checkpoint"),
-            d.get("worktree_digest"),
-        )
+        return cls(d["records_digest"], d.get("inventory_digest"), d.get("context_envelope_digest"), d.get("mneme_snapshot_digest"), d.get("relay_checkpoint"), d.get("worktree_digest"))
 @dataclass(frozen=True, slots=True)
 class Compatibility:
     record_schema_min: str = RECORD_SCHEMA
@@ -104,13 +83,7 @@ class Budget:
     estimator: str
     policy: str = "critical-atoms-lossless"
     def to_dict(self) -> dict:
-        return {
-            "profile": self.profile,
-            "max_tokens": self.max_tokens,
-            "estimated_tokens": self.estimated_tokens,
-            "estimator": self.estimator,
-            "policy": self.policy,
-        }
+        return {"profile": self.profile, "max_tokens": self.max_tokens, "estimated_tokens": self.estimated_tokens, "estimator": self.estimator, "policy": self.policy}
     @classmethod
     def from_dict(cls, d: dict) -> "Budget":
         if not isinstance(d, dict):
@@ -330,12 +303,21 @@ def _blank_manifest_sha256(result: dict) -> None:
         integrity["manifest_sha256"] = ""
 def _atom_sort_key(atom: CanonAtom) -> tuple[object, ...]:
     return (atom.precedence_rank, atom.layer, atom.type, atom.id)
+def _safe_atom_sort_key(atom: CanonAtom) -> tuple[int, str, str, str] | None:
+    rank, layer, atom_type, atom_id = _atom_sort_key(atom)
+    if isinstance(rank, bool) or not isinstance(rank, int) or not all(isinstance(v, str) for v in (layer, atom_type, atom_id)):
+        return None
+    return (rank, layer, atom_type, atom_id)
 def _duplicate_atom_identities(atoms: object) -> tuple[tuple[object, ...], ...]:
-    counts: dict[tuple[object, ...], int] = {}
-    if isinstance(atoms, tuple):
-        for atom in atoms:
-            if isinstance(atom, CanonAtom):
-                key = _atom_sort_key(atom); counts[key] = counts.get(key, 0) + 1
+    counts: dict[tuple[int, str, str, str], int] = {}
+    if not isinstance(atoms, tuple):
+        return ()
+    for atom in atoms:
+        if not isinstance(atom, CanonAtom):
+            continue
+        key = _safe_atom_sort_key(atom)
+        if key is not None:
+            counts[key] = counts.get(key, 0) + 1
     return tuple(key for key, count in sorted(counts.items()) if count > 1)
 def _sorted_records(records: tuple[Record, ...]) -> tuple[Record, ...]:
     return tuple(sorted(records, key=lambda r: (r.scope, r.id, r.kind)))
@@ -406,8 +388,22 @@ def _check_nested(name: str, value: object, item_type: type, validator: Callable
         if not isinstance(item, item_type):
             problems.append(f"{name}[{position}] must be a {item_type.__name__}")
             continue
-        for problem in validator(item):
+        if isinstance(item, CanonAtom):
+            _check_atom_identity_components(f"{name}[{position}]", item, problems)
+        try:
+            item_problems = validator(item)
+        except (TypeError, ValueError, AttributeError) as exc:
+            problems.append(f"{name}[{position}]: validation failed with {type(exc).__name__}: {exc}")
+            continue
+        for problem in item_problems:
             problems.append(f"{name}[{position}]: {problem}")
+def _check_atom_identity_components(prefix: str, atom: CanonAtom, problems: list[str]) -> None:
+    rank, layer, atom_type, atom_id = _atom_sort_key(atom)
+    if isinstance(rank, bool) or not isinstance(rank, int):
+        problems.append(f"{prefix}: precedence_rank must be a non-bool int")
+    for name, value in (("layer", layer), ("type", atom_type), ("id", atom_id)):
+        if not isinstance(value, str) or value == "":
+            problems.append(f"{prefix}: {name} must be a non-empty string")
 def _check_target(target: object, problems: list[str]) -> None:
     if not isinstance(target, CapsuleTarget):
         problems.append("target must be a CapsuleTarget")
@@ -472,7 +468,7 @@ def _check_digest_binding(capsule: Capsule, problems: list[str]) -> None:
         problems.append("capsule_id must match identity digest")
 def _check_ordering(capsule: Capsule, problems: list[str]) -> None:
     if isinstance(capsule.atoms, tuple) and all(isinstance(a, CanonAtom) for a in capsule.atoms):
-        if capsule.atoms != tuple(sorted(capsule.atoms, key=_atom_sort_key)):
+        if all(_safe_atom_sort_key(a) is not None for a in capsule.atoms) and capsule.atoms != tuple(sorted(capsule.atoms, key=_atom_sort_key)):
             problems.append("atoms must be sorted by precedence_rank, layer, type, id")
     if isinstance(capsule.records, tuple) and all(isinstance(r, Record) for r in capsule.records):
         if capsule.records != _sorted_records(capsule.records):
@@ -488,6 +484,8 @@ def _check_ordering(capsule: Capsule, problems: list[str]) -> None:
             problems.append("receipts must be sorted by canonical JSON")
 def _check_derived_fields(capsule: Capsule, problems: list[str]) -> None:
     if not isinstance(capsule.atoms, tuple) or not all(isinstance(a, CanonAtom) for a in capsule.atoms):
+        return
+    if any(_safe_atom_sort_key(a) is None for a in capsule.atoms):
         return
     if capsule.layers != _layers(capsule.atoms):
         problems.append("layers must be derived from sorted atoms")

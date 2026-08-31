@@ -303,6 +303,24 @@ def test_capsule_validator_rejects_duplicate_atom_identities_from_direct_and_dic
     assert any("duplicate atom identity" in p for p in validate_capsule(from_dict_capsule))
 
 
+@pytest.mark.parametrize(("field", "value", "expected"), (
+    ("id", [], "id must be a non-empty string"),
+    ("layer", [], "layer must be one of"),
+    ("type", {"bad": "shape"}, "type must be a non-empty string"),
+    ("precedence_rank", True, "precedence_rank must be a non-negative int"),
+    ("precedence_rank", "0", "precedence_rank must be a non-negative int"),
+))
+def test_capsule_validator_is_total_for_malformed_atom_identity_parts(field, value, expected):
+    d = _capsule_fixture().to_dict()
+    atom = _atom("atom_active_goal.json").to_dict()
+    atom[field] = value
+    d["atoms"] = [atom]
+    capsule = Capsule.from_dict(d)
+    problems = validate_capsule(capsule)
+    assert any(expected in problem for problem in problems)
+    assert not any("duplicate atom identity" in problem for problem in problems)
+
+
 def test_capsule_validator_rejects_budget_estimator_outside_known_unknown():
     capsule = build_capsule(
         profile="needle",
