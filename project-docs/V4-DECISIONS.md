@@ -154,6 +154,9 @@ discloses a latent V2 defect: `surface_drift` is not total over a mixed pool tod
 (a caller who hands it personas gets a `LayeringError`, not a verdict). V4 works
 around it at the call site; the root fix (filter inside `surface_drift`, or catch
 `LayeringError` to REFUSED) is a separate V2 task, recorded so it is not lost.
+The root fix landed in D-68 (this build): `surface_drift` catches `LayeringError`
+and folds it to `VERDICT_REFUSED`, so V4's call-site pre-filter is defense in depth,
+not a workaround for a still-broken drift leg.
 
 ## D-59 — the pure gate/deadline kernel, with a fail-closed lapse
 **Status:** accepted (this build).
@@ -353,3 +356,23 @@ and the path-clean witness. It confirmed all six as built and surfaced three ite
 
 Outcome: 0 critical, 1 warning folded, 2 info disclosed. Full suite 407 passed
 after the fold. V4 is marked done for this band.
+
+## D-68 — surface_drift folds LayeringError into a verdict, closing D-58
+**Status:** accepted (this build; root fix for the V2 defect D-58 disclosed).
+**Context:** D-58 recorded a latent V2 defect. `surface_drift` caught
+`RegionError` and `RenderRefused` only, so a mixed pool (personality blocks
+alongside any other kind, e.g. a persona synthesized from the same store or an
+episodic memory) leaked a `LayeringError` out of the drift leg instead of
+returning a verdict. V4 worked around it at the call site by filtering the pool
+before `classify_surface` (see D-58), which fixed the reconcile path but left
+the drift API itself non-total for a realistic caller.
+**Decision:** `surface_drift` catches `LayeringError` alongside `RegionError`
+and `RenderRefused`, returning `VERDICT_REFUSED` with a "layering refused: {exc}"
+reason. The module docstring's totality guarantee ("every refusal is a verdict,
+never raised") now holds over a realistic mixed pool, and the whole-catalog
+`drift_report` stays total on that pool with `ok=False` and exit code one.
+**Consequence:** V4's call-site pre-filter becomes defense in depth rather than
+a load-bearing workaround. Two TDD-style tests pin the fix against regression:
+`test_mixed_pool_with_non_block_record_is_refused_not_raised` (single-surface)
+and `test_drift_report_over_mixed_pool_does_not_raise` (whole-catalog).
+Full suite 409 passed (407 + 2). `drift.py` at 134 lines, under the 300-line gate.
