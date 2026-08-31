@@ -228,3 +228,120 @@ def test_transform_receipt_requires_output_hash_boundary():
 def test_validators_are_total_and_list_returning():
     assert isinstance(validate_omission(object()), list)
     assert isinstance(validate_transform_receipt(object()), list)
+
+
+from canon.adapter import (
+    AdapterDescriptor,
+    assert_requested_tier_allowed,
+    builtin_descriptors,
+    descriptor_for,
+    validate_adapter_descriptor,
+)
+
+
+@pytest.mark.parametrize(
+    ("fixture_name", "adapter_id", "integration_tier"),
+    (
+        ("adapter_codex_cli_native_advisory.json", "codex-cli", "native-advisory"),
+        ("adapter_mcp_readonly_guided.json", "mcp-readonly", "guided"),
+        ("adapter_a2a_artifact_guided.json", "a2a-artifact", "guided"),
+    ),
+)
+def test_builtin_adapter_descriptor_fixtures_roundtrip(fixture_name, adapter_id, integration_tier):
+    d = load_fixture(fixture_name)
+    adapter = AdapterDescriptor.from_dict(d)
+    assert adapter.adapter_id == adapter_id
+    assert adapter.integration_tier == integration_tier
+    assert adapter.to_dict() == d
+    assert adapter.to_json().endswith("\n")
+    assert validate_adapter_descriptor(adapter) == []
+
+
+def test_builtin_descriptors_are_conservative_lowercase_and_valid():
+    descriptors = builtin_descriptors()
+    by_id = {d.adapter_id: d for d in descriptors}
+
+    assert tuple(by_id) == (
+        "codex-cli",
+        "claude-code",
+        "chatgpt-app",
+        "claude-app",
+        "api-runner",
+        "local-runner",
+        "mcp-readonly",
+        "a2a-artifact",
+    )
+    assert all(d.adapter_id == d.adapter_id.lower() for d in descriptors)
+    assert by_id["codex-cli"].integration_tier == "native-advisory"
+    assert by_id["claude-code"].integration_tier == "native-advisory"
+    assert by_id["chatgpt-app"].integration_tier == "guided"
+    assert by_id["claude-app"].integration_tier == "guided"
+    assert by_id["api-runner"].integration_tier == "guided"
+    assert by_id["local-runner"].integration_tier == "guided"
+    assert by_id["mcp-readonly"].integration_tier == "guided"
+    assert by_id["a2a-artifact"].integration_tier == "guided"
+    assert all(d.integration_tier != "enforced" for d in descriptors)
+    assert all(d.bootstrap.get("can_block_before_work") is False for d in descriptors)
+    assert all(validate_adapter_descriptor(d) == [] for d in descriptors)
+
+
+def test_descriptor_for_uses_exact_lowercase_builtin_ids():
+    assert descriptor_for("codex-cli").display_name == "Codex CLI"
+    assert descriptor_for("claude-code").integration_tier == "native-advisory"
+    assert descriptor_for("mcp-readonly").integration_tier == "guided"
+    assert descriptor_for("a2a-artifact").display_name == "A2A Artifact"
+
+    with pytest.raises(KeyError):
+        descriptor_for("Codex-CLI")
+
+    with pytest.raises(KeyError):
+        descriptor_for("unknown-adapter")
+
+
+def test_requested_tier_guard_rejects_unproved_promotion():
+    guided = descriptor_for("chatgpt-app")
+    native = descriptor_for("codex-cli")
+
+    assert_requested_tier_allowed(guided, "guided")
+    assert_requested_tier_allowed(guided, "unsupported")
+    assert_requested_tier_allowed(native, "native-advisory")
+    assert_requested_tier_allowed(native, "guided")
+
+    with pytest.raises(ValueError, match="stronger"):
+        assert_requested_tier_allowed(guided, "native-advisory")
+
+    with pytest.raises(ValueError, match="stronger"):
+        assert_requested_tier_allowed(native, "enforced")
+
+    with pytest.raises(ValueError, match="unknown tier"):
+        assert_requested_tier_allowed(native, "blocking")
+
+
+def test_enforced_adapter_requires_blocking_evidence():
+    adapter = AdapterDescriptor(
+        adapter_id="closed-app",
+        display_name="Closed App",
+        version="0",
+        integration_tier="enforced",
+        target_surfaces=("CANON.md",),
+        import_modes=("paste",),
+        export_modes=("file",),
+        bootstrap={"can_block_before_work": False},
+        evidence_refs=(),
+    )
+    assert any("enforced" in p for p in validate_adapter_descriptor(adapter))
+
+
+def test_enforced_adapter_with_blocking_evidence_validates():
+    adapter = AdapterDescriptor(
+        adapter_id="owned-wrapper",
+        display_name="Owned Wrapper",
+        version="1",
+        integration_tier="enforced",
+        target_surfaces=("CANON.md",),
+        import_modes=("file",),
+        export_modes=("file",),
+        bootstrap={"can_block_before_work": True},
+        evidence_refs=("fixture:owned-wrapper-blocking-start",),
+    )
+    assert validate_adapter_descriptor(adapter) == []
