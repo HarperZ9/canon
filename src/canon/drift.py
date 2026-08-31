@@ -21,6 +21,7 @@ from __future__ import annotations
 import hashlib
 from dataclasses import dataclass
 
+from canon.layering import LayeringError
 from canon.region import RegionError, extract_region
 from canon.registry import (
     SURFACE_CATALOG,
@@ -98,6 +99,13 @@ def surface_drift(surface: Surface, pool: list[Record], *, home: str,
             f"region scope {region.scope!r} != surface scope {surface.scope!r}")
     try:
         expected = render_surface(pool_for(surface, pool), surface.scope)
+    except LayeringError as exc:
+        # A pool that carries a non-personality-block record, or a record with
+        # an unknown scope, is not a personality set layering can place. D-58:
+        # surface_drift folds that raise into a verdict so the totality
+        # guarantee holds for a realistic mixed pool a caller supplies.
+        return SurfaceDrift(surface, path, VERDICT_REFUSED, None, None,
+                            f"layering refused: {exc}")
     except RenderRefused as exc:
         return SurfaceDrift(surface, path, VERDICT_REFUSED, None, None,
                             f"render refused: {exc}")
