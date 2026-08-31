@@ -367,6 +367,16 @@ def test_every_pin_constant_matches_its_registry_entry():
         assert pin.name == name
 
 
+def test_schema_module_pins_to_pin_record():
+    """D-94: canon.schema.SCHEMA aliases PIN_RECORD.kind_tag through a
+    bottom-of-module import. A downstream module that reads `SCHEMA` reads the
+    same string as one that calls `pin_for('record').kind_tag`, byte-for-byte,
+    with no fixture rewrite."""
+    from canon.schema import SCHEMA
+    assert SCHEMA is PIN_RECORD.kind_tag or SCHEMA == PIN_RECORD.kind_tag
+    assert SCHEMA == "canon.record/v1"
+
+
 def test_every_pin_has_a_recognized_adr_ref_shape():
     for pin in all_pins():
         assert pin.adr_ref, f"pin {pin.name} missing adr_ref"
