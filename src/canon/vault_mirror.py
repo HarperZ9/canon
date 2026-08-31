@@ -96,6 +96,10 @@ def _checked_vault_path(path: str, *, vault: str) -> str:
         raise VaultError(str(exc)) from exc
 
 
+def _checked_vault_root(vault: str) -> None:
+    _checked_vault_path(_abs(vault, _HUB_RELPATH), vault=vault)
+
+
 def _flatten_ws(text: str) -> str:
     return text.replace("\r", " ").replace("\n", " ")
 
@@ -273,6 +277,7 @@ def plan_vault(records, *, vault, read_text, write_text, list_dir):
     deleted. IO is injected: `read_text` returns None for an absent file,
     `list_dir` yields the POSIX relpaths present under the mirror.
     """
+    _checked_vault_root(vault)
     targets = _render_targets(records)
     orphans = _discover_orphans(
         targets, vault=vault, read_text=read_text, list_dir=list_dir)
@@ -283,6 +288,7 @@ def plan_vault(records, *, vault, read_text, write_text, list_dir):
         planned.append(hub_write)
     for relpath, record in orphans:
         results.append(VaultResult(_abs(vault, relpath), "orphan", record_key(record), None))
+    _checked_vault_root(vault)
     for abs_path, content in planned:
         _checked_vault_path(abs_path, vault=vault)
     for abs_path, content in planned:

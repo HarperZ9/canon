@@ -87,6 +87,13 @@ def _link_file_or_skip(link: Path, target: Path) -> None:
         pytest.skip("current platform or privileges do not allow file symlinks")
 
 
+def _link_dir_or_skip(link: Path, target: Path) -> None:
+    try:
+        link.symlink_to(target, target_is_directory=True)
+    except OSError:
+        pytest.skip("current platform or privileges do not allow dir symlinks")
+
+
 def test_catalog_covers_the_confirmed_instruction_surfaces():
     coords = {(s.harness, s.scope, s.root, s.relative_path)
               for s in SURFACE_CATALOG}
@@ -150,6 +157,67 @@ def test_write_surface_refuses_a_non_catalog_surface():
         write_surface(evil, [], home=HOME, workspace=WS,
                       read_text=fs.read_text, write_text=fs.write_text)
     assert fs.writes == []
+
+
+def test_write_surface_preserves_plain_nonexistent_injected_fake_root():
+    surface = _codex_surface()
+    path = resolve_surface_path(surface, home=HOME, workspace=WS)
+    fs = FakeFS({path: _host("workspace")})
+
+    out = write_surface(surface, [_block("tone", "workspace", "W tone", 20)],
+                        home=HOME, workspace=WS,
+                        read_text=fs.read_text, write_text=fs.write_text)
+
+    assert fs.writes == [path]
+    assert fs.files[path] == out
+
+
+def test_write_surface_rejects_broken_symlink_root_before_read(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    workspace = tmp_path / "workspace-link"
+    _link_dir_or_skip(workspace, tmp_path / "missing-root")
+    counts = {"reads": 0, "writes": 0}
+
+    def read_text(path: str) -> str:
+        counts["reads"] += 1
+        return _host("workspace")
+
+    def write_text(path: str, text: str) -> None:
+        counts["writes"] += 1
+
+    with pytest.raises(SurfaceError):
+        write_surface(_codex_surface(), [_block("tone", "workspace", "W tone", 20)],
+                      home=str(home), workspace=str(workspace),
+                      read_text=read_text, write_text=write_text)
+
+    assert counts == {"reads": 0, "writes": 0}
+
+
+def test_write_surface_rejects_existing_file_root_before_read(
+    tmp_path: Path,
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    workspace = tmp_path / "workspace-file"
+    workspace.write_text("not a directory\n", encoding="utf-8")
+    counts = {"reads": 0, "writes": 0}
+
+    def read_text(path: str) -> str:
+        counts["reads"] += 1
+        return _host("workspace")
+
+    def write_text(path: str, text: str) -> None:
+        counts["writes"] += 1
+
+    with pytest.raises(SurfaceError):
+        write_surface(_codex_surface(), [_block("tone", "workspace", "W tone", 20)],
+                      home=str(home), workspace=str(workspace),
+                      read_text=read_text, write_text=write_text)
+
+    assert counts == {"reads": 0, "writes": 0}
 
 
 def test_pool_for_is_the_public_authored_split():

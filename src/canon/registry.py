@@ -92,7 +92,7 @@ def _checked_surface_path(surface: Surface, *, home: str, workspace: str) -> str
     root = _root_dir(surface, home=home, workspace=workspace)
     path = resolve_surface_path(surface, home=home, workspace=workspace)
     assert_writable(path, home=home, workspace=workspace)
-    if not os.path.isdir(root):
+    if not os.path.lexists(root):
         return path
     try:
         return str(assert_operational_surface_path(path, root=root))

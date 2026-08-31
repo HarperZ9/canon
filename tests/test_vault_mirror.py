@@ -20,6 +20,7 @@ cannot:
 from __future__ import annotations
 
 import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -119,6 +120,7 @@ def _real_vault_root(tmp_path: Path):
 class RealFS:
     def __init__(self, dirs: list[str] | None = None) -> None:
         self.dir = list(dirs or [])
+        self.list_calls = 0
         self.reads: list[Path] = []
         self.writes: list[Path] = []
 
@@ -136,6 +138,7 @@ class RealFS:
         Path(path).write_text(content, encoding="utf-8")
 
     def list_dir(self, vault: str) -> list[str]:
+        self.list_calls += 1
         return list(self.dir)
 
     def plan(self, records):
@@ -151,6 +154,71 @@ def _link_file_or_skip(link: Path, target: Path) -> None:
         link.symlink_to(target)
     except OSError:
         pytest.skip("current platform or privileges do not allow file symlinks")
+
+
+def _link_dir_or_skip(link: Path, target: Path) -> None:
+    try:
+        link.symlink_to(target, target_is_directory=True)
+    except OSError:
+        pytest.skip("current platform or privileges do not allow dir symlinks")
+
+
+def _make_junction_or_skip(link: Path, target: Path) -> None:
+    result = subprocess.run(
+        ["cmd", "/c", "mklink", "/J", str(link), str(target)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout).strip()
+        pytest.skip(f"could not create Windows junction: {detail}")
+
+
+def test_plan_vault_allows_empty_real_vault() -> None:
+    fs = RealFS()
+
+    results = fs.plan([])
+
+    assert [r.status for r in results] == ["written"]
+    assert [_rel(str(path)) for path in fs.writes] == ["MEMORY.md"]
+
+
+def test_plan_vault_refuses_symlink_vault_root_before_callbacks(
+    tmp_path: Path,
+) -> None:
+    vault = Path(VAULT)
+    vault.rmdir()
+    target = tmp_path / "outside-vault"
+    target.mkdir()
+    _link_dir_or_skip(vault, target)
+    fs = RealFS()
+
+    with pytest.raises(VaultError, match="reparse"):
+        fs.plan([])
+
+    assert fs.list_calls == 0
+    assert fs.reads == []
+    assert fs.writes == []
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows junction behavior only")
+def test_plan_vault_refuses_junction_vault_root_before_callbacks(
+    tmp_path: Path,
+) -> None:
+    vault = Path(VAULT)
+    vault.rmdir()
+    target = tmp_path / "outside-junction-target"
+    target.mkdir()
+    _make_junction_or_skip(vault, target)
+    fs = RealFS()
+
+    with pytest.raises(VaultError, match="reparse"):
+        fs.plan([])
+
+    assert fs.list_calls == 0
+    assert fs.reads == []
+    assert fs.writes == []
 
 
 # 22
