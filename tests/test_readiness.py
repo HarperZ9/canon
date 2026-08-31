@@ -116,17 +116,28 @@ def test_readiness_response_checks_status_mismatches_when_expected_statuses_pres
     assert result.mismatched_ids == ("goal-1",)
 
 
-def test_readiness_response_mismatches_status_missing_from_expected_statuses():
-    probe = make_probe({"active_goal_ids": ("goal-1",)})
-    response = {
-        "active_goal_ids": ("goal-1",),
-        "statuses": {"goal-1": "active"},
-        "expected_statuses": {},
-    }
-    result = evaluate_readiness_response(probe, response)
+@pytest.mark.parametrize(
+    ("statuses", "expected_statuses"),
+    (({"goal-1": "active"}, {}), ({}, {"goal-1": "active"})),
+)
+def test_readiness_response_mismatches_one_sided_statuses(statuses, expected_statuses):
+    response = {"active_goal_ids": ("goal-1",), "statuses": statuses, "expected_statuses": expected_statuses}
+    result = evaluate_readiness_response(make_probe({"active_goal_ids": ("goal-1",)}), response)
     assert result.verdict == "fail"
     assert result.missing_ids == ()
     assert result.mismatched_ids == ("goal-1",)
+
+
+def test_readiness_response_status_mismatches_are_symmetric_and_sorted():
+    probe = make_probe({"permission_ids": ("perm-1",), "active_goal_ids": ("goal-1",), "unknown_ids": ("unknown-1",)})
+    response = {
+        "permission_ids": ["perm-1"], "active_goal_ids": ["goal-1"], "unknown_ids": ["unknown-1"],
+        "statuses": {"perm-1": "active", "unknown-1": "stale"},
+        "expected_statuses": {"goal-1": "active", "unknown-1": "active"},
+    }
+    result = evaluate_readiness_response(probe, response)
+    assert result.verdict == "fail"
+    assert result.mismatched_ids == ("goal-1", "perm-1", "unknown-1")
 
 
 @pytest.mark.parametrize("field", ("statuses", "expected_statuses"))

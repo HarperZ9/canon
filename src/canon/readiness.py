@@ -290,7 +290,9 @@ def _status_mismatches(critical_sets: dict, response: Mapping[str, object]) -> s
     mismatched: set[str] = set()
     for values in critical_sets.values():
         for critical_id in values:
-            if critical_id in statuses:
-                if critical_id not in expected_statuses or statuses[critical_id] != expected_statuses[critical_id]:
+            has_status = critical_id in statuses
+            has_expected = critical_id in expected_statuses
+            if has_status or has_expected:
+                if not has_status or not has_expected or statuses[critical_id] != expected_statuses[critical_id]:
                     mismatched.add(critical_id)
     return mismatched
