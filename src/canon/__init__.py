@@ -10,6 +10,11 @@ defines.
 """
 from __future__ import annotations
 
+from .canon_check import (
+    CanonCheckReport,
+    canon_check,
+    canon_check_exit_code,
+)
 from .backends import (
     CAP_ARBITRARY_KIND,
     CAP_AUDIT_CHAIN,
@@ -167,4 +172,7 @@ __all__ = [
     "migrate",
     "register_migrator",
     "unregister_migrator",
+    "CanonCheckReport",
+    "canon_check",
+    "canon_check_exit_code",
 ]

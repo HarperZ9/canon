@@ -511,4 +511,29 @@ layout may still shift under a future decision.
 pin without touching the note pin. A caller inspecting a vault reads both
 pins and knows exactly which concern moved.
 
-<!-- M4.4 canon_check decisions append below in a later commit. -->
+## D-100 — `canon_check` is a read-only composition over existing verdicts
+**Status:** accepted (M4.4).
+**Context:** a build script that keys on canon's health checks has to wire
+each leg separately today: `drift_exit_code`, the vault fidelity legs, and
+the persona assessor. Every call site owns its own aggregation of the four
+`ok` bits, and a fifth leg lands under it silently. A caller who wants a
+run-and-check has to run `reconcile` first, but a check that composes with
+`reconcile` invites a check that quietly writes: mixing the write action
+into the check breaks the read-only invariant every verdict leg ships.
+**Decision:** `canon_check` composes exactly the four verdict-returning
+check legs (drift, vault, vault_symmetric, persona) and returns a
+`CanonCheckReport` carrying every leg's original verdict plus an aggregate
+`ok`, a `reasons` tuple naming failed legs, and an `exit_code` mirror of
+`drift_exit_code` and `reconcile_exit_code`. A leg without its seam wired
+lands as `None` and does not affect `ok`. `reconcile` is not a leg because
+it is an action (writes host files, raises durable gates); a caller who
+wants a run-and-check composes `reconcile` and `canon_check` in that
+order. Persona passes iff the verdict is `MATCH`; `UNVERIFIABLE` fails
+closed for the aggregate, carrying V2's empty-hard-list discipline (D-39)
+up one layer.
+**Consequence:** a build script wires `canon_check` once and drops the
+per-leg glue. Adding a fifth read-only leg is a one-line change to the
+composition; a leg that writes host state cannot land here without changing
+the docstring's read-only invariant, so the boundary between check and
+action stays legible. A leg that raises still raises out of the
+composition, preserving D-38 / D-39 fail-loud on wiring bugs.
