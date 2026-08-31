@@ -19,7 +19,7 @@ is declared and documented but cannot be triggered by a lone record, so
 `guard_put` does not raise on it. Kind support is enforced separately, by
 `supported_kinds()`.
 
-canon stays self-contained: this module imports only the schema. The two
+canon stays self-contained: this module imports only the schema and validator. The two
 adapters that map external engines (mneme, flywheel) take an injected store
 handle rather than importing the engine, so the container carries no runtime
 dependency on either.
