@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from canon.canonical_json import canonical_json_text
 from canon.omission import Omission, validate_omission
 from canon.transform import TransformReceipt, validate_transform_receipt
@@ -46,6 +48,33 @@ def test_omission_uses_tuple_storage_and_defensive_lists():
     assert omission.affected_source_refs == ("record:workspace/fact-1",)
     assert omission.does_not_prove == ("This does not prove omitted facts were irrelevant.",)
     assert omission.to_dict()["affected_ids"] == ["fact-1"]
+
+
+@pytest.mark.parametrize("field", ("affected_ids", "affected_source_refs", "does_not_prove"))
+def test_omission_rejects_scalar_sequence_fields_from_dict(field: str):
+    d = load_fixture("omission_budget_noncritical.json")
+    d[field] = "not-a-list"
+    omission = Omission.from_dict(d)
+    assert getattr(omission, field) == "not-a-list"
+    assert omission.to_dict()[field] == "not-a-list"
+    assert any(field in p for p in validate_omission(omission))
+
+
+def test_omission_rejects_scalar_sequence_fields_from_direct_construction():
+    omission = Omission(
+        "budget",
+        1,
+        "fact-1",
+        "record:workspace/fact-1",
+        False,
+        "omitted",
+        "not-proof-text",
+    )
+    assert omission.to_dict()["affected_ids"] == "fact-1"
+    problems = validate_omission(omission)
+    assert any("affected_ids" in p for p in problems)
+    assert any("affected_source_refs" in p for p in problems)
+    assert any("does_not_prove" in p for p in problems)
 
 
 def test_critical_omission_cannot_be_marked_omitted():
@@ -111,6 +140,61 @@ def test_transform_receipt_uses_tuple_storage_and_defensive_lists():
     assert receipt.does_not_prove == ("This receipt does not prove the summary is complete.",)
     assert len(receipt.omissions) == 1
     assert receipt.to_dict()["input_refs"] == ["record:workspace/mem-000123"]
+
+
+@pytest.mark.parametrize("field", ("input_refs", "retained_critical_atom_ids", "does_not_prove"))
+def test_transform_receipt_rejects_scalar_sequence_fields_from_dict(field: str):
+    d = load_fixture("transform_summary.json")
+    d[field] = "not-a-list"
+    receipt = TransformReceipt.from_dict(d)
+    assert getattr(receipt, field) == "not-a-list"
+    assert receipt.to_dict()[field] == "not-a-list"
+    assert any(field in p for p in validate_transform_receipt(receipt))
+
+
+def test_transform_receipt_rejects_scalar_sequence_fields_from_direct_construction():
+    receipt = TransformReceipt(
+        transform="summary",
+        method_id="deterministic-summary-v1",
+        input_refs="record:workspace/goal-1",
+        input_span_hash="sha256:" + "a" * 64,
+        output_ref="atom:goal-1",
+        output_hash="sha256:" + "b" * 64,
+        lossy=True,
+        retained_critical_atom_ids="goal-1",
+        does_not_prove="not-proof-text",
+    )
+    assert receipt.to_dict()["input_refs"] == "record:workspace/goal-1"
+    problems = validate_transform_receipt(receipt)
+    assert any("input_refs" in p for p in problems)
+    assert any("retained_critical_atom_ids" in p for p in problems)
+    assert any("does_not_prove" in p for p in problems)
+
+
+def test_transform_receipt_rejects_dict_omissions_from_dict():
+    d = load_fixture("transform_summary.json")
+    d["omissions"] = load_fixture("omission_budget_noncritical.json")
+    receipt = TransformReceipt.from_dict(d)
+    assert receipt.omissions == d["omissions"]
+    assert receipt.to_dict()["omissions"] == d["omissions"]
+    assert any("omissions" in p for p in validate_transform_receipt(receipt))
+
+
+@pytest.mark.parametrize("value", ("not-a-list", {"schema": "canon.omission/v1"}))
+def test_transform_receipt_rejects_malformed_omissions_from_direct_construction(value):
+    receipt = TransformReceipt(
+        transform="summary",
+        method_id="deterministic-summary-v1",
+        input_refs=("record:workspace/goal-1",),
+        input_span_hash="sha256:" + "a" * 64,
+        output_ref="atom:goal-1",
+        output_hash="sha256:" + "b" * 64,
+        lossy=True,
+        retained_critical_atom_ids=("goal-1",),
+        omissions=value,
+    )
+    assert receipt.to_dict()["omissions"] == value
+    assert any("omissions" in p for p in validate_transform_receipt(receipt))
 
 
 def test_transform_receipt_requires_hash_boundaries():

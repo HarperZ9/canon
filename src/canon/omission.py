@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
+import copy
 from dataclasses import dataclass
 from typing import ClassVar
 
@@ -34,20 +34,20 @@ class Omission:
     schema: ClassVar[str] = OMISSION_SCHEMA
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "affected_ids", _tuple_from(self.affected_ids))
-        object.__setattr__(self, "affected_source_refs", _tuple_from(self.affected_source_refs))
-        object.__setattr__(self, "does_not_prove", _tuple_from(self.does_not_prove))
+        object.__setattr__(self, "affected_ids", _tuple_sequence(self.affected_ids))
+        object.__setattr__(self, "affected_source_refs", _tuple_sequence(self.affected_source_refs))
+        object.__setattr__(self, "does_not_prove", _tuple_sequence(self.does_not_prove))
 
     def to_dict(self) -> dict:
         return {
             "schema": OMISSION_SCHEMA,
             "reason": self.reason,
             "count": self.count,
-            "affected_ids": list(self.affected_ids),
-            "affected_source_refs": list(self.affected_source_refs),
+            "affected_ids": _json_sequence(self.affected_ids),
+            "affected_source_refs": _json_sequence(self.affected_source_refs),
             "critical": self.critical,
             "decision": self.decision,
-            "does_not_prove": list(self.does_not_prove),
+            "does_not_prove": _json_sequence(self.does_not_prove),
         }
 
     @classmethod
@@ -87,14 +87,20 @@ def validate_omission(omission: Omission) -> list[str]:
     return problems
 
 
-def _tuple_from(value: object) -> tuple:
-    if isinstance(value, tuple):
-        return value
+def _tuple_sequence(value: object) -> object:
     if isinstance(value, list):
-        return tuple(value)
-    if isinstance(value, Iterable) and not isinstance(value, (str, bytes, dict)):
-        return tuple(value)
-    return (value,)
+        return tuple(copy.deepcopy(item) for item in value)
+    if isinstance(value, tuple):
+        return tuple(copy.deepcopy(item) for item in value)
+    return copy.deepcopy(value)
+
+
+def _json_sequence(value: object) -> object:
+    if isinstance(value, tuple):
+        return [copy.deepcopy(item) for item in value]
+    if isinstance(value, list):
+        return [copy.deepcopy(item) for item in value]
+    return copy.deepcopy(value)
 
 
 def _check_member(name: str, value: object, allowed: tuple[str, ...], problems: list[str]) -> None:
@@ -107,7 +113,7 @@ def _check_count(omission: Omission, problems: list[str]) -> None:
     if not isinstance(count, int) or isinstance(count, bool) or count < 0:
         problems.append("count must be a non-negative int")
         return
-    if omission.affected_ids and count != len(omission.affected_ids):
+    if isinstance(omission.affected_ids, tuple) and omission.affected_ids and count != len(omission.affected_ids):
         problems.append("count must match affected_ids when affected_ids are listed")
 
 

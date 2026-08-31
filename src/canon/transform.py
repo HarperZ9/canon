@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
+import copy
 from dataclasses import dataclass
 from typing import ClassVar
 
@@ -29,25 +29,25 @@ class TransformReceipt:
     schema: ClassVar[str] = TRANSFORM_SCHEMA
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "input_refs", _tuple_from(self.input_refs))
-        object.__setattr__(self, "retained_critical_atom_ids", _tuple_from(self.retained_critical_atom_ids))
+        object.__setattr__(self, "input_refs", _tuple_sequence(self.input_refs))
+        object.__setattr__(self, "retained_critical_atom_ids", _tuple_sequence(self.retained_critical_atom_ids))
         object.__setattr__(self, "omissions", _omission_tuple(self.omissions))
-        object.__setattr__(self, "does_not_prove", _tuple_from(self.does_not_prove))
+        object.__setattr__(self, "does_not_prove", _tuple_sequence(self.does_not_prove))
 
     def to_dict(self) -> dict:
         return {
             "schema": TRANSFORM_SCHEMA,
             "transform": self.transform,
             "method_id": self.method_id,
-            "input_refs": list(self.input_refs),
+            "input_refs": _json_sequence(self.input_refs),
             "input_span_hash": self.input_span_hash,
             "output_ref": self.output_ref,
             "output_hash": self.output_hash,
             "lossy": self.lossy,
-            "retained_critical_atom_ids": list(self.retained_critical_atom_ids),
-            "omissions": [omission.to_dict() for omission in self.omissions],
+            "retained_critical_atom_ids": _json_sequence(self.retained_critical_atom_ids),
+            "omissions": _omissions_to_json(self.omissions),
             "verifier": self.verifier,
-            "does_not_prove": list(self.does_not_prove),
+            "does_not_prove": _json_sequence(self.does_not_prove),
         }
 
     @classmethod
@@ -93,19 +93,41 @@ def validate_transform_receipt(receipt: TransformReceipt) -> list[str]:
     return problems
 
 
-def _tuple_from(value: object) -> tuple:
-    if isinstance(value, tuple):
-        return value
+def _tuple_sequence(value: object) -> object:
     if isinstance(value, list):
-        return tuple(value)
-    if isinstance(value, Iterable) and not isinstance(value, (str, bytes, dict)):
-        return tuple(value)
-    return (value,)
+        return tuple(copy.deepcopy(item) for item in value)
+    if isinstance(value, tuple):
+        return tuple(copy.deepcopy(item) for item in value)
+    return copy.deepcopy(value)
 
 
-def _omission_tuple(value: object) -> tuple:
-    omissions = _tuple_from(value)
-    return tuple(Omission.from_dict(item) if isinstance(item, dict) else item for item in omissions)
+def _json_sequence(value: object) -> object:
+    if isinstance(value, tuple):
+        return [copy.deepcopy(item) for item in value]
+    if isinstance(value, list):
+        return [copy.deepcopy(item) for item in value]
+    return copy.deepcopy(value)
+
+
+def _omission_tuple(value: object) -> object:
+    if not isinstance(value, (list, tuple)):
+        return copy.deepcopy(value)
+    return tuple(_omission_value(item) for item in value)
+
+
+def _omission_value(value: object) -> object:
+    if not isinstance(value, dict):
+        return copy.deepcopy(value)
+    try:
+        return Omission.from_dict(value)
+    except (KeyError, TypeError, ValueError):
+        return copy.deepcopy(value)
+
+
+def _omissions_to_json(value: object) -> object:
+    if not isinstance(value, (list, tuple)):
+        return copy.deepcopy(value)
+    return [item.to_dict() if isinstance(item, Omission) else copy.deepcopy(item) for item in value]
 
 
 def _check_member(name: str, value: object, allowed: tuple[str, ...], problems: list[str]) -> None:
