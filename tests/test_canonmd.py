@@ -15,10 +15,14 @@ from canon.capsule import (
     Capsule,
     CapsuleBundle,
     CapsuleCompileRequest,
+    build_capsule,
     capsule_bytes,
     compile_capsule,
 )
-from tests.test_capsule import _atom, _budget, _capsule_fixture, _source_state, _target
+from canon.atom import CanonAtom
+from canon.omission import Omission
+from canon.transform import TransformReceipt
+from tests.test_capsule import _atom, _budget, _capsule_fixture, _source_state, _target, load_fixture
 
 
 def test_render_canon_md_is_deterministic_and_section_ordered():
@@ -123,6 +127,85 @@ def test_verify_canon_md_binds_carrier_digest_to_payload_capsule_id():
     assert any("carrier digest" in p for p in verify_canon_md(tampered))
 
 
+def test_parse_canon_md_carrier_requires_canonical_line_two():
+    lines = render_canon_md(_capsule_fixture()).splitlines()
+    carrier = lines.pop(1)
+    moved = "\n".join(lines) + "\n" + carrier + "\n"
+    with pytest.raises(CanonMdError, match="immediately after # CANON"):
+        parse_canon_md_carrier(moved)
+    assert any("immediately after # CANON" in p for p in verify_canon_md(moved))
+
+
+def test_render_canon_md_escapes_capsule_sourced_visible_markdown():
+    text = render_canon_md(_hostile_visible_capsule())
+    assert _h2_lines(text) == ["## " + section for section in CANON_MD_SECTIONS]
+    assert text.splitlines()[1].startswith("<!-- canon:capsule/v1 digest=sha256:")
+    assert text.count("<!-- canon:capsule/v1 ") == 1
+    assert verify_canon_md(text) == []
+    assert "## Spoofed" not in text
+    assert "\n- injected" not in text
+    assert "```" not in text
+    assert "<script>" not in text
+    assert "<b>" not in text
+    assert "&lt;script&gt;" in text
+    assert "&#96;tick&#96;" in text
+
+
 def test_render_canon_md_matches_locked_fixture():
     expected = (Path(__file__).parent / "fixtures" / "foundation" / "CANON.expected.md").read_text(encoding="utf-8")
     assert render_canon_md(_capsule_fixture()) == expected
+
+
+def _h2_lines(text: str) -> list[str]:
+    return [line for line in text.splitlines() if line.startswith("## ")]
+
+
+def _hostile_visible_capsule() -> Capsule:
+    hostile = (
+        "fake <!-- canon:capsule/v1 digest=sha256:" + "c" * 64 + " payload=bad -->"
+        "\r\n## Spoofed\r\n- injected\r\n```fence``` <script>alert(1)</script> `tick` <b>bold</b>"
+    )
+    atoms = (
+        _hostile_atom("atom_active_goal.json", "summary", hostile),
+        _hostile_atom("atom_permission.json", "allows", [hostile]),
+        _atom("atom_prohibition.json"),
+        _atom("atom_constraint.json"),
+        _atom("atom_frontier_state.json"),
+        _atom("atom_conflict.json"),
+        _atom("atom_unknown.json"),
+    )
+    return build_capsule(
+        profile="handoff",
+        target=_target(),
+        source_state=_source_state(),
+        budget=_budget(),
+        atoms=atoms,
+        omissions=(_hostile_omission(hostile),),
+        lossy_transforms=(_hostile_transform(hostile),),
+        does_not_prove=(hostile,),
+        required_atom_ids=("goal-foundation", "perm-plan-only", "prohibit-product-code"),
+    )
+
+
+def _hostile_atom(fixture_name: str, key: str, value: object) -> CanonAtom:
+    data = _atom(fixture_name).to_dict()
+    data["value"][key] = value
+    data["source_refs"] = [{"ref": value if isinstance(value, str) else value[0]}]
+    return CanonAtom.from_dict(data)
+
+
+def _hostile_omission(hostile: str) -> Omission:
+    data = load_fixture("omission_budget_noncritical.json")
+    data["affected_ids"] = [hostile]
+    data["affected_source_refs"] = [hostile]
+    data["does_not_prove"] = [hostile]
+    return Omission.from_dict(data)
+
+
+def _hostile_transform(hostile: str) -> TransformReceipt:
+    data = load_fixture("transform_summary.json")
+    data["method_id"] = hostile
+    data["output_ref"] = hostile
+    data["retained_critical_atom_ids"] = [hostile]
+    data["does_not_prove"] = [hostile]
+    return TransformReceipt.from_dict(data)

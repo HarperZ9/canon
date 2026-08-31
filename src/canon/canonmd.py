@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import html
 import json
 import re
 
@@ -61,6 +62,7 @@ def parse_canon_md_carrier(text: str) -> dict:
     matches = list(_CARRIER_RE.finditer(text))
     if len(matches) != 1:
         raise CanonMdError(f"expected exactly one carrier, found {len(matches)}")
+    _check_carrier_placement(text, matches[0])
     attrs = _carrier_attrs(matches[0].group("attrs"))
     payload = _decode_payload(attrs["payload"])
     if not isinstance(payload, dict):
@@ -100,6 +102,12 @@ def _carrier_attrs(attrs_text: str) -> dict:
     if not is_sha256_ref(attrs["digest"]):
         raise CanonMdError("carrier digest must be a sha256: reference")
     return attrs
+
+
+def _check_carrier_placement(text: str, match: re.Match[str]) -> None:
+    lines = text.splitlines()
+    if len(lines) < 2 or lines[0] != "# CANON" or lines[1] != match.group(0):
+        raise CanonMdError("carrier must appear immediately after # CANON")
 
 
 def _decode_payload(payload: str) -> object:
@@ -155,28 +163,28 @@ def _section_lines(section: str, capsule: Capsule) -> list[str]:
 
 def _identity_lines(capsule: Capsule) -> list[str]:
     return [
-        f"- Capsule id: `{capsule.capsule_id}`",
-        f"- Manifest SHA-256: `{capsule.integrity.manifest_sha256}`",
-        f"- Profile: `{capsule.profile}`",
-        f"- Canonicalization: `{capsule.integrity.canonicalization}`",
-        f"- Compatibility: record `{capsule.compatibility.record_schema_min}`, capsule `{capsule.compatibility.capsule_schema}`",
+        f"- Capsule id: {_code(capsule.capsule_id)}",
+        f"- Manifest SHA-256: {_code(capsule.integrity.manifest_sha256)}",
+        f"- Profile: {_code(capsule.profile)}",
+        f"- Canonicalization: {_code(capsule.integrity.canonicalization)}",
+        f"- Compatibility: record {_code(capsule.compatibility.record_schema_min)}, capsule {_code(capsule.compatibility.capsule_schema)}",
     ]
 
 
 def _target_lines(capsule: Capsule) -> list[str]:
     target = capsule.target
     return [
-        f"- Adapter: `{target.adapter}`",
-        f"- Surface: `{target.surface}`",
-        f"- Integration tier: `{target.integration_tier}`",
-        f"- Host enforcement observed: `{str(target.host_enforcement_observed).lower()}`",
+        f"- Adapter: {_code(target.adapter)}",
+        f"- Surface: {_code(target.surface)}",
+        f"- Integration tier: {_code(target.integration_tier)}",
+        f"- Host enforcement observed: {_code(str(target.host_enforcement_observed).lower())}",
     ]
 
 
 def _freshness_lines(capsule: Capsule) -> list[str]:
     lines = [f"- Layers: {_csv(capsule.layers)}"]
-    lines.extend(f"- Freshness `{row.get('id')}`: status `{row.get('status')}`, state `{_state(row)}`" for row in capsule.freshness)
-    lines.extend(f"- Unknown `{atom.id}`: {_summary(atom.value)}" for atom in capsule.unknowns)
+    lines.extend(f"- Freshness {_code(row.get('id'))}: status {_code(row.get('status'))}, state {_code(_state(row))}" for row in capsule.freshness)
+    lines.extend(f"- Unknown {_code(atom.id)}: {_summary(atom.value)}" for atom in capsule.unknowns)
     return lines or ["- None."]
 
 
@@ -185,7 +193,7 @@ def _frontier_lines(capsule: Capsule) -> list[str]:
     source = capsule.source_state.to_dict()
     for key in sorted(source):
         if source[key] is not None:
-            lines.append(f"- Source state `{key}`: `{source[key]}`")
+            lines.append(f"- Source state {_code(key)}: {_code(source[key])}")
     return lines
 
 
@@ -202,24 +210,25 @@ def _receipt_section_lines(section: str, capsule: Capsule) -> list[str]:
     if section == "Bootstrap readiness probe":
         return _readiness_lines(capsule)
     if section == "Does-not-prove":
-        return [f"- {item}" for item in capsule.does_not_prove] or ["- None."]
+        return [f"- {_safe_text(item)}" for item in capsule.does_not_prove] or ["- None."]
     return ["- None."]
 
 
 def _atom_line(atom: object) -> str:
     refs = _csv(ref.get("ref", "") for ref in getattr(atom, "source_refs", ()) if isinstance(ref, dict))
     suffix = f"; refs: {refs}" if refs != "none" else ""
-    return f"- `{atom.id}` ({atom.type}, {atom.layer}, {atom.status}, critical={str(atom.critical).lower()}): {_summary(atom.value)}{suffix}"
+    meta = f"{_safe_text(atom.type)}, {_safe_text(atom.layer)}, {_safe_text(atom.status)}"
+    return f"- {_code(atom.id)} ({meta}, critical={_safe_text(str(atom.critical).lower())}): {_summary(atom.value)}{suffix}"
 
 
 def _omission_line(item: object) -> str:
-    proof = "; does-not-prove: " + " | ".join(item.does_not_prove) if item.does_not_prove else ""
-    return f"- `{item.reason}` {item.decision}; critical={str(item.critical).lower()}; affected: {_csv(item.affected_ids)}{proof}"
+    proof = "; does-not-prove: " + _join_safe(item.does_not_prove, " | ") if item.does_not_prove else ""
+    return f"- {_code(item.reason)} {_safe_text(item.decision)}; critical={_safe_text(str(item.critical).lower())}; affected: {_csv(item.affected_ids)}{proof}"
 
 
 def _transform_line(item: object) -> str:
-    proof = "; does-not-prove: " + " | ".join(item.does_not_prove) if item.does_not_prove else ""
-    return f"- `{item.transform}` via `{item.method_id}` -> `{item.output_ref}`; retained: {_csv(item.retained_critical_atom_ids)}{proof}"
+    proof = "; does-not-prove: " + _join_safe(item.does_not_prove, " | ") if item.does_not_prove else ""
+    return f"- {_code(item.transform)} via {_code(item.method_id)} -> {_code(item.output_ref)}; retained: {_csv(item.retained_critical_atom_ids)}{proof}"
 
 
 def _readiness_lines(capsule: Capsule) -> list[str]:
@@ -229,7 +238,7 @@ def _readiness_lines(capsule: Capsule) -> list[str]:
         if key is not None and atom.critical is True:
             sets[key].append(atom.id)
     lines = ["- Challenge format: `json`", "- Checker: `exact-id-set-and-status-match`"]
-    lines.extend(f"- `{key}`: {_csv(sets[key])}" for key in CRITICAL_SET_KEYS)
+    lines.extend(f"- {_code(key)}: {_csv(sets[key])}" for key in CRITICAL_SET_KEYS)
     return lines
 
 
@@ -237,8 +246,8 @@ def _summary(value: object) -> str:
     if isinstance(value, dict):
         for key in ("summary", "question", "current_state", "allows", "forbids", "requires", "resolution"):
             if key in value:
-                return _compact(value[key])
-    return _compact(value)
+                return _safe_text(value[key])
+    return _safe_text(value)
 
 
 def _state(row: dict) -> str:
@@ -250,6 +259,29 @@ def _compact(value: object) -> str:
     return canonical_json_text(value).strip() if isinstance(value, (dict, list)) else str(value)
 
 
+def _safe_text(value: object) -> str:
+    text = _compact(value).replace("\r\n", "\n").replace("\r", "\n")
+    safe = html.escape(" / ".join(text.split("\n")), quote=False).replace("#", r"\#")
+    return safe.replace("`", "&#96;")
+
+
+def _code(value: object) -> str:
+    return f"`{_safe_text(value)}`"
+
+
+def _join_safe(values: object, separator: str) -> str:
+    return separator.join(_safe_text(value) for value in _iter_values(values))
+
+
 def _csv(values: object) -> str:
-    items = [str(value) for value in values] if isinstance(values, (list, tuple)) else [str(value) for value in values]
+    items = [_safe_text(value) for value in _iter_values(values)]
     return ", ".join(items) if items else "none"
+
+
+def _iter_values(values: object) -> tuple[object, ...]:
+    if isinstance(values, str):
+        return (values,)
+    try:
+        return tuple(values)
+    except TypeError:
+        return (values,)
