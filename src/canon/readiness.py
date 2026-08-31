@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import copy
 from dataclasses import dataclass
-from typing import ClassVar, Mapping
+from typing import Mapping
 
 from .canonical_json import CanonicalJSONError, canonical_sha256, is_sha256_ref
 
@@ -20,8 +20,6 @@ class ReadinessProbe:
     critical_sets: dict
     challenge: dict
     checker: dict
-
-    schema: ClassVar[str] = READINESS_PROBE_SCHEMA
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "target", copy.deepcopy(self.target))
@@ -47,14 +45,7 @@ class ReadinessProbe:
         got = d.get("schema")
         if got != READINESS_PROBE_SCHEMA:
             raise ValueError(f"expected schema {READINESS_PROBE_SCHEMA!r}, got {got!r}")
-        return cls(
-            probe_id=d["probe_id"],
-            capsule_id=d["capsule_id"],
-            target=d["target"],
-            critical_sets=d["critical_sets"],
-            challenge=d["challenge"],
-            checker=d["checker"],
-        )
+        return cls(d["probe_id"], d["capsule_id"], d["target"], d["critical_sets"], d["challenge"], d["checker"])
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,8 +58,6 @@ class ReadinessResult:
     mismatched_ids: tuple[str, ...]
     response_hash: str
     does_not_prove: tuple[str, ...] = ()
-
-    schema: ClassVar[str] = READINESS_RESULT_SCHEMA
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "reported", copy.deepcopy(self.reported))
@@ -97,14 +86,8 @@ class ReadinessResult:
         if got != READINESS_RESULT_SCHEMA:
             raise ValueError(f"expected schema {READINESS_RESULT_SCHEMA!r}, got {got!r}")
         return cls(
-            probe_id=d["probe_id"],
-            capsule_id=d["capsule_id"],
-            verdict=d["verdict"],
-            reported=d["reported"],
-            missing_ids=d["missing_ids"],
-            mismatched_ids=d["mismatched_ids"],
-            response_hash=d["response_hash"],
-            does_not_prove=d.get("does_not_prove", ()),
+            d["probe_id"], d["capsule_id"], d["verdict"], d["reported"],
+            d["missing_ids"], d["mismatched_ids"], d["response_hash"], d.get("does_not_prove", ()),
         )
 
 
@@ -114,10 +97,9 @@ def validate_readiness_probe(probe: ReadinessProbe) -> list[str]:
     problems: list[str] = []
     _check_non_empty_string("probe_id", probe.probe_id, problems)
     _check_sha256("capsule_id", probe.capsule_id, problems)
-    _check_dict("target", probe.target, problems)
+    for name in ("target", "challenge", "checker"):
+        _check_dict(name, getattr(probe, name), problems)
     _check_critical_sets(probe.critical_sets, problems)
-    _check_dict("challenge", probe.challenge, problems)
-    _check_dict("checker", probe.checker, problems)
     return problems
 
 
@@ -236,17 +218,40 @@ def _check_string_tuple(name: str, value: object, problems: list[str]) -> None:
 
 
 def _evaluation_blockers(probe: object, response: object) -> list[str]:
-    blockers: list[str] = []
+    blockers: set[str] = set()
     if not isinstance(probe, ReadinessProbe):
-        blockers.append("probe")
-        return blockers
-    if not isinstance(probe.critical_sets, dict):
-        blockers.append("critical_sets")
-    elif any(not isinstance(ids, tuple) or any(not isinstance(item, str) for item in ids) for ids in probe.critical_sets.values()):
-        blockers.append("critical_sets")
-    if not isinstance(response, Mapping):
-        blockers.append("response")
+        return ["probe"]
+    blockers.update(_probe_blockers(probe))
+    if isinstance(response, Mapping):
+        blockers.update(_response_blockers(probe, response))
+    else:
+        blockers.add("response")
+    return sorted(blockers)
+
+
+def _probe_blockers(probe: ReadinessProbe) -> set[str]:
+    fields = ("probe_id", "capsule_id", "target", "critical_sets", "challenge", "checker")
+    blockers: set[str] = set()
+    for problem in validate_readiness_probe(probe):
+        blockers.add(next((field for field in fields if problem.startswith(field)), "probe"))
     return blockers
+
+
+def _response_blockers(probe: ReadinessProbe, response: Mapping[str, object]) -> set[str]:
+    blockers: set[str] = set()
+    for key in ("statuses", "expected_statuses"):
+        if key in response and not isinstance(response[key], Mapping):
+            blockers.add(key)
+    if not isinstance(probe.critical_sets, dict):
+        return blockers
+    for key in probe.critical_sets:
+        if key in CRITICAL_SET_KEYS and key in response and not _valid_response_ids(response[key]):
+            blockers.add(key)
+    return blockers
+
+
+def _valid_response_ids(value: object) -> bool:
+    return isinstance(value, (list, tuple)) and all(isinstance(item, str) for item in value)
 
 
 def _reported_copy(response: object) -> dict:
@@ -260,14 +265,6 @@ def _response_hash(response: object) -> str:
         return canonical_sha256(response)
     except (CanonicalJSONError, TypeError, ValueError):
         return canonical_sha256({"malformed_response_type": type(response).__name__})
-
-
-def _probe_id(probe: object) -> str:
-    return probe.probe_id if isinstance(probe, ReadinessProbe) else ""
-
-
-def _capsule_id(probe: object) -> str:
-    return probe.capsule_id if isinstance(probe, ReadinessProbe) else ""
 
 
 def _compare_critical_sets(critical_sets: dict, response: Mapping[str, object]) -> tuple[set[str], set[str]]:
@@ -293,7 +290,7 @@ def _status_mismatches(critical_sets: dict, response: Mapping[str, object]) -> s
     mismatched: set[str] = set()
     for values in critical_sets.values():
         for critical_id in values:
-            if critical_id in statuses and critical_id in expected_statuses:
-                if statuses[critical_id] != expected_statuses[critical_id]:
+            if critical_id in statuses:
+                if critical_id not in expected_statuses or statuses[critical_id] != expected_statuses[critical_id]:
                     mismatched.add(critical_id)
     return mismatched
