@@ -113,9 +113,17 @@ def _raise_build_problems(problems: Iterable[str]) -> None:
 
 
 def _check_required_atoms(atoms: tuple[CanonAtom, ...], required_ids: tuple[str, ...]) -> None:
-    by_id = {atom.id: atom for atom in atoms if isinstance(atom.id, str)}
+    identities_by_id: dict[str, set[tuple[str, str, str]]] = {}
+    atoms_by_id: dict[str, list[CanonAtom]] = {}
+    for atom in atoms:
+        if isinstance(atom.id, str):
+            identities_by_id.setdefault(atom.id, set()).add((atom.scope_key, atom.type, atom.id))
+            atoms_by_id.setdefault(atom.id, []).append(atom)
     for required_id in required_ids:
-        atom = by_id.get(required_id)
+        identities = identities_by_id.get(required_id, set())
+        if len(identities) > 1:
+            raise CapsuleBuildError(f"required atom {required_id!r} is ambiguous: {tuple(sorted(identities))!r}")
+        atom = next(iter(atoms_by_id.get(required_id, ())), None)
         if atom is None:
             raise CapsuleBuildError(f"required atom {required_id!r} is missing")
         if atom.critical is not True:

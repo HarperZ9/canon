@@ -82,6 +82,23 @@ def test_atom_validator_reports_multiple_envelope_problems():
     assert any("value" in p for p in problems)
 
 
+@pytest.mark.parametrize(
+    ("bad_atom", "expected"),
+    (
+        (object(), ["atom must be a CanonAtom, got object"]),
+        (None, ["atom must be a CanonAtom, got NoneType"]),
+        ({}, ["atom must be a CanonAtom, got dict"]),
+    ),
+)
+def test_atom_validator_is_total_for_non_atoms(bad_atom, expected):
+    try:
+        problems = validate_atom(bad_atom)
+    except Exception as exc:
+        pytest.fail(f"validate_atom raised {type(exc).__name__}: {exc}")
+    assert problems == expected
+    assert is_valid_atom(bad_atom) is False
+
+
 def test_atom_to_dict_deep_copies_nested_values():
     atom = CanonAtom.from_dict(load_fixture("atom_active_goal.json"))
     got = atom.to_dict()

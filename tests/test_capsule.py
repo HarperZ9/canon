@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+import re
+import subprocess
 from pathlib import Path
 
 import pytest
 
+from canon.adapter import builtin_descriptors
 from canon.atom import CanonAtom
 from canon.canonical_json import canonical_json_text
 from canon.capsule import (
@@ -30,6 +33,7 @@ FOUNDATION = Path(__file__).parent / "fixtures" / "foundation"
 HASH_A = "sha256:" + "a" * 64
 HASH_B = "sha256:" + "b" * 64
 HASH_C = "sha256:" + "c" * 64
+PROJECT_DOC_RE = re.compile(r"project-docs/[A-Za-z0-9._/-]+")
 
 
 def load_fixture(name: str) -> dict:
@@ -56,6 +60,12 @@ def _same_atom_key_variant(atom: CanonAtom) -> CanonAtom:
     d["layer"] = "project"
     d["precedence_rank"] = 7
     d["value"] = {"summary": "same atom key, different sort fields"}
+    return CanonAtom.from_dict(d)
+
+
+def _with_atom_fields(atom: CanonAtom, **fields: object) -> CanonAtom:
+    d = atom.to_dict()
+    d.update(fields)
     return CanonAtom.from_dict(d)
 
 
@@ -197,6 +207,77 @@ def test_build_capsule_fails_when_required_atom_is_not_critical():
             atoms=(atom,),
             required_atom_ids=("goal-1",),
         )
+
+
+def test_build_capsule_accepts_one_unambiguous_required_critical_identity():
+    atom = _atom("atom_active_goal.json")
+    capsule = build_capsule(
+        profile="needle",
+        target=_target(),
+        source_state=_source_state(),
+        budget=Budget("needle", 1024, 0, "unknown"),
+        atoms=(atom,),
+        required_atom_ids=("goal-foundation",),
+    )
+    assert [a.id for a in capsule.atoms] == ["goal-foundation"]
+
+
+def test_build_capsule_rejects_ambiguous_required_bare_id_deterministically():
+    critical = _with_atom_fields(
+        _atom("atom_active_goal.json"),
+        id="shared-required",
+        critical=True,
+        scope_key="workspace:canon",
+    )
+    noncritical = _with_atom_fields(
+        _atom("atom_constraint.json"),
+        id="shared-required",
+        critical=False,
+        scope_key="repo:canon",
+    )
+    errors: list[str] = []
+    for ordered_atoms in ((critical, noncritical), (noncritical, critical)):
+        with pytest.raises(CapsuleBuildError) as exc:
+            build_capsule(
+                profile="needle",
+                target=_target(),
+                source_state=_source_state(),
+                budget=Budget("needle", 1024, 0, "unknown"),
+                atoms=ordered_atoms,
+                required_atom_ids=("shared-required",),
+            )
+        errors.append(str(exc.value))
+    assert errors[0] == errors[1]
+    assert "required atom 'shared-required' is ambiguous" in errors[0]
+    assert "('repo:canon', 'constraint', 'shared-required')" in errors[0]
+    assert "('workspace:canon', 'active-goal', 'shared-required')" in errors[0]
+
+
+def test_local_project_doc_evidence_refs_resolve_to_tracked_files():
+    root = Path(__file__).resolve().parents[1]
+    refs = {
+        ref
+        for descriptor in builtin_descriptors()
+        for ref in descriptor.evidence_refs
+        if ref.startswith("project-docs/")
+    }
+    for fixture in FOUNDATION.iterdir():
+        if fixture.is_file():
+            refs.update(PROJECT_DOC_RE.findall(fixture.read_text(encoding="utf-8")))
+    tracked = set(
+        subprocess.run(
+            ["git", "ls-files"],
+            cwd=root,
+            check=True,
+            text=True,
+            capture_output=True,
+        ).stdout.splitlines()
+    )
+    assert {
+        "project-docs/CANON-CONTINUITY-CAPSULE-DESIGN.md",
+        "project-docs/APPROVAL-CANON-CONTINUITY-20260830.md",
+    }.issubset(refs)
+    assert [ref for ref in sorted(refs) if ref not in tracked or not (root / ref).is_file()] == []
 
 
 def test_capsule_validator_rejects_critical_omission_marked_omitted():

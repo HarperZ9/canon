@@ -170,7 +170,9 @@ def load_atoms_jsonl(text: str) -> list[CanonAtom]:
     return atoms
 
 
-def validate_atom(atom: CanonAtom) -> list[str]:
+def validate_atom(atom: object) -> list[str]:
+    if not isinstance(atom, CanonAtom):
+        return [f"atom must be a CanonAtom, got {type(atom).__name__}"]
     problems: list[str] = []
     _check_enum_fields(atom, problems)
     _check_text_key("id", atom.id, problems)
@@ -182,7 +184,7 @@ def validate_atom(atom: CanonAtom) -> list[str]:
     return problems
 
 
-def is_valid_atom(atom: CanonAtom) -> bool:
+def is_valid_atom(atom: object) -> bool:
     return not validate_atom(atom)
 
 
