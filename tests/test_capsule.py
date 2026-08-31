@@ -51,6 +51,14 @@ def _same_identity_variant(atom: CanonAtom) -> CanonAtom:
     return CanonAtom.from_dict(d)
 
 
+def _same_atom_key_variant(atom: CanonAtom) -> CanonAtom:
+    d = atom.to_dict()
+    d["layer"] = "project"
+    d["precedence_rank"] = 7
+    d["value"] = {"summary": "same atom key, different sort fields"}
+    return CanonAtom.from_dict(d)
+
+
 def _target() -> CapsuleTarget:
     return CapsuleTarget("codex-cli", "CANON.md", "native-advisory")
 
@@ -138,9 +146,12 @@ def test_build_capsule_sorts_omissions_transforms_and_receipts():
     assert [receipt["id"] for receipt in capsule.receipts] == ["a", "z"]
 
 
-def test_build_capsule_rejects_duplicate_atom_identity_before_sorting():
+@pytest.mark.parametrize("variant_factory", (_same_identity_variant, _same_atom_key_variant))
+def test_build_capsule_rejects_duplicate_atom_identity_before_sorting(variant_factory):
     atom = _atom("atom_active_goal.json")
-    variant = _same_identity_variant(atom)
+    variant = variant_factory(atom)
+    assert (atom.scope_key, atom.type, atom.id) == ("workspace:canon", "active-goal", "goal-foundation")
+    assert (variant.scope_key, variant.type, variant.id) == (atom.scope_key, atom.type, atom.id)
     errors: list[str] = []
     for ordered_atoms in ((variant, atom), (atom, variant)):
         with pytest.raises(CapsuleBuildError) as exc:
@@ -155,6 +166,8 @@ def test_build_capsule_rejects_duplicate_atom_identity_before_sorting():
         errors.append(str(exc.value))
     assert errors[0] == errors[1]
     assert "duplicate atom identity" in errors[0]
+    assert "workspace:canon" in errors[0]
+    assert "active-goal" in errors[0]
     assert "goal-foundation" in errors[0]
 
 
@@ -187,15 +200,44 @@ def test_build_capsule_fails_when_required_atom_is_not_critical():
 
 
 def test_capsule_validator_rejects_critical_omission_marked_omitted():
-    capsule = build_capsule(
-        profile="needle",
-        target=CapsuleTarget("codex-cli", "CANON.md", "native-advisory"),
-        source_state=SourceState(records_digest=HASH_A),
-        budget=Budget("needle", 1024, 0, "unknown"),
-        atoms=(),
-        omissions=(Omission("budget", 1, ("goal-1",), (), True, "omitted"),),
+    fixture = _capsule_fixture()
+    capsule = Capsule(
+        fixture.capsule_id, fixture.profile, fixture.target, fixture.source_state,
+        fixture.compatibility, fixture.budget, fixture.layers, fixture.atoms,
+        fixture.records, fixture.conflicts, fixture.unknowns,
+        (Omission("budget", 1, ("goal-1",), (), True, "omitted"),),
+        fixture.lossy_transforms, fixture.freshness, fixture.integrity,
+        fixture.receipts, fixture.does_not_prove,
     )
     assert any("critical" in p for p in validate_capsule(capsule))
+
+
+def test_build_capsule_rejects_critical_omission_before_returning_capsule():
+    with pytest.raises(CapsuleBuildError) as exc:
+        build_capsule(
+            profile="needle",
+            target=_target(),
+            source_state=_source_state(),
+            budget=Budget("needle", 1024, 0, "unknown"),
+            atoms=(),
+            omissions=(Omission("budget", 1, ("goal-1",), (), True, "omitted"),),
+        )
+    assert "critical omissions cannot use decision" in str(exc.value)
+
+
+def test_build_capsule_rejects_invalid_transform_receipt_before_returning_capsule():
+    bad_receipt = TransformReceipt("summary", "method", (), "bad", "atom:bad", HASH_C, False, ())
+    with pytest.raises(CapsuleBuildError) as exc:
+        build_capsule(
+            profile="needle",
+            target=_target(),
+            source_state=_source_state(),
+            budget=Budget("needle", 1024, 0, "unknown"),
+            atoms=(),
+            lossy_transforms=(bad_receipt,),
+        )
+    assert "lossy_transforms[0]" in str(exc.value)
+    assert "input_span_hash" in str(exc.value)
 
 
 def test_capsule_identity_blanks_self_hash_fields_before_digesting():
@@ -287,13 +329,17 @@ def test_capsule_from_dict_preserves_malformed_value_objects_for_validation():
     assert any("budget" in p for p in problems)
 
 
-def test_capsule_validator_rejects_duplicate_atom_identities_from_direct_and_dict():
+@pytest.mark.parametrize(
+    ("variant_factory", "expected_layers"),
+    ((_same_identity_variant, ("session",)), (_same_atom_key_variant, ("session", "project"))),
+)
+def test_capsule_validator_rejects_duplicate_atom_identities_from_direct_and_dict(variant_factory, expected_layers):
     atom = _atom("atom_active_goal.json")
-    variant = _same_identity_variant(atom)
+    variant = variant_factory(atom)
     fixture = _capsule_fixture()
     direct = Capsule(
         fixture.capsule_id, fixture.profile, fixture.target, fixture.source_state,
-        fixture.compatibility, fixture.budget, ("session",), (atom, variant),
+        fixture.compatibility, fixture.budget, expected_layers, (atom, variant),
         (), (), (), (), (), (), fixture.integrity, (), (),
     )
     from_dict_data = fixture.to_dict()
@@ -304,8 +350,13 @@ def test_capsule_validator_rejects_duplicate_atom_identities_from_direct_and_dic
 
 
 @pytest.mark.parametrize(("field", "value", "expected"), (
+    ("scope_key", [], "scope_key must be a non-empty string"),
+    ("scope_key", {"bad": "shape"}, "scope_key must be a non-empty string"),
     ("id", [], "id must be a non-empty string"),
+    ("id", {"bad": "shape"}, "id must be a non-empty string"),
     ("layer", [], "layer must be one of"),
+    ("layer", {"bad": "shape"}, "layer must be one of"),
+    ("type", [], "type must be a non-empty string"),
     ("type", {"bad": "shape"}, "type must be a non-empty string"),
     ("precedence_rank", True, "precedence_rank must be a non-negative int"),
     ("precedence_rank", "0", "precedence_rank must be a non-negative int"),
@@ -322,12 +373,14 @@ def test_capsule_validator_is_total_for_malformed_atom_identity_parts(field, val
 
 
 def test_capsule_validator_rejects_budget_estimator_outside_known_unknown():
-    capsule = build_capsule(
-        profile="needle",
-        target=_target(),
-        source_state=_source_state(),
-        budget=Budget("needle", 1024, 128, "measured"),
-        atoms=(),
+    fixture = _capsule_fixture()
+    capsule = Capsule(
+        fixture.capsule_id, fixture.profile, fixture.target, fixture.source_state,
+        fixture.compatibility, Budget("handoff", 4096, 512, "measured"),
+        fixture.layers, fixture.atoms, fixture.records, fixture.conflicts,
+        fixture.unknowns, fixture.omissions, fixture.lossy_transforms,
+        fixture.freshness, fixture.integrity, fixture.receipts,
+        fixture.does_not_prove,
     )
     problems = validate_capsule(capsule)
     assert any("budget.estimator" in p and "known" in p and "unknown" in p for p in problems)
