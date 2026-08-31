@@ -29,10 +29,8 @@ SOURCE_STATE_DIGEST_KEYS = (
     "relay_checkpoint",
     "worktree_digest",
 )
-class CapsuleError(ValueError):
-    pass
-class CapsuleBuildError(CapsuleError):
-    pass
+class CapsuleError(ValueError): pass
+class CapsuleBuildError(CapsuleError): pass
 @dataclass(frozen=True, slots=True)
 class CapsuleTarget:
     adapter: str
@@ -260,6 +258,9 @@ def build_capsule(
 ) -> Capsule:
     record_items = tuple(records)
     atom_items = tuple(atoms) + tuple(atoms_from_records(record_items))
+    duplicate_identities = _duplicate_atom_identities(atom_items)
+    if duplicate_identities:
+        raise CapsuleBuildError(f"duplicate atom identity {duplicate_identities[0]!r}")
     sorted_atoms = tuple(sorted(atom_items, key=_atom_sort_key))
     _check_required_atoms(sorted_atoms, tuple(required_atom_ids))
     draft = Capsule(
@@ -284,6 +285,8 @@ def validate_capsule(capsule: Capsule) -> list[str]:
     _check_budget(capsule.profile, capsule.budget, problems)
     _check_string_tuple("layers", capsule.layers, problems)
     _check_nested("atoms", capsule.atoms, CanonAtom, validate_atom, problems)
+    for key in _duplicate_atom_identities(capsule.atoms):
+        problems.append(f"atoms contain duplicate atom identity {key!r}")
     _check_nested("records", capsule.records, Record, validate_record, problems)
     _check_nested("conflicts", capsule.conflicts, CanonAtom, validate_atom, problems)
     _check_nested("unknowns", capsule.unknowns, CanonAtom, validate_atom, problems)
@@ -327,6 +330,13 @@ def _blank_manifest_sha256(result: dict) -> None:
         integrity["manifest_sha256"] = ""
 def _atom_sort_key(atom: CanonAtom) -> tuple[object, ...]:
     return (atom.precedence_rank, atom.layer, atom.type, atom.id)
+def _duplicate_atom_identities(atoms: object) -> tuple[tuple[object, ...], ...]:
+    counts: dict[tuple[object, ...], int] = {}
+    if isinstance(atoms, tuple):
+        for atom in atoms:
+            if isinstance(atom, CanonAtom):
+                key = _atom_sort_key(atom); counts[key] = counts.get(key, 0) + 1
+    return tuple(key for key, count in sorted(counts.items()) if count > 1)
 def _sorted_records(records: tuple[Record, ...]) -> tuple[Record, ...]:
     return tuple(sorted(records, key=lambda r: (r.scope, r.id, r.kind)))
 def _sorted_omissions(omissions: tuple[Omission, ...]) -> tuple[Omission, ...]:
@@ -438,7 +448,7 @@ def _check_budget(profile: str, budget: object, problems: list[str]) -> None:
     if isinstance(budget.estimated_tokens, int) and isinstance(budget.max_tokens, int):
         if not isinstance(budget.estimated_tokens, bool) and budget.estimated_tokens > budget.max_tokens:
             problems.append("budget.estimated_tokens must be <= budget.max_tokens")
-    _check_non_empty_string("budget.estimator", budget.estimator, problems)
+    _check_member("budget.estimator", budget.estimator, ("known", "unknown"), problems)
     if budget.policy != "critical-atoms-lossless":
         problems.append("budget.policy must be 'critical-atoms-lossless'")
 def _check_integrity(capsule: Capsule, problems: list[str]) -> None:

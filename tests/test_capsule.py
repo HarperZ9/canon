@@ -44,6 +44,13 @@ def _atom(name: str) -> CanonAtom:
     return CanonAtom.from_dict(load_fixture(name))
 
 
+def _same_identity_variant(atom: CanonAtom) -> CanonAtom:
+    d = atom.to_dict()
+    d["value"] = {"summary": "same identity, different content"}
+    d["source_refs"] = [{"kind": "review-finding", "id": "duplicate"}]
+    return CanonAtom.from_dict(d)
+
+
 def _target() -> CapsuleTarget:
     return CapsuleTarget("codex-cli", "CANON.md", "native-advisory")
 
@@ -129,6 +136,26 @@ def test_build_capsule_sorts_omissions_transforms_and_receipts():
     assert [omission.reason for omission in capsule.omissions] == ["budget", "policy"]
     assert [receipt.transform for receipt in capsule.lossy_transforms] == ["migration", "summary"]
     assert [receipt["id"] for receipt in capsule.receipts] == ["a", "z"]
+
+
+def test_build_capsule_rejects_duplicate_atom_identity_before_sorting():
+    atom = _atom("atom_active_goal.json")
+    variant = _same_identity_variant(atom)
+    errors: list[str] = []
+    for ordered_atoms in ((variant, atom), (atom, variant)):
+        with pytest.raises(CapsuleBuildError) as exc:
+            build_capsule(
+                profile="needle",
+                target=_target(),
+                source_state=_source_state(),
+                budget=Budget("needle", 1024, 128, "unknown"),
+                atoms=ordered_atoms,
+                required_atom_ids=("goal-foundation",),
+            )
+        errors.append(str(exc.value))
+    assert errors[0] == errors[1]
+    assert "duplicate atom identity" in errors[0]
+    assert "goal-foundation" in errors[0]
 
 
 def test_build_capsule_fails_when_required_critical_atom_is_missing():
@@ -258,6 +285,34 @@ def test_capsule_from_dict_preserves_malformed_value_objects_for_validation():
     problems = validate_capsule(capsule)
     assert any("compatibility" in p for p in problems)
     assert any("budget" in p for p in problems)
+
+
+def test_capsule_validator_rejects_duplicate_atom_identities_from_direct_and_dict():
+    atom = _atom("atom_active_goal.json")
+    variant = _same_identity_variant(atom)
+    fixture = _capsule_fixture()
+    direct = Capsule(
+        fixture.capsule_id, fixture.profile, fixture.target, fixture.source_state,
+        fixture.compatibility, fixture.budget, ("session",), (atom, variant),
+        (), (), (), (), (), (), fixture.integrity, (), (),
+    )
+    from_dict_data = fixture.to_dict()
+    from_dict_data["atoms"] = [atom.to_dict(), variant.to_dict()]
+    from_dict_capsule = Capsule.from_dict(from_dict_data)
+    assert any("duplicate atom identity" in p for p in validate_capsule(direct))
+    assert any("duplicate atom identity" in p for p in validate_capsule(from_dict_capsule))
+
+
+def test_capsule_validator_rejects_budget_estimator_outside_known_unknown():
+    capsule = build_capsule(
+        profile="needle",
+        target=_target(),
+        source_state=_source_state(),
+        budget=Budget("needle", 1024, 128, "measured"),
+        atoms=(),
+    )
+    problems = validate_capsule(capsule)
+    assert any("budget.estimator" in p and "known" in p and "unknown" in p for p in problems)
 
 
 def test_capsule_validator_rejects_manual_unsorted_ordering():
