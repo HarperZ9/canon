@@ -20,6 +20,8 @@ from .backends import (
     DropError,
     FilesBackend,
     FlywheelBackend,
+    InvalidKey,
+    InvalidRecord,
     MemoryBackend,
     MnemeBackend,
     SqliteBackend,
@@ -27,6 +29,7 @@ from .backends import (
     capabilities_required,
     guard_put,
     record_key,
+    validate_put_record,
 )
 from .layering import LayeringError, is_current, resolve_blocks
 from .schema import (
@@ -77,6 +80,8 @@ __all__ = [
     "LayeringError",
     "MemoryBackend",
     "BackendError",
+    "InvalidRecord",
+    "InvalidKey",
     "UnsupportedKind",
     "DropError",
     "FilesBackend",
@@ -91,4 +96,5 @@ __all__ = [
     "record_key",
     "capabilities_required",
     "guard_put",
+    "validate_put_record",
 ]

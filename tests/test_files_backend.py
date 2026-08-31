@@ -7,9 +7,12 @@ record can exercise it, a put never raises for it.
 """
 from __future__ import annotations
 
+from dataclasses import replace
+from urllib.parse import quote
+
 import pytest
 
-from canon.backends import CAP_AUDIT_CHAIN, FilesBackend, record_key
+from canon.backends import CAP_AUDIT_CHAIN, FilesBackend, InvalidKey, InvalidRecord, record_key
 from canon.schema import KINDS
 
 from ._helpers import RECORD_FILES, load_dict, load_record
@@ -77,3 +80,52 @@ def test_reload_from_disk_is_independent(tmp_path) -> None:
     rec = load_record(RECORD_FILES["adr-decision"])
     got = FilesBackend(tmp_path).get(record_key(rec))
     assert got is not None and got.to_dict() == load_dict(RECORD_FILES["adr-decision"])
+
+
+def test_put_invalid_scope_refuses_before_creating_outside_file(tmp_path) -> None:
+    be = FilesBackend(tmp_path / "store")
+    rec = replace(load_record(RECORD_FILES["episodic-memory"]), scope="..", id="escape")
+
+    with pytest.raises(InvalidRecord, match="unknown scope"):
+        be.put(rec)
+
+    assert not (tmp_path / "escape.json").exists()
+    assert not (tmp_path / "store").exists()
+
+
+@pytest.mark.parametrize("scope", ["../x", "global/../../x", "C:/tmp", "C:\\tmp", "repo"])
+def test_put_rejects_path_shaped_scopes_without_writing(tmp_path, scope: str) -> None:
+    be = FilesBackend(tmp_path / "store")
+    rec = replace(load_record(RECORD_FILES["episodic-memory"]), scope=scope, id="safe-id")
+
+    with pytest.raises(InvalidRecord):
+        be.put(rec)
+
+    assert not (tmp_path / "store").exists()
+
+
+@pytest.mark.parametrize("key", ["../escape", "repo/x", "C:/tmp/x", "C:\\tmp\\x"])
+def test_get_invalid_key_refuses_before_path_lookup(tmp_path, key: str) -> None:
+    with pytest.raises(InvalidKey):
+        FilesBackend(tmp_path).get(key)
+
+
+def test_records_ignores_unknown_scope_directories(tmp_path) -> None:
+    be = FilesBackend(tmp_path)
+    rec = load_record(RECORD_FILES["episodic-memory"])
+    rogue = tmp_path / "repo"
+    rogue.mkdir()
+    (rogue / (quote(rec.id, safe="") + ".json")).write_text(rec.to_json(), encoding="utf-8")
+
+    assert be.records() == []
+
+
+def test_records_rejects_path_scope_mismatch(tmp_path) -> None:
+    be = FilesBackend(tmp_path)
+    rec = load_record(RECORD_FILES["episodic-memory"])
+    scope_dir = tmp_path / "workspace"
+    scope_dir.mkdir()
+    (scope_dir / (quote(rec.id, safe="") + ".json")).write_text(rec.to_json(), encoding="utf-8")
+
+    with pytest.raises(InvalidRecord, match="path scope"):
+        be.records()

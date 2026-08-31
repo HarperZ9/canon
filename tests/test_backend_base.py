@@ -9,11 +9,15 @@ runtime_checkable MemoryBackend); their round-trips live in their own modules.
 """
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 from canon.backends import (
     CAP_TEMPORAL,
     CAPABILITIES,
+    InvalidKey,
+    InvalidRecord,
     RECORD_ENFORCEABLE,
     BackendError,
     DropError,
@@ -36,6 +40,22 @@ from ._fakes import FakeFlywheelStore, FakeMnemeStore
 from ._helpers import RECORD_FILES, load_record
 
 
+class _AllKindsBackend:
+    name = "all-kinds-test"
+
+    def supported_kinds(self) -> frozenset[str]:
+        return frozenset({
+            "personality-block",
+            "episodic-memory",
+            "synthesized-persona-l3",
+            "adr-decision",
+            "research-artifact-ref",
+        })
+
+    def declared_drops(self) -> frozenset[str]:
+        return frozenset()
+
+
 def _block(scope: str = "global", rid: str = "b") -> Record:
     return Record(
         kind="personality-block", id=rid, scope=scope,
@@ -55,6 +75,25 @@ def test_split_key_inverts_record_key() -> None:
 def test_split_key_keeps_slash_in_id() -> None:
     # id may contain '/'; only the first separator delimits scope.
     assert split_key("global/a/b/c") == ("global", "a/b/c")
+
+
+def test_guard_put_rejects_semantically_invalid_record() -> None:
+    rec = replace(load_record(RECORD_FILES["episodic-memory"]), scope="..")
+    with pytest.raises(InvalidRecord, match="unknown scope"):
+        guard_put(_AllKindsBackend(), rec)
+
+
+@pytest.mark.parametrize("scope", ["", ".", "..", "repo", "../x", "global/../../x", "C:/tmp", "C:\\tmp"])
+def test_record_key_rejects_invalid_scope_values(scope: str) -> None:
+    rec = replace(load_record(RECORD_FILES["episodic-memory"]), scope=scope)
+    with pytest.raises(InvalidRecord):
+        record_key(rec)
+
+
+@pytest.mark.parametrize("key", ["", "global", "/id", "../x", "repo/x", "C:/tmp/x", "C:\\tmp\\x"])
+def test_split_key_rejects_invalid_backend_keys(key: str) -> None:
+    with pytest.raises(InvalidKey):
+        split_key(key)
 
 
 def test_two_scopes_one_id_are_distinct_keys() -> None:

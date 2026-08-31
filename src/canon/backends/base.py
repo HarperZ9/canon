@@ -28,7 +28,8 @@ from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
 
-from canon.schema import Record
+from canon.schema import SCOPES, Record
+from canon.validator import validate_record
 
 # Capability tokens. A backend's declared_drops() is a subset of these.
 CAP_TEMPORAL = "temporal"
@@ -54,6 +55,14 @@ class BackendError(Exception):
     """Base for every backend-level refusal."""
 
 
+class InvalidRecord(BackendError):
+    """The record is semantically invalid and cannot enter a backend."""
+
+
+class InvalidKey(BackendError):
+    """The backend key is malformed or names an unsupported scope."""
+
+
 class UnsupportedKind(BackendError):
     """The backend does not hold this record's kind."""
 
@@ -75,18 +84,35 @@ class MissingSupersedeTarget(BackendError):
     field."""
 
 
+def _validate_key_parts(scope: object, rid: object, *, record: bool) -> tuple[str, str]:
+    if not isinstance(scope, str) or scope not in SCOPES:
+        if record:
+            raise InvalidRecord(f"unknown scope {scope!r}; expected one of {list(SCOPES)}")
+        raise InvalidKey(f"unknown scope {scope!r}; expected one of {list(SCOPES)}")
+    if not isinstance(rid, str) or rid == "":
+        if record:
+            raise InvalidRecord("id must be a non-empty string")
+        raise InvalidKey("id must be a non-empty string")
+    return scope, rid
+
+
 def record_key(record: Record) -> str:
     """The store-unique key for a record: its (scope, id) pair as a path. `id`
     alone is not unique -- a personality-block is deliberately present at both
     global and workspace under one id (the override case), so scope is part of
     the identity a backend stores under."""
-    return f"{record.scope}/{record.id}"
+    scope, rid = _validate_key_parts(record.scope, record.id, record=True)
+    return f"{scope}/{rid}"
 
 
 def split_key(key: str) -> tuple[str, str]:
     """Inverse of record_key: (scope, id). id may itself contain '/'."""
-    scope, _, rid = key.partition("/")
-    return scope, rid
+    if not isinstance(key, str):
+        raise InvalidKey(f"key must be str, got {type(key).__name__}")
+    scope, sep, rid = key.partition("/")
+    if sep == "":
+        raise InvalidKey("key must be '<scope>/<id>'")
+    return _validate_key_parts(scope, rid, record=False)
 
 
 def temporal_in_use(record: Record) -> bool:
@@ -112,10 +138,13 @@ def flatten_for_drops(record: Record, drops: frozenset[str]) -> Record:
     return record
 
 
-def guard_put(backend: "MemoryBackend", record: Record) -> None:
+def validate_put_record(backend: "MemoryBackend", record: Record) -> None:
     """The shared pre-store check every backend runs at the top of put(). Raises
     UnsupportedKind if the kind is not held, DropError if the record would
     silently lose a record-enforceable capability the backend dropped."""
+    problems = validate_record(record)
+    if problems:
+        raise InvalidRecord("; ".join(problems))
     if record.kind not in backend.supported_kinds():
         raise UnsupportedKind(
             f"{backend.name} does not hold kind {record.kind!r}; "
@@ -125,6 +154,10 @@ def guard_put(backend: "MemoryBackend", record: Record) -> None:
         raise DropError(
             f"{backend.name} dropped {sorted(blocked)}; record {record.id!r} "
             f"exercises it -- flatten() to store current-only.")
+
+
+def guard_put(backend: "MemoryBackend", record: Record) -> None:
+    validate_put_record(backend, record)
 
 
 @runtime_checkable

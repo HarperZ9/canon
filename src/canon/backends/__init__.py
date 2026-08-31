@@ -26,6 +26,8 @@ from .base import (
     RECORD_ENFORCEABLE,
     BackendError,
     DropError,
+    InvalidKey,
+    InvalidRecord,
     MemoryBackend,
     MissingSupersedeTarget,
     UnsupportedKind,
@@ -35,6 +37,7 @@ from .base import (
     record_key,
     split_key,
     temporal_in_use,
+    validate_put_record,
 )
 from .files import FilesBackend
 from .flywheel import FlywheelBackend
@@ -44,6 +47,8 @@ from .sqlite import SqliteBackend
 __all__ = [
     "MemoryBackend",
     "BackendError",
+    "InvalidRecord",
+    "InvalidKey",
     "UnsupportedKind",
     "DropError",
     "MissingSupersedeTarget",
@@ -64,4 +69,5 @@ __all__ = [
     "capabilities_required",
     "flatten_for_drops",
     "guard_put",
+    "validate_put_record",
 ]

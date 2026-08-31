@@ -13,10 +13,11 @@ from __future__ import annotations
 from pathlib import Path
 from urllib.parse import quote
 
-from canon.schema import KINDS, Record
+from canon.schema import KINDS, SCOPES, Record
 
 from .base import (
     CAP_AUDIT_CHAIN,
+    InvalidRecord,
     flatten_for_drops,
     guard_put,
     record_key,
@@ -59,9 +60,15 @@ class FilesBackend:
         out: list[Record] = []
         if not self._root.is_dir():
             return out
-        for scope_dir in sorted(self._root.iterdir()):
+        for scope in SCOPES:
+            scope_dir = self._root / scope
             if not scope_dir.is_dir():
                 continue
             for f in sorted(scope_dir.glob("*.json")):
-                out.append(Record.from_json(f.read_text(encoding="utf-8")))
+                rec = Record.from_json(f.read_text(encoding="utf-8"))
+                guard_put(self, rec)
+                if rec.scope != scope:
+                    raise InvalidRecord(
+                        f"path scope {scope!r} does not match record scope {rec.scope!r}")
+                out.append(rec)
         return out
