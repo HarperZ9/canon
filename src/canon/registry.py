@@ -16,6 +16,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
+from canon.path_policy import PathPolicyError, assert_operational_surface_path
 from canon.region import extract_region
 from canon.schema import Record
 from canon.surface import SurfaceError, apply_surface
@@ -84,6 +85,21 @@ def assert_writable(path: str, *, home: str, workspace: str) -> None:
             f"path is not an allow-listed canon surface: {path!r}")
 
 
+def _checked_surface_path(surface: Surface, *, home: str, workspace: str) -> str:
+    if surface not in SURFACE_CATALOG:
+        raise SurfaceError(
+            f"surface is not in the write allow-list: {surface!r}")
+    root = _root_dir(surface, home=home, workspace=workspace)
+    path = resolve_surface_path(surface, home=home, workspace=workspace)
+    assert_writable(path, home=home, workspace=workspace)
+    if not os.path.isdir(root):
+        return path
+    try:
+        return str(assert_operational_surface_path(path, root=root))
+    except PathPolicyError as exc:
+        raise SurfaceError(str(exc)) from exc
+
+
 def write_surface(surface: Surface, pool: list[Record], *, home: str,
                   workspace: str, read_text, write_text) -> str:
     """Render `pool` at `surface.scope` into `surface`'s file and write it back,
@@ -93,14 +109,11 @@ def write_surface(surface: Surface, pool: list[Record], *, home: str,
     resolves outside the allow-listed paths, is refused. IO is injected so the
     guard is provable without touching the filesystem.
     """
-    if surface not in SURFACE_CATALOG:
-        raise SurfaceError(
-            f"surface is not in the write allow-list: {surface!r}")
-    path = resolve_surface_path(surface, home=home, workspace=workspace)
-    assert_writable(path, home=home, workspace=workspace)
+    path = _checked_surface_path(surface, home=home, workspace=workspace)
     host = read_text(path)
     new = apply_surface(host, pool, surface.scope)
     if new != host:
+        path = _checked_surface_path(surface, home=home, workspace=workspace)
         write_text(path, new)
     return new
 
@@ -160,24 +173,23 @@ def write_surfaces(pool: list[Record], *, home: str, workspace: str,
     write_text that fails after earlier files wrote) is not rolled back.
     """
     chosen = SURFACE_CATALOG if surfaces is None else surfaces
-    planned: list[tuple[str, str]] = []
+    planned: list[tuple[Surface, str]] = []
     results: list[SurfaceResult] = []
     for surface in chosen:
-        if surface not in SURFACE_CATALOG:
-            raise SurfaceError(
-                f"surface is not in the write allow-list: {surface!r}")
-        path = resolve_surface_path(surface, home=home, workspace=workspace)
-        assert_writable(path, home=home, workspace=workspace)
+        path = _checked_surface_path(surface, home=home, workspace=workspace)
         host = read_text(path)
         if not extract_region(host).present:
             results.append(SurfaceResult(surface, path, "off-limits", None))
             continue
         new = apply_surface(host, pool_for(surface, pool), surface.scope)
         if new != host:
-            planned.append((path, new))
+            planned.append((surface, new))
             results.append(SurfaceResult(surface, path, "written", new))
         else:
             results.append(SurfaceResult(surface, path, "unchanged", new))
-    for path, content in planned:
+    for surface, _content in planned:
+        _checked_surface_path(surface, home=home, workspace=workspace)
+    for surface, content in planned:
+        path = _checked_surface_path(surface, home=home, workspace=workspace)
         write_text(path, content)
     return results

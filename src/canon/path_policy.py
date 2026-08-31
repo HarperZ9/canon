@@ -78,6 +78,10 @@ def _has_windows_drive(raw: str) -> bool:
     return len(raw) >= 2 and raw[1] == ":" and raw[0].isalpha()
 
 
+def _drop_windows_drive(raw: str) -> str:
+    return raw[2:] if _has_windows_drive(raw) else raw
+
+
 def _is_windows_qualified(raw: str) -> bool:
     return _has_windows_drive(raw) or raw.replace("/", "\\").startswith("\\\\")
 
@@ -129,6 +133,13 @@ def _exists_or_link(path: Path) -> bool:
         return True
 
 
+def _exists_resolved(path: Path) -> bool:
+    try:
+        return path.exists()
+    except OSError:
+        return False
+
+
 def _check_reparse_chain(root: Path, target: Path) -> None:
     try:
         relative = target.relative_to(root)
@@ -150,8 +161,7 @@ def _check_reparse_chain(root: Path, target: Path) -> None:
 
 def is_windows_ads_path(path: str | Path) -> bool:
     _path, raw = _coerce_path(path, role="path")
-    if _has_windows_drive(raw):
-        raw = raw[2:]
+    raw = _drop_windows_drive(raw)
     for part in _split_raw_parts(raw):
         if not _is_drive_designator(part) and ":" in part:
             return True
@@ -175,9 +185,10 @@ def is_reparse_point(path: str | Path) -> bool:
 
 def classify_protected_path(path: str | Path) -> tuple[PathPolicyViolation, ...]:
     _path, raw = _coerce_path(path, role="path")
+    classified = _drop_windows_drive(raw)
     parts = tuple(
         part.casefold()
-        for part in _split_raw_parts(raw)
+        for part in _split_raw_parts(classified)
         if not _is_drive_designator(part)
     )
     violations: list[PathPolicyViolation] = []
@@ -215,7 +226,7 @@ def resolve_under_root(
         _check_reparse_chain(root_input.absolute(), target_unresolved.absolute())
     if not _is_under(target_resolved, root_resolved):
         _raise("outside-root", str(target_resolved), "target resolves outside root")
-    if must_exist and not _exists_or_link(target_unresolved):
+    if must_exist and not _exists_resolved(target_resolved):
         _raise("missing-target", str(target_unresolved), "target does not exist")
     return target_resolved
 

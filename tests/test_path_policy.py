@@ -88,6 +88,24 @@ def test_classify_protected_path_returns_deterministic_violations(
     assert {v.code for v in first} == {"protected-path"}
 
 
+@pytest.mark.parametrize(
+    ("path", "reason"),
+    [
+        (r"C:.env", "protected name"),
+        (r"C:.ssh\config", "protected directory"),
+        (r"C:.aws\credentials", "protected directory"),
+    ],
+)
+def test_classify_protected_path_handles_leading_windows_drive_prefix(
+    path: str,
+    reason: str,
+) -> None:
+    violations = classify_protected_path(path)
+    assert violations
+    assert {v.code for v in violations} == {"protected-path"}
+    assert any(v.reason == reason for v in violations)
+
+
 def test_ads_detection_rejects_named_stream() -> None:
     assert is_windows_ads_path("AGENTS.md:secret")
     with pytest.raises(PathPolicyError, match="ads"):
@@ -194,6 +212,21 @@ def test_reject_reparse_false_still_enforces_resolved_root(
 
     with pytest.raises(PathPolicyError, match="outside-root"):
         resolve_under_root(link / "note.md", root=tmp_path / "root", reject_reparse=False)
+
+
+def test_must_exist_rejects_broken_symlink_when_reparse_allowed(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    link = root / "broken.md"
+    try:
+        link.symlink_to(root / "missing.md")
+    except OSError:
+        pytest.skip("current platform or privileges do not allow file symlinks")
+
+    with pytest.raises(PathPolicyError, match="missing-target"):
+        resolve_under_root(link, root=root, must_exist=True, reject_reparse=False)
 
 
 def test_operational_surface_rejects_protected_paths(tmp_path: Path) -> None:

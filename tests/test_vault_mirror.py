@@ -20,6 +20,7 @@ cannot:
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import pytest
 
@@ -101,6 +102,55 @@ class FakeFS:
             read_text=self.read_text, write_text=self.write_text,
             list_dir=self.list_dir,
         )
+
+
+@pytest.fixture(autouse=True)
+def _real_vault_root(tmp_path: Path):
+    global VAULT
+    prior = VAULT
+    VAULT = str(tmp_path / "vault")
+    Path(VAULT).mkdir()
+    try:
+        yield
+    finally:
+        VAULT = prior
+
+
+class RealFS:
+    def __init__(self, dirs: list[str] | None = None) -> None:
+        self.dir = list(dirs or [])
+        self.reads: list[Path] = []
+        self.writes: list[Path] = []
+
+    def read_text(self, path: str) -> str | None:
+        resolved = Path(path).resolve(strict=False)
+        self.reads.append(resolved)
+        if not Path(path).exists():
+            return None
+        return Path(path).read_text(encoding="utf-8")
+
+    def write_text(self, path: str, content: str) -> None:
+        resolved = Path(path).resolve(strict=False)
+        self.writes.append(resolved)
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        Path(path).write_text(content, encoding="utf-8")
+
+    def list_dir(self, vault: str) -> list[str]:
+        return list(self.dir)
+
+    def plan(self, records):
+        return plan_vault(
+            records, vault=VAULT,
+            read_text=self.read_text, write_text=self.write_text,
+            list_dir=self.list_dir,
+        )
+
+
+def _link_file_or_skip(link: Path, target: Path) -> None:
+    try:
+        link.symlink_to(target)
+    except OSError:
+        pytest.skip("current platform or privileges do not allow file symlinks")
 
 
 # 22
@@ -406,3 +456,93 @@ def test_vault_result_carries_record_key():
                 and r.record_key == record_key(rec)]
     assert note_res
     assert isinstance(note_res[0], VaultResult)
+
+
+def test_plan_vault_refuses_symlink_target_before_reading_outside(
+    tmp_path: Path,
+) -> None:
+    rec = _mk("voice", "workspace", 1)
+    rel = derive_note_name(rec)
+    target = Path(_abs(rel))
+    target.parent.mkdir(parents=True)
+    outside = tmp_path / "outside-note.md"
+    outside.write_text(render_note(rec), encoding="utf-8")
+    _link_file_or_skip(target, outside)
+    fs = RealFS()
+
+    with pytest.raises(VaultError, match="reparse"):
+        fs.plan([rec])
+
+    assert fs.reads == []
+    assert fs.writes == []
+    assert outside.read_text(encoding="utf-8") == render_note(rec)
+
+
+def test_plan_vault_refuses_orphan_symlink_before_reading_outside(
+    tmp_path: Path,
+) -> None:
+    orphan = _mk("old", "workspace", 2)
+    rel = derive_note_name(orphan)
+    target = Path(_abs(rel))
+    target.parent.mkdir(parents=True)
+    outside = tmp_path / "outside-orphan.md"
+    outside.write_text(render_note(orphan), encoding="utf-8")
+    _link_file_or_skip(target, outside)
+    fs = RealFS(dirs=[rel])
+
+    with pytest.raises(VaultError, match="reparse"):
+        fs.plan([])
+
+    assert fs.reads == []
+    assert fs.writes == []
+    assert outside.read_text(encoding="utf-8") == render_note(orphan)
+
+
+def test_plan_vault_refuses_symlink_hub_before_reading_outside(
+    tmp_path: Path,
+) -> None:
+    rec = _mk("voice", "workspace", 1)
+    hub = Path(_abs("MEMORY.md"))
+    outside = tmp_path / "outside-memory.md"
+    outside.write_text(render_hub([rec]), encoding="utf-8")
+    _link_file_or_skip(hub, outside)
+    fs = RealFS()
+
+    with pytest.raises(VaultError, match="reparse"):
+        fs.plan([rec])
+
+    assert all(read != outside.resolve() for read in fs.reads)
+    assert fs.writes == []
+    assert outside.read_text(encoding="utf-8") == render_hub([rec])
+
+
+def test_plan_vault_rechecks_before_write_and_refuses_symlink_swap(
+    tmp_path: Path,
+) -> None:
+    rec = _mk("voice", "workspace", 1)
+    rel = derive_note_name(rec)
+    target = Path(_abs(rel))
+    target.parent.mkdir(parents=True)
+    outside = tmp_path / "outside-write.md"
+    outside.write_text("outside stays unchanged\n", encoding="utf-8")
+    swapped = False
+
+    def read_text(path: str) -> str | None:
+        nonlocal swapped
+        if _nc(path) == _nc(str(target)) and not swapped:
+            _link_file_or_skip(target, outside)
+            swapped = True
+            return None
+        if not Path(path).exists():
+            return None
+        return Path(path).read_text(encoding="utf-8")
+
+    fs = RealFS()
+    fs.read_text = read_text  # type: ignore[method-assign]
+
+    with pytest.raises(VaultError, match="reparse"):
+        fs.plan([rec])
+
+    assert swapped
+    assert fs.writes == []
+    assert outside.read_text(encoding="utf-8") == "outside stays unchanged\n"

@@ -10,6 +10,7 @@ reason: no real path reaches the repo.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import pytest
 
@@ -24,6 +25,7 @@ from canon.registry import (
     pool_for,
     resolve_surface_path,
     write_surface,
+    write_surfaces,
 )
 from canon.schema import KIND_PERSONALITY_BLOCK, Provenance, Record
 from canon.surface import SurfaceError
@@ -60,6 +62,29 @@ class FakeFS:
     def write_text(self, path: str, text: str) -> None:
         self.files[path] = text
         self.writes.append(path)
+
+
+def _real_roots(tmp_path: Path) -> tuple[str, str]:
+    home = tmp_path / "home"
+    workspace = tmp_path / "workspace"
+    (home / ".claude").mkdir(parents=True)
+    workspace.mkdir()
+    return str(home), str(workspace)
+
+
+def _codex_surface() -> Surface:
+    return Surface("codex", "workspace", ROOT_WORKSPACE, "AGENTS.md")
+
+
+def _hermes_surface() -> Surface:
+    return Surface("hermes", "workspace", ROOT_WORKSPACE, "SOUL.md")
+
+
+def _link_file_or_skip(link: Path, target: Path) -> None:
+    try:
+        link.symlink_to(target)
+    except OSError:
+        pytest.skip("current platform or privileges do not allow file symlinks")
 
 
 def test_catalog_covers_the_confirmed_instruction_surfaces():
@@ -100,14 +125,15 @@ def test_is_write_allowed_refuses_a_traversal_escape():
     assert not is_write_allowed(escape, home=HOME, workspace=WS)
 
 
-def test_write_surface_writes_through_an_allow_listed_surface():
+def test_write_surface_writes_through_an_allow_listed_surface(tmp_path: Path):
     surface = Surface("claude-code", "workspace", ROOT_WORKSPACE, "CLAUDE.md")
-    path = resolve_surface_path(surface, home=HOME, workspace=WS)
+    home, workspace = _real_roots(tmp_path)
+    path = resolve_surface_path(surface, home=home, workspace=workspace)
     fs = FakeFS({path: _host("workspace")})
     pool = [_block("voice", "global", "G voice", 10),
             _block("tone", "workspace", "W tone", 20)]
 
-    out = write_surface(surface, pool, home=HOME, workspace=WS,
+    out = write_surface(surface, pool, home=home, workspace=workspace,
                         read_text=fs.read_text, write_text=fs.write_text)
 
     assert fs.writes == [path]
@@ -144,16 +170,111 @@ def test_pool_for_is_the_public_authored_split():
     assert {r.id for r in pool_for(g, pool)} == {"voice", "tone"}
 
 
-def test_write_surface_does_not_write_when_the_region_is_unchanged():
+def test_write_surface_does_not_write_when_the_region_is_unchanged(tmp_path: Path):
     surface = Surface("claude-code", "workspace", ROOT_WORKSPACE, "CLAUDE.md")
-    path = resolve_surface_path(surface, home=HOME, workspace=WS)
+    home, workspace = _real_roots(tmp_path)
+    path = resolve_surface_path(surface, home=home, workspace=workspace)
     fs = FakeFS({path: _host("workspace")})
     pool = [_block("tone", "workspace", "W tone", 20)]
 
-    first = write_surface(surface, pool, home=HOME, workspace=WS,
+    first = write_surface(surface, pool, home=home, workspace=workspace,
                           read_text=fs.read_text, write_text=fs.write_text)
-    second = write_surface(surface, pool, home=HOME, workspace=WS,
+    second = write_surface(surface, pool, home=home, workspace=workspace,
                            read_text=fs.read_text, write_text=fs.write_text)
 
     assert second == first
     assert fs.writes == [path]  # the second call was a no-op
+
+
+def test_write_surface_refuses_symlink_before_reading_outside(
+    tmp_path: Path,
+) -> None:
+    home, workspace = _real_roots(tmp_path)
+    surface = _codex_surface()
+    outside = tmp_path / "outside.md"
+    outside.write_text(_host("workspace"), encoding="utf-8")
+    link = Path(resolve_surface_path(surface, home=home, workspace=workspace))
+    _link_file_or_skip(link, outside)
+    reads: list[Path] = []
+    writes: list[Path] = []
+
+    def read_text(path: str) -> str:
+        reads.append(Path(path).resolve())
+        return Path(path).read_text(encoding="utf-8")
+
+    def write_text(path: str, text: str) -> None:
+        writes.append(Path(path).resolve())
+        Path(path).write_text(text, encoding="utf-8")
+
+    with pytest.raises(SurfaceError, match="reparse"):
+        write_surface(surface, [_block("tone", "workspace", "W tone", 20)],
+                      home=home, workspace=workspace,
+                      read_text=read_text, write_text=write_text)
+
+    assert reads == []
+    assert writes == []
+    assert outside.read_text(encoding="utf-8") == _host("workspace")
+
+
+def test_write_surface_rechecks_before_write_and_refuses_symlink_swap(
+    tmp_path: Path,
+) -> None:
+    home, workspace = _real_roots(tmp_path)
+    surface = _codex_surface()
+    path = Path(resolve_surface_path(surface, home=home, workspace=workspace))
+    path.write_text(_host("workspace"), encoding="utf-8")
+    outside = tmp_path / "outside.md"
+    outside.write_text("outside stays unchanged\n", encoding="utf-8")
+    writes: list[Path] = []
+    swapped = False
+
+    def read_text(path_text: str) -> str:
+        nonlocal swapped
+        text = Path(path_text).read_text(encoding="utf-8")
+        Path(path_text).unlink()
+        _link_file_or_skip(Path(path_text), outside)
+        swapped = True
+        return text
+
+    def write_text(path_text: str, text: str) -> None:
+        writes.append(Path(path_text).resolve())
+        Path(path_text).write_text(text, encoding="utf-8")
+
+    with pytest.raises(SurfaceError, match="reparse"):
+        write_surface(surface, [_block("tone", "workspace", "W tone", 20)],
+                      home=home, workspace=workspace,
+                      read_text=read_text, write_text=write_text)
+
+    assert swapped
+    assert writes == []
+    assert outside.read_text(encoding="utf-8") == "outside stays unchanged\n"
+
+
+def test_write_surfaces_refuses_batch_symlink_with_zero_writes(
+    tmp_path: Path,
+) -> None:
+    home, workspace = _real_roots(tmp_path)
+    safe = Path(resolve_surface_path(_codex_surface(), home=home, workspace=workspace))
+    safe.write_text(_host("workspace"), encoding="utf-8")
+    outside = tmp_path / "outside-soul.md"
+    outside.write_text(_host("workspace"), encoding="utf-8")
+    link = Path(resolve_surface_path(_hermes_surface(), home=home, workspace=workspace))
+    _link_file_or_skip(link, outside)
+    writes: list[Path] = []
+
+    def read_text(path: str) -> str:
+        return Path(path).read_text(encoding="utf-8")
+
+    def write_text(path: str, text: str) -> None:
+        writes.append(Path(path).resolve())
+        Path(path).write_text(text, encoding="utf-8")
+
+    with pytest.raises(SurfaceError, match="reparse"):
+        write_surfaces([_block("tone", "workspace", "W tone", 20)],
+                       home=home, workspace=workspace,
+                       read_text=read_text, write_text=write_text,
+                       surfaces=(_codex_surface(), _hermes_surface()))
+
+    assert writes == []
+    assert safe.read_text(encoding="utf-8") == _host("workspace")
+    assert outside.read_text(encoding="utf-8") == _host("workspace")
