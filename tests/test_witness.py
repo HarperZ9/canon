@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import get_type_hints
 
 import pytest
 
@@ -23,6 +24,17 @@ def load_fixture(name: str) -> dict:
 
 def read_fixture_text(name: str) -> str:
     return (FOUNDATION / name).read_text(encoding="utf-8")
+
+
+def fixture_witness(**overrides) -> BootstrapWitness:
+    d = load_fixture("bootstrap_witness_pass.json")
+    d.update(overrides)
+    return BootstrapWitness.from_dict(d)
+
+
+def check_dict(name: str = "readiness", verdict: str = "pass", evidence: bool = True) -> dict:
+    refs = ["capsule:" + HASH_A] if evidence else []
+    return {"details": {}, "evidence_refs": refs, "name": name, "verdict": verdict}
 
 
 def test_bootstrap_witness_roundtrips_and_validates():
@@ -106,6 +118,42 @@ def test_enforced_observed_witness_requires_check_evidence():
     assert any("evidence_refs" in p for p in validate_bootstrap_witness(enforced))
 
 
+def test_bootstrap_witness_public_annotations_match_nested_contract():
+    hints = get_type_hints(BootstrapWitness)
+    assert hints["checks"] == tuple[BootstrapCheck, ...]
+    assert hints["omissions"] == tuple[Omission, ...]
+    assert hints["lossy_transforms"] == tuple[TransformReceipt, ...]
+    assert hints["readiness_result"] is ReadinessResult
+
+
+@pytest.mark.parametrize("tier", ("native-advisory", "guided", "unsupported"))
+def test_observed_host_enforcement_requires_enforced_tier(tier: str):
+    witness = fixture_witness(
+        integration_tier_claimed=tier,
+        host_enforcement_observed=True,
+        checks=[check_dict()],
+    )
+    assert any("integration_tier_claimed" in p and "enforced" in p for p in validate_bootstrap_witness(witness))
+
+
+@pytest.mark.parametrize(
+    ("overrides", "want"),
+    (
+        ({"checks": []}, "readiness check"),
+        ({"readiness_result": {"schema": "canon.readiness-result/v1"}}, "readiness_result"),
+        ({"checks": [check_dict(), check_dict("secrets", "warn")]}, "checks"),
+        ({"checks": [check_dict(evidence=False)]}, "evidence_refs"),
+    ),
+)
+def test_enforced_observed_claim_requires_complete_readiness_and_evidence(overrides: dict, want: str):
+    witness = fixture_witness(
+        integration_tier_claimed="enforced",
+        host_enforcement_observed=True,
+        **overrides,
+    )
+    assert any(want in p for p in validate_bootstrap_witness(witness))
+
+
 def test_native_advisory_witness_may_record_no_host_enforcement():
     witness = BootstrapWitness.from_dict(load_fixture("bootstrap_witness_pass.json"))
     assert witness.integration_tier_claimed == "native-advisory"
@@ -167,6 +215,42 @@ def test_bootstrap_witness_rejects_scalar_sequence_fields(field: str):
     witness = BootstrapWitness.from_dict(d)
     assert witness.to_dict()[field] == "not-a-list"
     assert any(field in p for p in validate_bootstrap_witness(witness))
+
+
+def test_source_state_requires_records_digest():
+    witness = fixture_witness(source_state={})
+    assert any("source_state.records_digest" in p for p in validate_bootstrap_witness(witness))
+
+
+@pytest.mark.parametrize(
+    "field",
+    ("records_digest", "inventory_digest", "context_envelope_digest", "mneme_snapshot_digest", "worktree_digest"),
+)
+def test_source_state_validates_known_digest_fields(field: str):
+    state = {"records_digest": HASH_C, field: "not-a-sha256-ref"}
+    witness = fixture_witness(source_state=state)
+    assert any(f"source_state.{field}" in p for p in validate_bootstrap_witness(witness))
+
+
+@pytest.mark.parametrize("target", ({}, {"adapter": "", "surface": "CANON.md"}, {"adapter": "codex-cli", "surface": ""}))
+def test_target_requires_adapter_and_surface_strings(target: dict):
+    witness = fixture_witness(target=target)
+    problems = validate_bootstrap_witness(witness)
+    assert any("target.adapter" in p or "target.surface" in p for p in problems)
+
+
+def test_from_dict_preserves_malformed_nested_values_for_total_to_dict():
+    d = load_fixture("bootstrap_witness_pass.json")
+    d["checks"] = [{"name": "readiness"}]
+    d["omissions"] = [{"schema": "canon.omission/v1"}]
+    d["lossy_transforms"] = [{"schema": "canon.transform-receipt/v1"}]
+    d["readiness_result"] = {"schema": "canon.readiness-result/v1"}
+    witness = BootstrapWitness.from_dict(d)
+    assert witness.to_dict()["checks"] == [{"name": "readiness"}]
+    assert witness.to_dict()["omissions"] == [{"schema": "canon.omission/v1"}]
+    assert witness.to_dict()["lossy_transforms"] == [{"schema": "canon.transform-receipt/v1"}]
+    assert witness.to_dict()["readiness_result"] == {"schema": "canon.readiness-result/v1"}
+    assert any("checks" in p for p in validate_bootstrap_witness(witness))
 
 
 def test_bootstrap_witness_validator_reports_multiple_shape_problems():

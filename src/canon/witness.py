@@ -13,6 +13,13 @@ from .transform import TransformReceipt, validate_transform_receipt
 BOOTSTRAP_WITNESS_SCHEMA = "canon.bootstrap-witness/v1"
 BOOTSTRAP_CHECK_NAMES = ("freshness", "conflicts", "secrets", "budget", "reachability", "readiness")
 BOOTSTRAP_CHECK_VERDICTS = ("pass", "fail", "warn", "blocked", "unknown")
+SOURCE_STATE_DIGEST_KEYS = (
+    "records_digest",
+    "inventory_digest",
+    "context_envelope_digest",
+    "mneme_snapshot_digest",
+    "worktree_digest",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,9 +66,9 @@ class BootstrapWitness:
     host_enforcement_observed: bool
     started_at: str
     checks: tuple[BootstrapCheck, ...]
-    omissions: tuple[object, ...]
-    lossy_transforms: tuple[object, ...]
-    readiness_result: object
+    omissions: tuple[Omission, ...]
+    lossy_transforms: tuple[TransformReceipt, ...]
+    readiness_result: ReadinessResult
     does_not_prove: tuple[str, ...] = ()
 
     schema: ClassVar[str] = BOOTSTRAP_WITNESS_SCHEMA
@@ -131,6 +138,7 @@ def validate_bootstrap_witness(witness: BootstrapWitness) -> list[str]:
     _check_dict("source_state", witness.source_state, problems)
     _check_dict("target", witness.target, problems)
     _check_source_state(witness.source_state, problems)
+    _check_target(witness.target, problems)
     _check_member("integration_tier_claimed", witness.integration_tier_claimed, INTEGRATION_TIERS, problems)
     _check_bool("host_enforcement_observed", witness.host_enforcement_observed, problems)
     _check_non_empty_string("started_at", witness.started_at, problems)
@@ -215,9 +223,18 @@ def _check_dict(name: str, value: object, problems: list[str]) -> None:
 def _check_source_state(value: object, problems: list[str]) -> None:
     if not isinstance(value, dict):
         return
-    records_digest = value.get("records_digest")
-    if records_digest is not None and not is_sha256_ref(records_digest):
+    if not is_sha256_ref(value.get("records_digest")):
         problems.append("source_state.records_digest must be a sha256: reference")
+    for key in SOURCE_STATE_DIGEST_KEYS[1:]:
+        if key in value and value[key] is not None and not is_sha256_ref(value[key]):
+            problems.append(f"source_state.{key} must be a sha256: reference")
+
+
+def _check_target(value: object, problems: list[str]) -> None:
+    if not isinstance(value, dict):
+        return
+    _check_non_empty_string("target.adapter", value.get("adapter"), problems)
+    _check_non_empty_string("target.surface", value.get("surface"), problems)
 
 
 def _check_string_tuple(name: str, value: object, problems: list[str]) -> None:
@@ -249,11 +266,8 @@ def _check_readiness_result(witness: BootstrapWitness, problems: list[str]) -> N
 def _check_observed_claim(witness: BootstrapWitness, problems: list[str]) -> None:
     if witness.host_enforcement_observed is not True:
         return
-    if isinstance(witness.checks, tuple):
-        for check in witness.checks:
-            if isinstance(check, BootstrapCheck) and check.verdict == "fail":
-                problems.append(f"host_enforcement_observed requires no failed checks; {check.name!r} failed")
     if witness.integration_tier_claimed != "enforced":
+        problems.append("host_enforcement_observed requires integration_tier_claimed 'enforced'")
         return
     _check_enforced_readiness(witness, problems)
     _check_enforced_checks(witness, problems)
