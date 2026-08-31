@@ -5,23 +5,17 @@ from dataclasses import dataclass, field, replace
 from typing import Callable, ClassVar, Iterable
 from .adapter import INTEGRATION_TIERS
 from .atom import CanonAtom, atoms_from_records, validate_atom
-from .canonical_json import (
-    CANONICALIZATION as JSON_CANONICALIZATION,
-    CanonicalJSONError,
-    canonical_json_bytes,
-    canonical_json_text,
-    canonical_sha256,
-    is_sha256_ref,
-)
+from .canonical_json import CANONICALIZATION as JSON_CANONICALIZATION, CanonicalJSONError, canonical_json_bytes, canonical_json_text, canonical_sha256, is_sha256_ref
 from .omission import Omission, validate_omission
 from .schema import SCHEMA as RECORD_SCHEMA, Record
 from .transform import TransformReceipt, validate_transform_receipt
-from .readiness import ReadinessProbe
+from .readiness import CRITICAL_SET_KEYS, ReadinessProbe
 from .validator import validate_record
 CAPSULE_SCHEMA = "canon.capsule/v1"
 CAPSULE_PROFILES = ("needle", "handoff", "archive", "custom")
 CANONICALIZATION = JSON_CANONICALIZATION
 SOURCE_STATE_DIGEST_KEYS = ("records_digest", "inventory_digest", "context_envelope_digest", "mneme_snapshot_digest", "relay_checkpoint", "worktree_digest")
+_CRITICAL_SET_BY_TYPE = {"active-goal": "active_goal_ids", "permission": "permission_ids", "prohibition": "prohibition_ids", "constraint": "constraint_ids", "frontier-state": "frontier_state_ids", "conflict": "unresolved_conflict_ids", "unknown": "unknown_ids"}
 class CapsuleError(ValueError): pass
 class CapsuleBuildError(CapsuleError): pass
 @dataclass(frozen=True, slots=True)
@@ -31,12 +25,7 @@ class CapsuleTarget:
     integration_tier: str
     host_enforcement_observed: bool = False
     def to_dict(self) -> dict:
-        return {
-            "adapter": self.adapter,
-            "surface": self.surface,
-            "integration_tier": self.integration_tier,
-            "host_enforcement_observed": self.host_enforcement_observed,
-        }
+        return {"adapter": self.adapter, "surface": self.surface, "integration_tier": self.integration_tier, "host_enforcement_observed": self.host_enforcement_observed}
     @classmethod
     def from_dict(cls, d: dict) -> "CapsuleTarget":
         if not isinstance(d, dict):
@@ -65,11 +54,7 @@ class Compatibility:
     def __post_init__(self) -> None:
         object.__setattr__(self, "requires_features", _tuple_sequence(self.requires_features))
     def to_dict(self) -> dict:
-        return {
-            "record_schema_min": self.record_schema_min,
-            "capsule_schema": self.capsule_schema,
-            "requires_features": _json_sequence(self.requires_features),
-        }
+        return {"record_schema_min": self.record_schema_min, "capsule_schema": self.capsule_schema, "requires_features": _json_sequence(self.requires_features)}
     @classmethod
     def from_dict(cls, d: dict) -> "Compatibility":
         if not isinstance(d, dict):
@@ -168,12 +153,7 @@ class Capsule:
         got = d.get("schema")
         if got != CAPSULE_SCHEMA:
             raise ValueError(f"expected schema {CAPSULE_SCHEMA!r}, got {got!r}")
-        return cls(
-            d["capsule_id"], d["profile"], d["target"], d["source_state"], d["compatibility"],
-            d["budget"], d["layers"], d["atoms"], d["records"], d["conflicts"],
-            d["unknowns"], d["omissions"], d["lossy_transforms"], d["freshness"],
-            d["integrity"], d["receipts"], d.get("does_not_prove", ()),
-        )
+        return cls(d["capsule_id"], d["profile"], d["target"], d["source_state"], d["compatibility"], d["budget"], d["layers"], d["atoms"], d["records"], d["conflicts"], d["unknowns"], d["omissions"], d["lossy_transforms"], d["freshness"], d["integrity"], d["receipts"], d.get("does_not_prove", ()))
     def to_json(self) -> str:
         return canonical_json_text(self.to_dict())
 @dataclass(frozen=True, slots=True)
@@ -215,6 +195,23 @@ def capsule_digest(capsule: Capsule) -> str:
     return canonical_sha256(capsule_identity_dict(capsule))
 def capsule_bytes(capsule: Capsule) -> bytes:
     return canonical_json_bytes(capsule.to_dict())
+def compile_capsule(request: CapsuleCompileRequest) -> CapsuleBundle:
+    from .canonmd import render_canon_md
+    capsule = build_capsule(
+        profile=request.profile,
+        target=request.target,
+        source_state=request.source_state,
+        budget=request.budget,
+        atoms=request.atoms,
+        records=request.records,
+        omissions=request.omissions,
+        lossy_transforms=request.lossy_transforms,
+        receipts=request.receipts,
+        does_not_prove=request.does_not_prove,
+        required_atom_ids=request.required_atom_ids,
+    )
+    probe = ReadinessProbe(request.readiness_probe_id, capsule.capsule_id, request.readiness_target or capsule.target.to_dict(), _critical_sets(capsule.atoms), {"format": "json", "required_fields": list(CRITICAL_SET_KEYS)}, {"method": "exact-id-set-and-status-match", "pass_threshold": "all-critical"})
+    return CapsuleBundle(capsule, capsule_bytes(capsule), render_canon_md(capsule), probe)
 def build_capsule(
     *,
     profile: str,
@@ -346,6 +343,12 @@ def _freshness(atoms: tuple[CanonAtom, ...]) -> tuple[dict, ...]:
     return tuple(_freshness_row(atom) for atom in atoms if atom.freshness)
 def _freshness_row(atom: CanonAtom) -> dict:
     return {"id": atom.id, "type": atom.type, "status": atom.status, "freshness": copy.deepcopy(atom.freshness)}
+def _critical_sets(atoms: tuple[CanonAtom, ...]) -> dict:
+    result = {key: [] for key in CRITICAL_SET_KEYS}
+    for atom in atoms:
+        if atom.critical is True and atom.type in _CRITICAL_SET_BY_TYPE:
+            result[_CRITICAL_SET_BY_TYPE[atom.type]].append(atom.id)
+    return result
 def _check_required_atoms(atoms: tuple[CanonAtom, ...], required_ids: tuple[str, ...]) -> None:
     by_id = {atom.id: atom for atom in atoms}
     for required_id in required_ids:
