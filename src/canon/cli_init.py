@@ -103,7 +103,7 @@ def _text(value: object) -> str:
 def _reject_reserved_parts(parts: tuple[str, ...]) -> None:
     if any(_normalized_part(part) in _RESERVED_STATE_PARTS for part in parts): raise _InitFailure("unsafe_path")
 def _normalized_part(part: str) -> str:
-    return unicodedata.normalize("NFC", part).rstrip(" .").casefold()
+    return unicodedata.normalize("NFKC", part).rstrip(" .").casefold()
 def _config_payload(parts: tuple[str, ...]) -> dict[str, object]:
     return {"canon_schema": CONFIG_SCHEMA, "workspace": {"relative_from_state_dir": "/".join(".." for _ in parts)}}
 def _entries(state_rel: str) -> tuple[str, ...]:

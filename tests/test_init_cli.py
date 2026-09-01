@@ -190,6 +190,72 @@ def test_reserved_host_surface_state_components_are_rejected_before_mutation(
     assert _rel_tree(workspace) == []
 
 
+@pytest.mark.parametrize(
+    "state_dir",
+    [
+        "ＡＧＥＮＴＳ.ｍｄ",
+        "AＧENTS.md",
+        "ＣＬＡＵＤＥ．ｍｄ",
+        "CＬAUDE.md",
+        "SＯUL.md",
+        "ＧＥＭＩＮＩ.ｍｄ",
+        "GＥMINI.md",
+        "ＣＯＤＥＸ.ｍｄ",
+        "CＯDEX.md",
+        "．chatgpt",
+        ".chatｇpt",
+        "．claude",
+        "﹒claude",
+        "․claude",
+        ".clａude",
+        "․codex",
+        ".coｄex",
+        "．vscode",
+        ".vsｃode",
+        "﹒idea",
+        ".ideａ",
+        "․cursor",
+        ".cuｒsor",
+        "．windsurf",
+        ".windｓurf",
+        "﹒opencode",
+        ".openｃode",
+        "․github",
+        ".gitｈub",
+        "．git",
+        ".gｉt",
+    ],
+)
+def test_reserved_host_surface_compatibility_aliases_are_rejected_before_mutation(
+    tmp_path: Path,
+    state_dir: str,
+) -> None:
+    workspace = tmp_path / "work"
+    workspace.mkdir()
+
+    code, stdout, stderr = _run(["--json", "init", "--workspace", str(workspace), "--state-dir", state_dir, "--apply"])
+
+    assert code == EX_SECURITY
+    assert stderr == ""
+    assert _payload(stdout)["failure_code"] == "unsafe_path"
+    assert _rel_tree(workspace) == []
+
+
+@pytest.mark.parametrize("state_dir", ["．canon", "﹒canon", "․canon", ".ｃanon"])
+def test_canon_compatibility_aliases_remain_allowed_when_path_policy_allows(
+    tmp_path: Path,
+    state_dir: str,
+) -> None:
+    workspace = tmp_path / "work"
+    workspace.mkdir()
+
+    code, _stdout, stderr = _run(["init", "--workspace", str(workspace), "--state-dir", state_dir, "--apply"])
+
+    assert code == EX_OK
+    assert stderr == ""
+    assert (workspace / state_dir / "config.json").exists()
+
+
 def test_default_canon_state_dir_is_not_a_reserved_host_surface(tmp_path: Path) -> None:
     workspace = tmp_path / "work"
     workspace.mkdir()
