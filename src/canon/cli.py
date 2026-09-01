@@ -7,6 +7,7 @@ import sys
 from collections.abc import Mapping
 from typing import TextIO
 
+from .cli_format import color_enabled, make_result, write_result
 from .exit_codes import EX_OK, EX_USAGE
 
 COMMANDS = (
@@ -75,7 +76,7 @@ def run_cli(
     environ: Mapping[str, str],
 ) -> int:
     """Run canon's CLI with caller-owned streams and environment."""
-    del stdin, environ
+    del stdin
     tokens = _argv_copy(argv, stderr)
     if tokens is None:
         return EX_USAGE
@@ -86,8 +87,14 @@ def run_cli(
     except _ParserExit as error:
         return error.status
 
-    stdout.write(parsed.command + "\n")
-    return EX_OK
+    result = make_result(ok=True, command=parsed.command, failure_code="ok", message="ready")
+    return write_result(
+        result,
+        stdout=stdout,
+        stderr=stderr,
+        json_output=parsed.json_output,
+        color=color_enabled(environ=environ, no_color=parsed.no_color, is_tty=_is_tty(stdout)),
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -121,6 +128,16 @@ def _argv_copy(argv: list[str], stderr: TextIO) -> list[str] | None:
         stderr.write("canon: argv entries must be str\n")
         return None
     return list(argv)
+
+
+def _is_tty(stream: TextIO) -> bool:
+    isatty = getattr(stream, "isatty", None)
+    if not callable(isatty):
+        return False
+    try:
+        return bool(isatty())
+    except OSError:
+        return False
 
 
 __all__ = ["COMMANDS", "build_parser", "run_cli", "main"]

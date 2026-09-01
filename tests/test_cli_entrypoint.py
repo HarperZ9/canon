@@ -86,7 +86,7 @@ def test_subcommand_parse_errors_use_injected_stderr(capsys: pytest.CaptureFixtu
     assert capsys.readouterr() == ("", "")
 
 
-def test_placeholder_commands_echo_the_command_name_to_injected_stdout() -> None:
+def test_placeholder_commands_emit_accessible_result_to_injected_stdout() -> None:
     from canon.cli import run_cli
     from canon.exit_codes import EX_OK
 
@@ -94,7 +94,7 @@ def test_placeholder_commands_echo_the_command_name_to_injected_stdout() -> None
         stdout = io.StringIO()
         stderr = io.StringIO()
         assert run_cli([command], stdout=stdout, stderr=stderr, environ={}) == EX_OK
-        assert stdout.getvalue() == command + "\n"
+        assert stdout.getvalue() == f"PASS {command}: ready\n"
         assert stderr.getvalue() == ""
 
 
