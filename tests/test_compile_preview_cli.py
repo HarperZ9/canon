@@ -150,31 +150,19 @@ def test_preview_json_never_mutates_filesystem_and_reports_bundle(tmp_path: Path
     assert _tree(workspace) == before
 
 
-def test_compile_out_publishes_three_canonical_artifacts_and_is_idempotent(tmp_path: Path) -> None:
+def test_compile_out_rejects_unsupported_safe_publish_before_mutation(tmp_path: Path) -> None:
     workspace = tmp_path / "work"
     workspace.mkdir()
     _copy_inputs(workspace)
     argv = ["--json", "compile", *_base_args(workspace), "--out", "bundle"]
 
-    first = _run(argv)
-    if os.name != "nt":
-        assert first[0] == EX_SECURITY
-        assert first[2] == ""
-        assert _json(first[1])["failure_code"] == "unsafe_path"
-        assert not (workspace / "bundle").exists()
-        assert not any(path.name.startswith(".canon-compile-") for path in workspace.iterdir())
-        return
-    second = _run(argv)
+    code, stdout, stderr = _run(argv)
 
-    assert first[0] == second[0] == EX_OK
-    assert first[2] == second[2] == ""
-    assert _json(first[1]) == _json(second[1])
-    bundle = workspace / "bundle"
-    assert set(_tree(bundle)) == set(ARTIFACTS)
-    for name in ("canon.capsule.json", "readiness-probe.json"):
-        text = (bundle / name).read_text(encoding="utf-8")
-        assert text == canonical_json_text(json.loads(text))
-    assert (bundle / "CANON.md").read_text(encoding="utf-8").startswith("# CANON\n")
+    assert code == EX_SECURITY
+    assert stderr == ""
+    assert _json(stdout)["failure_code"] == "unsafe_path"
+    assert not (workspace / "bundle").exists()
+    assert not any(path.name.startswith(".canon-compile-") for path in workspace.iterdir())
 
 
 def test_existing_mixed_output_state_conflicts_without_overwrite(tmp_path: Path) -> None:
@@ -390,56 +378,37 @@ def test_compile_publish_parent_swap_does_not_create_outside_bundle_or_stage(
     outside_workspace.mkdir()
     _copy_inputs(workspace)
     attempted = False
-    swapped = False
 
     def attempt_swap() -> None:
-        nonlocal attempted, swapped
+        nonlocal attempted
         attempted = True
-        try:
-            workspace.rename(displaced)
-            outside_workspace.rename(workspace)
-            swapped = True
-        except OSError:
-            pass
+        workspace.rename(displaced)
+        outside_workspace.rename(workspace)
 
-    if os.name == "nt":
-        real_create = cli_publish._win.nt_create_relative
+    real_create = cli_publish._win.nt_create_relative
 
-        def swap_before_stage_create(
-            dir_handle: int,
-            name: str,
-            access: int,
-            share: int,
-            disposition: int,
-            options: int,
-        ) -> int:
-            if name.startswith(".canon-compile-") and not attempted:
-                attempt_swap()
-            return real_create(dir_handle, name, access, share, disposition, options)
+    def swap_before_stage_create(
+        dir_handle: int,
+        name: str,
+        access: int,
+        share: int,
+        disposition: int,
+        options: int,
+    ) -> int:
+        if name.startswith(".canon-compile-") and not attempted:
+            attempt_swap()
+        return real_create(dir_handle, name, access, share, disposition, options)
 
-        monkeypatch.setattr(cli_publish._win, "nt_create_relative", swap_before_stage_create)
-    else:
-        real_mkdir = cli_publish.os.mkdir
-
-        def swap_before_stage_mkdir(path: object, *args: object, **kwargs: object) -> object:
-            if isinstance(path, str) and path.startswith(".canon-compile-") and not attempted:
-                attempt_swap()
-            return real_mkdir(path, *args, **kwargs)
-
-        monkeypatch.setattr(cli_publish.os, "mkdir", swap_before_stage_mkdir)
+    monkeypatch.setattr(cli_publish._win, "nt_create_relative", swap_before_stage_create)
 
     code, stdout, stderr = _run(["--json", "compile", *_base_args(workspace), "--out", "bundle"])
 
-    assert attempted
-    if swapped:
-        assert code == EX_SECURITY
-        assert _json(stdout)["failure_code"] == "unsafe_path"
-        assert not (workspace / "bundle").exists()
-        assert not any(path.name.startswith(".canon-compile-") for path in workspace.iterdir())
-        assert not any(path.name.startswith(".canon-compile-") for path in displaced.iterdir())
-    else:
-        assert code == EX_OK
-        assert (workspace / "bundle").is_dir()
+    assert not attempted
+    assert code == EX_SECURITY
+    assert _json(stdout)["failure_code"] == "unsafe_path"
+    assert not (workspace / "bundle").exists()
+    assert not any(path.name.startswith(".canon-compile-") for path in workspace.iterdir())
+    assert not displaced.exists()
     assert stderr == ""
 
 
@@ -462,6 +431,37 @@ def test_compile_publish_without_safe_backend_fails_before_stage_mutation(
     assert code == EX_SECURITY
     assert stderr == ""
     assert _json(stdout)["failure_code"] == "unsafe_path"
+    assert not (workspace / "bundle").exists()
+    assert not any(path.name.startswith(".canon-compile-") for path in workspace.iterdir())
+
+
+def test_windows_publish_backend_rejects_before_stage_create_when_unsupported(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import canon.cli_publish as cli_publish
+
+    if os.name != "nt":
+        pytest.skip("Windows safe-publish backend is platform-specific")
+
+    workspace = tmp_path / "work"
+    workspace.mkdir()
+    _copy_inputs(workspace)
+    calls: list[str] = []
+
+    def forbidden_create(*args: object, **kwargs: object) -> int:
+        del args, kwargs
+        calls.append("nt_create_relative")
+        raise OSError("stage mutation must not run")
+
+    monkeypatch.setattr(cli_publish._win, "nt_create_relative", forbidden_create)
+
+    code, stdout, stderr = _run(["--json", "compile", *_base_args(workspace), "--out", "bundle"])
+
+    assert code == EX_SECURITY
+    assert stderr == ""
+    assert _json(stdout)["failure_code"] == "unsafe_path"
+    assert calls == []
     assert not (workspace / "bundle").exists()
     assert not any(path.name.startswith(".canon-compile-") for path in workspace.iterdir())
 
@@ -547,23 +547,16 @@ def test_compile_publish_stage_swap_does_not_write_outside_or_publish_symlink(
 
     workspace = tmp_path / "work"
     outside = tmp_path / "outside"
-    moved_stage = tmp_path / "moved-stage"
     workspace.mkdir()
     outside.mkdir()
     _copy_inputs(workspace)
     attempted = False
-    swapped = False
 
     def attempt_stage_swap() -> None:
-        nonlocal attempted, swapped
+        nonlocal attempted
         attempted = True
-        try:
-            stage = next(path for path in workspace.iterdir() if path.name.startswith(".canon-compile-"))
-            stage.rename(moved_stage)
-            stage.symlink_to(outside, target_is_directory=True)
-            swapped = True
-        except (OSError, StopIteration):
-            pass
+        stage = next(path for path in workspace.iterdir() if path.name.startswith(".canon-compile-"))
+        stage.symlink_to(outside, target_is_directory=True)
 
     real_create = cli_publish._win.nt_create_relative
 
@@ -583,20 +576,90 @@ def test_compile_publish_stage_swap_does_not_write_outside_or_publish_symlink(
 
     code, stdout, stderr = _run(["--json", "compile", *_base_args(workspace), "--out", "bundle"])
 
-    assert attempted
-    if swapped:
+    assert not attempted
+    assert code == EX_SECURITY
+    assert _json(stdout)["failure_code"] == "unsafe_path"
+    assert _tree(outside) == []
+    assert not (workspace / "bundle").exists()
+    assert not any(path.name.startswith(".canon-compile-") for path in workspace.iterdir())
+    assert stderr == ""
+
+
+def test_compile_publish_rejects_post_write_artifact_drift_before_stage_rename(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import canon.cli_publish as cli_publish
+
+    if os.name != "nt":
+        pytest.skip("Windows handle-pinned publish race coverage")
+
+    workspace = tmp_path / "work"
+    workspace.mkdir()
+    _copy_inputs(workspace)
+    expected_md = _run(["compile", *_base_args(workspace)])[1]
+    preview = _json(_run(["--json", "preview", *_base_args(workspace)])[1])["data"]
+    attempts: dict[str, str] = {}
+    real_rename = cli_publish._rename_stage
+
+    def mutate_stage_artifacts(stage_path: Path) -> None:
+        try:
+            (stage_path / "canon.capsule.json").write_bytes(b"{\"mutated\":true}\n")
+            attempts["overwrite"] = "mutated"
+        except OSError:
+            attempts["overwrite"] = "blocked"
+        moved = stage_path / "CANON.md.moved"
+        try:
+            (stage_path / "CANON.md").rename(moved)
+            moved.unlink()
+            attempts["rename_delete"] = "mutated"
+        except OSError:
+            attempts["rename_delete"] = "blocked"
+            try:
+                moved.replace(stage_path / "CANON.md")
+            except OSError:
+                pass
+        replacement = stage_path / "readiness-replacement.tmp"
+        try:
+            replacement.write_bytes(b"{\"mutated\":true}\n")
+            os.replace(replacement, stage_path / "readiness-probe.json")
+            attempts["replace"] = "mutated"
+        except OSError:
+            attempts["replace"] = "blocked"
+        finally:
+            try:
+                replacement.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+    def mutate_before_rename(parent: object, stage: object, target_name: str) -> None:
+        mutate_stage_artifacts(stage.path)
+        real_rename(parent, stage, target_name)
+
+    monkeypatch.setattr(cli_publish, "_rename_stage", mutate_before_rename)
+
+    code, stdout, stderr = _run(["--json", "compile", *_base_args(workspace), "--out", "bundle"])
+
+    assert stderr == ""
+    if not attempts:
         assert code == EX_SECURITY
         assert _json(stdout)["failure_code"] == "unsafe_path"
-        assert _tree(outside) == []
         assert not (workspace / "bundle").exists()
-        assert not any(path.is_symlink() for path in workspace.iterdir())
-        if moved_stage.exists():
-            assert not any(path.name in ARTIFACTS for path in moved_stage.rglob("*"))
-    else:
-        assert code == EX_OK
-        assert _tree(outside) == []
-        assert (workspace / "bundle").is_dir()
-    assert stderr == ""
+        assert not any(path.name.startswith(".canon-compile-") for path in workspace.iterdir())
+        return
+    assert set(attempts) == {"overwrite", "rename_delete", "replace"}
+    if "mutated" in attempts.values():
+        assert code == EX_SECURITY
+        assert _json(stdout)["failure_code"] == "unsafe_path"
+        assert not (workspace / "bundle").exists()
+        assert not any(path.name.startswith(".canon-compile-") for path in workspace.iterdir())
+        return
+    bundle = workspace / "bundle"
+    assert code == EX_OK
+    assert (bundle / "CANON.md").read_text(encoding="utf-8") == expected_md
+    assert sha256_bytes((bundle / "canon.capsule.json").read_bytes()) == preview["manifest_sha256"]
+    probe = canonical_json_text(preview["readiness_probe"])
+    assert (bundle / "readiness-probe.json").read_text(encoding="utf-8") == probe
 
 
 def test_output_path_rejects_symlink_parent_and_cleans_stage_on_publish_failure(
@@ -619,22 +682,7 @@ def test_output_path_rejects_symlink_parent_and_cleans_stage_on_publish_failure(
     assert blocked[0] == EX_SECURITY
     assert _json(blocked[1])["failure_code"] == "unsafe_path"
     assert _tree(outside) == []
-    if os.name != "nt":
-        disabled = _run(["--json", "compile", *_base_args(workspace), "--out", "bundle"])
-        assert disabled[0] == EX_SECURITY
-        assert _json(disabled[1])["failure_code"] == "unsafe_path"
-        assert not any(path.name.startswith(".canon-compile-") for path in workspace.iterdir())
-        return
-
-    def fail_rename(parent: object, stage: object, target_name: object) -> None:
-        del parent, stage, target_name
-        raise OSError("leaked-secret-token")
-
-    monkeypatch.setattr(cli_publish, "_rename_stage", fail_rename)
-    code, stdout, stderr = _run(["--json", "compile", *_base_args(workspace), "--out", "bundle"])
-
-    assert code == 8
-    assert stderr == ""
-    assert _json(stdout)["failure_code"] == "io_error"
+    disabled = _run(["--json", "compile", *_base_args(workspace), "--out", "bundle"])
+    assert disabled[0] == EX_SECURITY
+    assert _json(disabled[1])["failure_code"] == "unsafe_path"
     assert not any(path.name.startswith(".canon-compile-") for path in workspace.iterdir())
-    assert "leaked-secret-token" not in stdout

@@ -9,9 +9,11 @@ from .path_policy import is_reparse_point
 _STAGE_PREFIX = ".canon-compile-"
 _TEMP_ATTEMPTS = 8
 _WIN_FILE_DIRECTORY_FILE = 0x1
-_WIN_SHARE = _win.FILE_SHARE_READ | _win.FILE_SHARE_WRITE
+_WIN_DIR_SHARE = _win.FILE_SHARE_READ | _win.FILE_SHARE_WRITE
+_WIN_FILE_SHARE = _win.FILE_SHARE_READ
 _WIN_DIR_OPTS = _WIN_FILE_DIRECTORY_FILE | _win.FILE_OPEN_REPARSE_POINT | _win.FILE_SYNCHRONOUS_IO_NONALERT
 _WIN_FILE_OPTS = _win.FILE_NON_DIRECTORY_FILE | _win.FILE_OPEN_REPARSE_POINT | _win.FILE_SYNCHRONOUS_IO_NONALERT
+_WINDOWS_STAGE_RENAME_WITH_OPEN_ARTIFACTS = False
 _FileRenameInfo = 3
 _SetFileInformationByHandle = None
 _FlushFileBuffers = None
@@ -23,6 +25,10 @@ class PublishError(Exception):
 @dataclass(frozen=True, slots=True)
 class _DirCap:
     path: Path; ref: int; key: tuple[int, int]
+
+@dataclass(frozen=True, slots=True)
+class _FileCap:
+    name: str; ref: int; key: tuple[int, int]; data: bytes
 
 class _RenameInfo(ctypes.Structure):
     _fields_ = [
@@ -43,11 +49,12 @@ def publish_new_bundle(target: Path, expected: tuple[tuple[str, bytes], ...], *,
         _close_dir(root)
 
 def _publish_under_parent(root: _DirCap, parent: _DirCap, target_name: str, expected: tuple[tuple[str, bytes], ...]) -> None:
-    stage: _DirCap | None = None; committed = False
+    stage: _DirCap | None = None; files: tuple[_FileCap, ...] = (); committed = False
     try:
         stage = _create_stage(parent); _verify_publish_caps(root, parent, stage)
-        _write_stage(root, parent, stage, expected); _verify_publish_caps(root, parent, stage)
-        _ensure_target_absent(parent, target_name); _rename_stage(parent, stage, target_name); committed = True
+        files = _write_stage(root, parent, stage, expected); _verify_publish_caps(root, parent, stage)
+        _ensure_target_absent(parent, target_name); _verify_publish_caps(root, parent, stage)
+        _verify_stage_files(files); _rename_stage(parent, stage, target_name); committed = True
     except FileExistsError as exc:
         raise PublishError("conflict") from exc
     except PublishError:
@@ -56,13 +63,19 @@ def _publish_under_parent(root: _DirCap, parent: _DirCap, target_name: str, expe
         raise PublishError("io_error") from exc
     finally:
         if stage is not None:
+            _close_file_caps(files)
             if not committed: _cleanup_stage_files(stage, tuple(name for name, _data in expected))
             _close_dir(stage)
             if not committed: _cleanup_stage_entry(parent, stage.path.name)
 
-def _write_stage(root: _DirCap, parent: _DirCap, stage: _DirCap, expected: tuple[tuple[str, bytes], ...]) -> None:
-    for name, data in expected:
-        _verify_publish_caps(root, parent, stage); _write_file(stage, name, data)
+def _write_stage(root: _DirCap, parent: _DirCap, stage: _DirCap, expected: tuple[tuple[str, bytes], ...]) -> tuple[_FileCap, ...]:
+    files: list[_FileCap] = []
+    try:
+        for name, data in expected:
+            _verify_publish_caps(root, parent, stage); files.append(_write_file(stage, name, data))
+        return tuple(files)
+    except Exception:
+        _close_file_caps(tuple(files)); raise
 
 def _verify_publish_caps(root: _DirCap, parent: _DirCap, stage: _DirCap) -> None:
     _verify_cap_path(root); _verify_cap_path(parent); _verify_cap_path(stage)
@@ -118,19 +131,31 @@ def _cleanup_bad_stage(parent: _DirCap, stage: _DirCap) -> None:
     try: _cleanup_stage_files(stage, ()); _close_dir(stage); _cleanup_stage_entry(parent, stage.path.name)
     except OSError: pass
 
-def _write_file(stage: _DirCap, name: str, data: bytes) -> None:
+def _write_file(stage: _DirCap, name: str, data: bytes) -> _FileCap:
     _check_child_name(name)
-    _win_write_file(stage, name, data)
+    return _win_write_file(stage, name, data)
 
-def _win_write_file(stage: _DirCap, name: str, data: bytes) -> None:
+def _win_write_file(stage: _DirCap, name: str, data: bytes) -> _FileCap:
     access = _win.GENERIC_READ | _win.GENERIC_WRITE | _win.SYNCHRONIZE
-    handle = _win.nt_create_relative(stage.ref, name, access, _WIN_SHARE, _win.FILE_CREATE, _WIN_FILE_OPTS)
+    handle = _win.nt_create_relative(stage.ref, name, access, _WIN_FILE_SHARE, _win.FILE_CREATE, _WIN_FILE_OPTS)
     try:
-        attrs = int(_win.handle_info(handle).dwFileAttributes)
-        if attrs & _win.FILE_ATTRIBUTE_DIRECTORY or attrs & _win.FILE_ATTRIBUTE_REPARSE_POINT: raise PublishError("unsafe_path")
+        cap = _FileCap(name, handle, _handle_key(handle), data)
+        _verify_file_cap(cap, check_bytes=False)
         _verify_cap_path(stage); _win.write_file(handle, data); _win_flush(handle)
-    finally:
-        _win.close_handle(handle)
+        _verify_file_cap(cap); return cap
+    except Exception:
+        _close_ref(handle); raise
+
+def _verify_stage_files(files: tuple[_FileCap, ...]) -> None:
+    for file in files: _verify_file_cap(file)
+
+def _verify_file_cap(file: _FileCap, *, check_bytes: bool = True) -> None:
+    info = _win.handle_info(file.ref); attrs = int(info.dwFileAttributes)
+    if attrs & _win.FILE_ATTRIBUTE_DIRECTORY or attrs & _win.FILE_ATTRIBUTE_REPARSE_POINT: raise PublishError("unsafe_path")
+    if _handle_key(file.ref) != file.key: raise PublishError("unsafe_path")
+    size = (int(info.nFileSizeHigh) << 32) | int(info.nFileSizeLow)
+    if check_bytes and (size != len(file.data) or _win.read_file(file.ref, size) != file.data):
+        raise PublishError("unsafe_path")
 
 def _rename_stage(parent: _DirCap, stage: _DirCap, target_name: str) -> None:
     _check_child_name(target_name)
@@ -161,14 +186,14 @@ def _handle_key(ref: int) -> tuple[int, int]:
 
 def _win_create_stage(parent_ref: int, name: str) -> int:
     access = _win.GENERIC_READ | _win.DELETE | _win.SYNCHRONIZE
-    return _win.nt_create_relative(parent_ref, name, access, _WIN_SHARE, _win.FILE_CREATE, _WIN_DIR_OPTS)
+    return _win.nt_create_relative(parent_ref, name, access, _WIN_DIR_SHARE, _win.FILE_CREATE, _WIN_DIR_OPTS)
 
 def _win_open_dir(path: Path) -> int:
     flags = _win.FILE_FLAG_BACKUP_SEMANTICS | _win.FILE_FLAG_OPEN_REPARSE_POINT
-    return _win.create_file(str(path), _win.GENERIC_READ | _win.SYNCHRONIZE, _WIN_SHARE, _win.OPEN_EXISTING, flags)
+    return _win.create_file(str(path), _win.GENERIC_READ | _win.SYNCHRONIZE, _WIN_DIR_SHARE, _win.OPEN_EXISTING, flags)
 
 def _win_open_child(parent_ref: int, name: str) -> int:
-    return _win.nt_create_relative(parent_ref, name, _win.GENERIC_READ | _win.SYNCHRONIZE, _WIN_SHARE, _win.FILE_OPEN, _WIN_DIR_OPTS)
+    return _win.nt_create_relative(parent_ref, name, _win.GENERIC_READ | _win.SYNCHRONIZE, _WIN_DIR_SHARE, _win.FILE_OPEN, _WIN_DIR_OPTS)
 
 def _win_rename_by_handle(stage_ref: int, target: Path) -> None:
     _load_win_rename_api(); encoded = str(target).encode("utf-16-le")
@@ -197,12 +222,18 @@ def _load_win_rename_api() -> None:
     _FlushFileBuffers.argtypes = [wintypes.HANDLE]; _FlushFileBuffers.restype = wintypes.BOOL
 
 def _require_safe_backend() -> None:
-    if os.name != "nt" or not _win.supported(): raise PublishError("unsafe_path")
+    if os.name != "nt" or not _win.supported() or not _WINDOWS_STAGE_RENAME_WITH_OPEN_ARTIFACTS:
+        raise PublishError("unsafe_path")
 
 def _cleanup_stage_files(stage: _DirCap, names: tuple[str, ...]) -> None:
     for name in names:
         try:
             (stage.path / name).unlink(missing_ok=True)
+        except OSError: pass
+
+def _close_file_caps(files: tuple[_FileCap, ...]) -> None:
+    for file in files:
+        try: _close_ref(file.ref)
         except OSError: pass
 
 def _cleanup_stage_entry(parent: _DirCap, stage_name: str) -> None:
