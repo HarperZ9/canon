@@ -1,31 +1,18 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from .adapter import assert_requested_tier_allowed, descriptor_for
-from .bootstrap_validation import (
-    BootstrapConfigError,
-    require_serializable_data,
-    require_bool,
-    safe_text,
-    snapshot_config_values,
-    snapshot_data,
-    thaw_mapping_or_none,
+from .bootstrap_report import BOOTSTRAP_STATES, BootstrapEvent, BootstrapReport, make_event, make_report
+from .bootstrap_runtime import (
+    build_witness, compile_event_data, compile_or_reuse, host_enforcement_observed,
+    load_runtime, present_event_data, readiness_result, resolve_workspace, result_data,
 )
-from .exit_codes import exit_code_for
+from .bootstrap_runtime_error import BootstrapRuntimeError
+from .bootstrap_validation import BootstrapConfigError, safe_text, snapshot_config_values
+from .bootstrap_witness_store import BootstrapWitnessStoreError, write_bootstrap_witness
 
-BOOTSTRAP_STATES = (
-    "detect_entry",
-    "resolve_layers",
-    "collect_source_state",
-    "preflight",
-    "compile_or_reuse_capsule",
-    "present_context",
-    "readiness_probe",
-    "emit_witness",
-    "release_to_work",
-)
 
 @dataclass(frozen=True, slots=True)
 class BootstrapConfig:
@@ -36,6 +23,10 @@ class BootstrapConfig:
     profile: str
     offline: bool
     run_id: str
+    records_path: str | None = None
+    atoms_path: str | None = None
+    readiness_response_path: str | None = None
+    started_at: str = "not-recorded"
     readiness_response: Mapping[str, object] | None = None
 
     def __post_init__(self) -> None:
@@ -43,251 +34,87 @@ class BootstrapConfig:
             object.__setattr__(self, name, value)
 
 
-@dataclass(frozen=True, slots=True)
-class BootstrapEvent:
-    state: str
-    ok: bool
-    failure_code: str
-    message: str
-    data: Mapping[str, object] | None = field(default=None, repr=False)
-
-    def __post_init__(self) -> None:
-        _require_state(self.state)
-        require_bool(self.ok, "event ok")
-        safe_text(self.failure_code, "event failure_code")
-        safe_text(self.message, "event message")
-        _require_event_invariant(self)
-        object.__setattr__(self, "data", snapshot_data(self.data))
-
-    def to_dict(self) -> dict[str, object]:
-        _require_event_serializable(self)
-        return {
-            "data": thaw_mapping_or_none(self.data),
-            "failure_code": self.failure_code,
-            "message": self.message,
-            "ok": self.ok,
-            "state": self.state,
-        }
-
-
-@dataclass(frozen=True, slots=True)
-class BootstrapReport:
-    ok: bool
-    failure_code: str
-    message: str
-    events: tuple[BootstrapEvent, ...]
-    data: Mapping[str, object] | None = field(default=None, repr=False)
-    exit_code: int = field(init=False)
-
-    def __post_init__(self) -> None:
-        require_bool(self.ok, "report ok")
-        safe_text(self.failure_code, "report failure_code")
-        safe_text(self.message, "report message")
-        _require_events(self.events)
-        _require_report_invariant(self)
-        object.__setattr__(self, "data", snapshot_data(self.data))
-        object.__setattr__(self, "exit_code", exit_code_for(self.failure_code))
-
-    def to_dict(self) -> dict[str, object]:
-        _require_report_serializable(self)
-        return {
-            "data": thaw_mapping_or_none(self.data),
-            "events": [event.to_dict() for event in self.events],
-            "exit_code": self.exit_code,
-            "failure_code": self.failure_code,
-            "message": self.message,
-            "ok": self.ok,
-        }
-
-    def to_result_data(self) -> dict[str, object]:
-        _require_report_serializable(self)
-        data = thaw_mapping_or_none(self.data) or {}
-        data["events"] = [event.to_dict() for event in self.events]
-        return data
-
-
 def run_bootstrap(config: BootstrapConfig) -> BootstrapReport:
-    try:
-        snapshot = _snapshot_config(config)
-    except BootstrapConfigError:
-        return _report(False, "invalid_args", "invalid bootstrap config", (), None)
-
+    try: snapshot = _snapshot_config(config)
+    except BootstrapConfigError: return make_report(False, "invalid_args", "invalid bootstrap config", (), None)
     events: list[BootstrapEvent] = []
-    try:
-        descriptor = descriptor_for(snapshot["target"])
+    try: descriptor = descriptor_for(snapshot["target"])
     except KeyError:
         return _terminal(events, "detect_entry", "invalid_args", "unsupported bootstrap target", {"reason": "unsupported_target"})
-
     base = _adapter_data(descriptor.adapter_id, descriptor.integration_tier, snapshot)
     if descriptor.integration_tier == "unsupported":
         return _terminal(events, "detect_entry", "unsupported_lifecycle", "unsupported bootstrap lifecycle", base)
-    try:
-        assert_requested_tier_allowed(descriptor, snapshot["tier"])
+    try: assert_requested_tier_allowed(descriptor, snapshot["tier"])
     except ValueError:
         return _terminal(events, "detect_entry", "tier_mislabeled", "requested tier exceeds adapter descriptor", base)
+    events.append(make_event("detect_entry", "detected entry", base))
+    try: workspace, state_dir = resolve_workspace(snapshot["workspace"], snapshot["state_dir"])
+    except BootstrapRuntimeError as exc: return _terminal(events, "resolve_layers", exc.code, str(exc), base)
+    events.append(make_event("resolve_layers", "resolved layers", base))
+    try: runtime = load_runtime(snapshot, descriptor, workspace=workspace, state_dir=state_dir)
+    except BootstrapRuntimeError as exc: return _terminal(events, "collect_source_state", exc.code, str(exc), base)
+    events.append(make_event("collect_source_state", "collected source state", {"source_state": runtime.source_state.to_dict()}))
+    return _run_checked(events, runtime, base)
 
-    events.append(_event("detect_entry", "detected entry", base))
-    for state in BOOTSTRAP_STATES[1:]:
-        if state == "readiness_probe" and snapshot["tier"] == "enforced":
-            return _terminal(events, state, "readiness_failed", "readiness probe failed", base)
-        events.append(_event(state, _state_message(state), _state_data(state, snapshot)))
-    return _report(True, "ok", "release to work", tuple(events), base)
+
+def _run_checked(events: list[BootstrapEvent], runtime: object, base: dict[str, object]) -> BootstrapReport:
+    events.append(make_event("preflight", "preflight complete", base))
+    try: cache = compile_or_reuse(runtime)
+    except BootstrapRuntimeError as exc:
+        return _terminal(events, "compile_or_reuse_capsule", exc.code, str(exc), base)
+    events.append(make_event("compile_or_reuse_capsule", "compiled or reused capsule", compile_event_data(runtime, cache)))
+    events.append(make_event("present_context", "context prepared", present_event_data(cache)))
+    readiness = readiness_result(runtime, cache)
+    observed = host_enforcement_observed(runtime, readiness)
+    data = result_data(runtime, cache, readiness, observed=observed)
+    if readiness.verdict != "pass" and (runtime.readiness_response is not None or runtime.tier == "enforced"):
+        return _terminal(events, "readiness_probe", "readiness_failed", "readiness probe failed", data)
+    events.append(make_event("readiness_probe", "readiness probe complete", data))
+    return _emit_witness(events, runtime, cache, readiness, observed, data)
+
+
+def _emit_witness(events: list[BootstrapEvent], runtime: object, cache: object, readiness: object, observed: bool, data: dict[str, object]) -> BootstrapReport:
+    witness = build_witness(runtime, cache, readiness, observed=observed)
+    try: write = write_bootstrap_witness(witness, workspace=runtime.workspace, state_dir=runtime.state_dir)
+    except BootstrapWitnessStoreError as exc:
+        return _terminal(events, "emit_witness", exc.code, "bootstrap witness write failed", data)
+    data = result_data(runtime, cache, readiness, witness_path=write.relative_path, observed=observed)
+    events.append(make_event("emit_witness", "witness emitted", {"witness_path": write.relative_path, "write_status": write.status}))
+    events.append(make_event("release_to_work", "release to work", data))
+    return make_report(True, "ok", "release to work", tuple(events), data)
 
 
 def _snapshot_config(config: BootstrapConfig) -> dict[str, object]:
-    if type(config) is not BootstrapConfig:
-        raise BootstrapConfigError("invalid bootstrap config")
-    return snapshot_config_values(
-        workspace=config.workspace,
-        state_dir=config.state_dir,
-        target=config.target,
-        tier=config.tier,
-        profile=config.profile,
-        offline=config.offline,
-        run_id=config.run_id,
-        readiness_response=config.readiness_response,
+    if type(config) is not BootstrapConfig: raise BootstrapConfigError("invalid bootstrap config")
+    snapshot = snapshot_config_values(
+        workspace=config.workspace, state_dir=config.state_dir, target=config.target,
+        tier=config.tier, profile=config.profile, offline=config.offline,
+        run_id=config.run_id, readiness_response=config.readiness_response,
     )
+    snapshot["records_path"] = _optional_path(config.records_path, "records_path")
+    snapshot["atoms_path"] = _optional_path(config.atoms_path, "atoms_path")
+    snapshot["readiness_response_path"] = _optional_path(config.readiness_response_path, "readiness_response_path")
+    snapshot["started_at"] = safe_text(config.started_at, "started_at")
+    if snapshot["readiness_response"] is not None and snapshot["readiness_response_path"] is not None:
+        raise BootstrapConfigError("invalid bootstrap config")
+    return snapshot
 
 
-def _terminal(
-    events: list[BootstrapEvent],
-    state: str,
-    failure_code: str,
-    message: str,
-    data: dict[str, object] | None,
-) -> BootstrapReport:
+def _terminal(events: list[BootstrapEvent], state: str, code: str, message: str, data: dict[str, object] | None) -> BootstrapReport:
     event_data = {"state": state}
-    if data is not None:
-        event_data.update(data)
-    events.append(BootstrapEvent(state, False, failure_code, message, event_data))
-    return _report(False, failure_code, message, tuple(events), data)
-
-
-def _event(state: str, message: str, data: dict[str, object] | None = None) -> BootstrapEvent:
-    event_data = {"state": state}
-    if data is not None:
-        event_data.update(data)
-    return BootstrapEvent(state, True, "ok", message, event_data)
-
-
-def _report(
-    ok: bool,
-    failure_code: str,
-    message: str,
-    events: tuple[BootstrapEvent, ...],
-    data: dict[str, object] | None,
-) -> BootstrapReport:
-    return BootstrapReport(ok, failure_code, message, events, data)
+    if data is not None: event_data.update(data)
+    events.append(BootstrapEvent(state, False, code, message, event_data))
+    return make_report(False, code, message, tuple(events), data)
 
 
 def _adapter_data(adapter_id: str, authoritative_tier: str, config: dict[str, object]) -> dict[str, object]:
-    return {
-        "adapter_id": adapter_id,
-        "authoritative_tier": authoritative_tier,
-        "offline": config["offline"],
-        "profile": config["profile"],
-        "requested_tier": config["tier"],
-        "run_id": config["run_id"],
-    }
+    return {"adapter_id": adapter_id, "authoritative_tier": authoritative_tier,
+            "offline": config["offline"], "profile": config["profile"],
+            "requested_tier": config["tier"], "run_id": config["run_id"]}
 
 
-def _state_data(state: str, config: dict[str, object]) -> dict[str, object]:
-    if state == "readiness_probe":
-        response = "provided" if config["readiness_response"] is not None else "absent"
-        return {"readiness_response": response}
-    return {"deferred": True}
-
-
-def _state_message(state: str) -> str:
-    return state.replace("_", " ")
-
-
-def _require_events(events: object) -> None:
-    if type(events) is not tuple:
-        raise TypeError("invalid bootstrap events")
-    states = tuple(event.state for event in events if type(event) is BootstrapEvent)
-    if len(states) != len(events) or states != BOOTSTRAP_STATES[: len(states)]:
-        raise TypeError("invalid bootstrap events")
-    for event in events:
-        try:
-            _require_event_invariant(event)
-        except TypeError:
-            raise TypeError("invalid bootstrap events") from None
-    failures = [event for event in events if not event.ok]
-    if len(failures) > 1 or (failures and events[-1] is not failures[0]):
-        raise TypeError("invalid bootstrap events")
-
-
-def _require_state(state: object) -> None:
-    if type(state) is not str or state not in BOOTSTRAP_STATES:
-        raise TypeError("invalid bootstrap state")
-
-
-def _require_event_serializable(event: BootstrapEvent) -> None:
-    try:
-        _require_state(event.state)
-        require_bool(event.ok, "event ok")
-        safe_text(event.failure_code, "event failure_code")
-        safe_text(event.message, "event message")
-        _require_event_invariant(event)
-        require_serializable_data(event.data, "invalid bootstrap event")
-    except TypeError:
-        raise TypeError("invalid bootstrap event") from None
-
-
-def _require_report_serializable(report: BootstrapReport) -> None:
-    try:
-        require_bool(report.ok, "report ok")
-        safe_text(report.failure_code, "report failure_code")
-        safe_text(report.message, "report message")
-    except TypeError:
-        raise TypeError("invalid bootstrap report") from None
-    try:
-        _require_events(report.events)
-        for event in report.events:
-            _require_event_serializable(event)
-    except TypeError:
-        raise TypeError("invalid bootstrap events") from None
-    try:
-        _require_report_invariant(report)
-        _require_report_exit_code(report)
-        require_serializable_data(report.data, "invalid bootstrap report")
-    except TypeError:
-        raise TypeError("invalid bootstrap report") from None
-
-
-def _require_event_invariant(event: BootstrapEvent) -> None:
-    if event.ok != (event.failure_code == "ok"):
-        raise TypeError("invalid bootstrap event")
-
-
-def _require_report_invariant(report: BootstrapReport) -> None:
-    exit_code = exit_code_for(report.failure_code)
-    if report.ok:
-        if report.failure_code != "ok" or exit_code != 0:
-            raise TypeError("invalid bootstrap report")
-        if _event_states(report.events) != BOOTSTRAP_STATES or any(not event.ok for event in report.events):
-            raise TypeError("invalid bootstrap report")
-        return
-    if report.failure_code == "ok" or exit_code == 0:
-        raise TypeError("invalid bootstrap report")
-    if not report.events:
-        if report.failure_code != "invalid_args" or report.message != "invalid bootstrap config":
-            raise TypeError("invalid bootstrap report")
-        return
-    terminal = report.events[-1]
-    if terminal.ok or terminal.failure_code != report.failure_code:
-        raise TypeError("invalid bootstrap report")
-
-
-def _require_report_exit_code(report: BootstrapReport) -> None:
-    expected = exit_code_for(report.failure_code)
-    if type(report.exit_code) is not int or isinstance(report.exit_code, bool) or report.exit_code != expected:
-        raise TypeError("invalid bootstrap report")
-
-
-def _event_states(events: tuple[BootstrapEvent, ...]) -> tuple[str, ...]:
-    return tuple(event.state for event in events)
+def _optional_path(value: object, name: str) -> str | None:
+    return None if value is None else safe_text(value, name)
 
 
 __all__ = ["BOOTSTRAP_STATES", "BootstrapConfig", "BootstrapConfigError", "BootstrapEvent", "BootstrapReport", "run_bootstrap"]

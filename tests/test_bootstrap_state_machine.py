@@ -1,8 +1,10 @@
 from __future__ import annotations
 
-import builtins
 import gc
+import json
 import socket
+import subprocess
+import tempfile
 import weakref
 from collections.abc import Mapping
 from pathlib import Path
@@ -10,13 +12,16 @@ from types import MappingProxyType
 
 import pytest
 
+FIXTURES = Path(__file__).parent / "fixtures" / "bootstrap"
+
 
 def _config(**overrides: object):
     from canon.bootstrap import BootstrapConfig
 
+    workspace = Path(tempfile.mkdtemp(prefix="canon-bootstrap-test-"))
     values = {
-        "workspace": "C:/work/canon",
-        "state_dir": "C:/work/canon/.canon",
+        "workspace": str(workspace),
+        "state_dir": ".canon",
         "target": "codex-cli",
         "tier": "native-advisory",
         "profile": "handoff",
@@ -35,6 +40,73 @@ def _success_report():
     from canon.bootstrap import run_bootstrap
 
     return run_bootstrap(_config(target="chatgpt-app", tier="guided"))
+
+
+def _copy_inputs(workspace: Path) -> None:
+    (workspace / "records.jsonl").write_bytes((FIXTURES / "records.jsonl").read_bytes())
+    (workspace / "atoms.jsonl").write_bytes((FIXTURES / "atoms.jsonl").read_bytes())
+    (workspace / "readiness_pass.json").write_bytes((FIXTURES / "readiness_pass.json").read_bytes())
+    (workspace / "readiness_fail_missing_goal.json").write_bytes(
+        (FIXTURES / "readiness_fail_missing_goal.json").read_bytes(),
+    )
+
+
+def _source_config(workspace: Path, **overrides: object):
+    values = {
+        "workspace": str(workspace),
+        "state_dir": ".canon",
+        "target": "codex-cli",
+        "tier": "native-advisory",
+        "profile": "handoff",
+        "offline": False,
+        "run_id": "run:task9.v1",
+        "records_path": "records.jsonl",
+        "atoms_path": "atoms.jsonl",
+        "readiness_response_path": "readiness_pass.json",
+    }
+    values.update(overrides)
+    return _config(**values)
+
+
+def _run_source_bootstrap(workspace: Path, **overrides: object):
+    from canon.bootstrap import run_bootstrap
+
+    return run_bootstrap(_source_config(workspace, **overrides))
+
+
+def _read_json(path: Path) -> dict[str, object]:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _tree(root: Path) -> list[str]:
+    return sorted(path.relative_to(root).as_posix() for path in root.rglob("*"))
+
+
+def _state_event(report: object, state: str):
+    for event in report.events:  # type: ignore[attr-defined]
+        if event.state == state:
+            return event
+    raise AssertionError(f"missing state {state}")
+
+
+def _witness_path(report: object, workspace: Path) -> Path:
+    value = report.to_result_data()["witness_path"]  # type: ignore[index]
+    assert type(value) is str
+    assert "\\" not in value
+    return workspace / value
+
+
+def _cache_entry(report: object, workspace: Path) -> dict[str, object]:
+    key = report.to_result_data()["cache_key"]  # type: ignore[index]
+    assert type(key) is str
+    return _read_json(workspace / ".canon" / "cache" / "bundles" / f"{key.removeprefix('sha256:')}.json")
+
+
+def _assert_no_raw_material(rendered: str, workspace: Path) -> None:
+    assert "Feature-first. Words with weight." not in rendered
+    assert "# CANON" not in rendered
+    assert str(workspace) not in rendered
+    assert _Canary.token not in rendered
 
 
 def _report_serializers(report: object):
@@ -162,6 +234,375 @@ def test_non_enforced_placeholder_reaches_full_prefix_with_adapter_tiers() -> No
     assert report.data["adapter_id"] == "chatgpt-app"  # type: ignore[index]
     assert report.data["authoritative_tier"] == "guided"  # type: ignore[index]
     assert report.data["requested_tier"] == "guided"  # type: ignore[index]
+
+
+def test_bootstrap_sources_readiness_cache_witness_and_release(tmp_path: Path) -> None:
+    from canon.bootstrap import BOOTSTRAP_STATES
+    from canon.witness import BootstrapWitness, validate_bootstrap_witness
+
+    workspace = tmp_path / "work"
+    workspace.mkdir()
+    _copy_inputs(workspace)
+
+    report = _run_source_bootstrap(workspace, started_at="2026-08-30T00:00:00Z")
+    data = report.to_result_data()
+    witness_path = _witness_path(report, workspace)
+    witness = BootstrapWitness.from_dict(_read_json(witness_path))
+    entry = _cache_entry(report, workspace)
+
+    assert report.ok is True
+    assert _event_states(report) == BOOTSTRAP_STATES
+    assert data["cache_status"] == "miss"
+    assert data["readiness_verdict"] == "pass"
+    assert data["host_enforcement_observed"] is False
+    assert witness.started_at == "2026-08-30T00:00:00Z"
+    assert validate_bootstrap_witness(witness) == []
+    assert entry["schema"] == "canon.bootstrap-cache-entry/v1"
+    assert entry["cache_key"] == data["cache_key"]
+    assert entry["source_state"] == data["source_state"]
+    assert (workspace / ".canon" / "cache" / "current.json").exists()
+    _assert_no_raw_material(json.dumps(report.to_result_data()), workspace)
+    _assert_no_raw_material(witness_path.read_text(encoding="utf-8"), workspace)
+
+
+def test_second_identical_bootstrap_reuses_cache_without_compiling(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import canon.bootstrap_runtime as runtime
+
+    workspace = tmp_path / "work"
+    workspace.mkdir()
+    _copy_inputs(workspace)
+    first = _run_source_bootstrap(workspace)
+
+    def forbidden_compile(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        raise AssertionError("cache hit must not compile")
+
+    monkeypatch.setattr(runtime, "compile_capsule", forbidden_compile)
+    second = _run_source_bootstrap(workspace)
+
+    assert first.ok is True
+    assert second.ok is True
+    assert first.to_result_data()["cache_status"] == "miss"
+    assert second.to_result_data()["cache_status"] == "hit"
+    for key in ("cache_key", "capsule_id", "manifest_sha256", "canon_md_sha256"):
+        assert first.to_result_data()[key] == second.to_result_data()[key]
+
+
+def test_bootstrap_cache_key_changes_for_sources_profile_offline_target_and_descriptor(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import canon.bootstrap as bootstrap
+    from canon.adapter import AdapterDescriptor, descriptor_for
+
+    workspace = tmp_path / "work"
+    workspace.mkdir()
+    _copy_inputs(workspace)
+    base = _run_source_bootstrap(workspace, run_id="run-base").to_result_data()["cache_key"]
+    changed_source = workspace / "records.jsonl"
+    changed_source.write_bytes(changed_source.read_bytes() + b"\n")
+    source_key = _run_source_bootstrap(workspace, run_id="run-source").to_result_data()["cache_key"]
+    changed_source.write_bytes((FIXTURES / "records.jsonl").read_bytes())
+    profile_key = _run_source_bootstrap(workspace, run_id="run-profile", profile="needle").to_result_data()["cache_key"]
+    offline_key = _run_source_bootstrap(workspace, run_id="run-offline", offline=True).to_result_data()["cache_key"]
+    target_key = _run_source_bootstrap(workspace, run_id="run-target", target="chatgpt-app", tier="guided").to_result_data()["cache_key"]
+    original = descriptor_for("codex-cli")
+    patched = AdapterDescriptor.from_dict({**original.to_dict(), "version": "foundation-task9"})
+    monkeypatch.setattr(bootstrap, "descriptor_for", lambda target: patched)
+    descriptor_key = _run_source_bootstrap(workspace, run_id="run-descriptor").to_result_data()["cache_key"]
+
+    assert len({base, source_key, profile_key, offline_key, target_key, descriptor_key}) == 6
+
+
+@pytest.mark.parametrize("corrupt_current", (True, False))
+def test_corrupt_cache_state_fails_closed_without_recompile_or_witness(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    corrupt_current: bool,
+) -> None:
+    import canon.bootstrap_runtime as runtime
+
+    workspace = tmp_path / "work"
+    workspace.mkdir()
+    _copy_inputs(workspace)
+    first = _run_source_bootstrap(workspace)
+    key = first.to_result_data()["cache_key"]
+    witnesses_before = _tree(workspace / ".canon" / "witnesses")
+    assert type(key) is str
+    if corrupt_current:
+        (workspace / ".canon" / "cache" / "current.json").write_text("[]\n", encoding="utf-8")
+    else:
+        path = workspace / ".canon" / "cache" / "bundles" / f"{key.removeprefix('sha256:')}.json"
+        path.write_text("{bad-json\n", encoding="utf-8")
+
+    def forbidden_compile(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        raise AssertionError("corrupt cache must fail closed")
+
+    monkeypatch.setattr(runtime, "compile_capsule", forbidden_compile)
+    report = _run_source_bootstrap(workspace, run_id="run-corrupt")
+
+    assert report.ok is False
+    assert report.failure_code in ("io_error", "conflict")
+    assert report.events[-1].state == "compile_or_reuse_capsule"
+    assert "release_to_work" not in _event_states(report)
+    assert _tree(workspace / ".canon" / "witnesses") == witnesses_before
+
+
+def test_failed_readiness_is_terminal_and_reports_missing_ids(tmp_path: Path) -> None:
+    workspace = tmp_path / "work"
+    workspace.mkdir()
+    _copy_inputs(workspace)
+
+    report = _run_source_bootstrap(workspace, readiness_response_path="readiness_fail_missing_goal.json")
+    data = report.to_result_data()
+
+    assert report.ok is False
+    assert report.failure_code == "readiness_failed"
+    assert report.events[-1].state == "readiness_probe"
+    assert data["readiness_verdict"] == "fail"
+    assert data["missing_ids"] == ["goal-foundation"]
+    assert "release_to_work" not in _event_states(report)
+    assert not (workspace / ".canon" / "witnesses").exists()
+
+
+def test_stale_frontier_response_shape_cannot_pass_live_readiness_api(tmp_path: Path) -> None:
+    workspace = tmp_path / "work"
+    workspace.mkdir()
+    _copy_inputs(workspace)
+    response = _read_json(workspace / "readiness_pass.json")
+    response["frontier"] = response.pop("frontier_state_ids")
+    (workspace / "readiness_stale.json").write_text(json.dumps(response, sort_keys=True) + "\n", encoding="utf-8")
+
+    report = _run_source_bootstrap(workspace, readiness_response_path="readiness_stale.json")
+
+    assert report.ok is False
+    assert report.failure_code == "readiness_failed"
+    assert report.to_result_data()["readiness_verdict"] in ("fail", "blocked")
+    assert "release_to_work" not in _event_states(report)
+
+
+def test_absent_readiness_response_releases_only_for_non_enforced_builtin(tmp_path: Path) -> None:
+    workspace = tmp_path / "work"
+    workspace.mkdir()
+    _copy_inputs(workspace)
+
+    report = _run_source_bootstrap(workspace, readiness_response_path=None, target="chatgpt-app", tier="guided")
+    data = report.to_result_data()
+    witness = _read_json(_witness_path(report, workspace))
+
+    assert report.ok is True
+    assert data["readiness_verdict"] == "unknown"
+    assert data["readiness_response_hash"] is None
+    assert data["does_not_prove"]
+    assert witness["readiness_result"]["verdict"] == "unknown"
+
+
+def test_absent_readiness_response_fails_closed_for_enforced_descriptor(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import canon.bootstrap as bootstrap
+    from canon.adapter import AdapterDescriptor
+
+    workspace = tmp_path / "work"
+    workspace.mkdir()
+    _copy_inputs(workspace)
+    descriptor = AdapterDescriptor(
+        adapter_id="owned-wrapper",
+        display_name="Owned Wrapper",
+        version="1",
+        integration_tier="enforced",
+        target_surfaces=("CANON.md",),
+        import_modes=("file",),
+        export_modes=("file",),
+        bootstrap={"can_block_before_work": True},
+        evidence_refs=("fixture:owned-wrapper-blocking-start",),
+    )
+    monkeypatch.setattr(bootstrap, "descriptor_for", lambda target: descriptor)
+
+    report = _run_source_bootstrap(workspace, target="owned-wrapper", tier="enforced", readiness_response_path=None)
+
+    assert report.ok is False
+    assert report.failure_code == "readiness_failed"
+    assert report.events[-1].state == "readiness_probe"
+    assert not (workspace / ".canon" / "witnesses").exists()
+
+
+def test_artificial_enforced_success_records_observed_host_enforcement(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import canon.bootstrap as bootstrap
+    from canon.adapter import AdapterDescriptor
+    from canon.witness import BootstrapWitness, validate_bootstrap_witness
+
+    workspace = tmp_path / "work"
+    workspace.mkdir()
+    _copy_inputs(workspace)
+    descriptor = AdapterDescriptor(
+        adapter_id="owned-wrapper",
+        display_name="Owned Wrapper",
+        version="1",
+        integration_tier="enforced",
+        target_surfaces=("CANON.md",),
+        import_modes=("file",),
+        export_modes=("file",),
+        bootstrap={"can_block_before_work": True},
+        evidence_refs=("fixture:owned-wrapper-blocking-start",),
+    )
+    monkeypatch.setattr(bootstrap, "descriptor_for", lambda target: descriptor)
+
+    report = _run_source_bootstrap(workspace, target="owned-wrapper", tier="enforced")
+    witness = _read_json(_witness_path(report, workspace))
+
+    assert report.ok is True
+    assert report.to_result_data()["host_enforcement_observed"] is True
+    assert witness["host_enforcement_observed"] is True
+    assert {check["verdict"] for check in witness["checks"]} == {"pass"}
+    assert validate_bootstrap_witness(BootstrapWitness.from_dict(witness)) == []
+
+
+def test_witness_filename_is_digest_derived_and_duplicate_runs_are_safe(tmp_path: Path) -> None:
+    workspace = tmp_path / "work"
+    workspace.mkdir()
+    _copy_inputs(workspace)
+
+    first = _run_source_bootstrap(workspace, run_id="run:task9.v1", started_at="same")
+    second = _run_source_bootstrap(workspace, run_id="run:task9.v1", started_at="same")
+    conflict = _run_source_bootstrap(workspace, run_id="run:task9.v1", started_at="different")
+    witness_path = _witness_path(first, workspace)
+
+    assert first.ok is True
+    assert second.ok is True
+    assert conflict.failure_code == "conflict"
+    assert conflict.events[-1].state == "emit_witness"
+    assert "run:task9.v1" not in witness_path.name
+    assert witness_path.name.startswith("run-")
+    assert witness_path.name.endswith(".json")
+    assert "release_to_work" not in _event_states(conflict)
+
+
+def test_witness_directory_failure_is_terminal_before_release(tmp_path: Path) -> None:
+    workspace = tmp_path / "work"
+    workspace.mkdir()
+    _copy_inputs(workspace)
+    witness_parent = workspace / ".canon" / "witnesses"
+    witness_parent.parent.mkdir()
+    witness_parent.write_text("not a directory\n", encoding="utf-8")
+
+    report = _run_source_bootstrap(workspace)
+
+    assert report.ok is False
+    assert report.failure_code == "io_error"
+    assert report.events[-1].state == "emit_witness"
+    assert "release_to_work" not in _event_states(report)
+
+
+@pytest.mark.parametrize(
+    ("overrides", "failure"),
+    (
+        ({"records_path": "missing.jsonl"}, "source_unreachable"),
+        ({"records_path": "../outside.jsonl"}, "unsafe_path"),
+        ({"state_dir": "../outside"}, "unsafe_path"),
+        ({"records_path": "-"}, "invalid_args"),
+        ({"atoms_path": None}, "invalid_args"),
+    ),
+)
+def test_path_and_source_argument_failures_prevent_state_mutation(
+    tmp_path: Path,
+    overrides: dict[str, object],
+    failure: str,
+) -> None:
+    workspace = tmp_path / "work"
+    workspace.mkdir()
+    _copy_inputs(workspace)
+
+    report = _run_source_bootstrap(workspace, **overrides)
+
+    assert report.ok is False
+    assert report.failure_code == failure
+    assert "compile_or_reuse_capsule" not in _event_states(report)
+    assert not (workspace / ".canon").exists()
+
+
+@pytest.mark.parametrize("role", ("atoms", "readiness"))
+def test_secret_inputs_are_quarantined_before_cache_witness_or_public_leak(tmp_path: Path, role: str) -> None:
+    workspace = tmp_path / "work"
+    workspace.mkdir()
+    _copy_inputs(workspace)
+    canary = json.loads((FIXTURES / "secret_atoms.jsonl").read_text(encoding="utf-8"))["value"]["summary"]
+    if role == "atoms":
+        (workspace / "atoms.jsonl").write_bytes((FIXTURES / "secret_atoms.jsonl").read_bytes())
+        report = _run_source_bootstrap(workspace)
+    else:
+        (workspace / "readiness_secret.json").write_text(
+            json.dumps({"schema": "canon.readiness-response/v1", "active_goal_ids": [canary]}) + "\n",
+            encoding="utf-8",
+        )
+        report = _run_source_bootstrap(workspace, readiness_response_path="readiness_secret.json")
+
+    rendered = json.dumps(report.to_dict(), sort_keys=True) + repr(report)
+    assert report.failure_code == "secret_quarantine"
+    assert canary not in rendered
+    assert not (workspace / ".canon").exists()
+
+
+def test_direct_api_rejects_mutually_exclusive_or_hostile_readiness_inputs() -> None:
+    from canon.bootstrap import BootstrapConfig, BootstrapConfigError
+
+    with pytest.raises(BootstrapConfigError):
+        _config(readiness_response={}, readiness_response_path="response.json")
+
+    canary = _Canary()
+    with pytest.raises(BootstrapConfigError) as excinfo:
+        BootstrapConfig(
+            workspace=".",
+            state_dir=".canon",
+            target="codex-cli",
+            tier="native-advisory",
+            profile="handoff",
+            offline=False,
+            run_id="run-1",
+            readiness_response=_HostileMapping(canary),
+        )
+    assert _Canary.token not in str(excinfo.value)
+    assert canary.calls == []
+
+
+def test_empty_source_set_uses_live_empty_source_state_and_default_started_at(tmp_path: Path) -> None:
+    from canon.source_state import source_state_sha256
+
+    workspace = tmp_path / "work"
+    workspace.mkdir()
+
+    report = _run_source_bootstrap(workspace, records_path=None, atoms_path=None, readiness_response_path=None)
+    witness = _read_json(_witness_path(report, workspace))
+
+    assert report.ok is True
+    assert report.to_result_data()["source_state"]["records_digest"] == source_state_sha256(())
+    assert witness["started_at"] == "not-recorded"
+
+
+def test_missing_required_critical_atom_maps_to_critical_atom_loss(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import canon.bootstrap_runtime as runtime
+
+    workspace = tmp_path / "work"
+    workspace.mkdir()
+    _copy_inputs(workspace)
+    monkeypatch.setattr(runtime, "_critical_atom_ids", lambda atoms: ("missing-critical",))
+
+    report = _run_source_bootstrap(workspace)
+
+    assert report.failure_code == "critical_atom_loss"
+    assert report.events[-1].state == "compile_or_reuse_capsule"
+    assert not (workspace / ".canon" / "witnesses").exists()
 
 
 def test_unsupported_descriptor_terminates_before_lifecycle_release(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -644,22 +1085,14 @@ def test_event_order_is_always_terminal_prefix() -> None:
             assert report.events[-1] is failures[0]
 
 
-def test_task5_placeholder_performs_no_io_cache_witness_or_model_calls(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_bootstrap_performs_no_network_subprocess_or_provider_calls(monkeypatch: pytest.MonkeyPatch) -> None:
     from canon.bootstrap import run_bootstrap
-    from canon.source_state_cache import SourceStateCache
 
     def forbidden(*args: object, **kwargs: object) -> object:
         raise AssertionError("Task 5 bootstrap must not perform external work")
 
-    monkeypatch.setattr(builtins, "open", forbidden)
-    monkeypatch.setattr(Path, "read_bytes", forbidden)
-    monkeypatch.setattr(Path, "read_text", forbidden)
-    monkeypatch.setattr(Path, "write_bytes", forbidden)
-    monkeypatch.setattr(Path, "write_text", forbidden)
     monkeypatch.setattr(socket, "socket", forbidden)
-    monkeypatch.setattr(SourceStateCache, "get", forbidden)
-    monkeypatch.setattr(SourceStateCache, "put", forbidden)
-    monkeypatch.setattr(SourceStateCache, "current", forbidden)
+    monkeypatch.setattr(subprocess, "run", forbidden)
 
     report = run_bootstrap(_config(target="chatgpt-app", tier="guided"))
 

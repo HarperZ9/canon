@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import re
+from pathlib import Path
 
 import pytest
 
@@ -157,3 +158,20 @@ def test_cli_no_color_no_color_env_and_non_tty_output_keep_visible_labels_only()
     assert ANSI_RE.search(no_color_stdout.getvalue()) is None
     assert ANSI_RE.search(no_color_env_stdout.getvalue()) is None
     assert ANSI_RE.search(non_tty_stdout.getvalue()) is None
+
+
+def test_bootstrap_human_output_respects_no_color_controls(tmp_path: Path) -> None:
+    from canon.cli import run_cli
+
+    workspace = tmp_path / "work"
+    workspace.mkdir()
+    args = ["bootstrap", "--workspace", str(workspace), "--target", "chatgpt-app",
+            "--tier", "guided", "--run-id", "run-accessible"]
+    no_color_stdout = TtyStringIO()
+    env_stdout = TtyStringIO()
+
+    assert run_cli(["--no-color", *args], stdout=no_color_stdout, stderr=io.StringIO(), environ={}) == EX_OK
+    assert run_cli(args, stdout=env_stdout, stderr=io.StringIO(), environ={"NO_COLOR": ""}) == EX_OK
+    assert no_color_stdout.getvalue() == "PASS bootstrap: release to work\n"
+    assert env_stdout.getvalue() == "PASS bootstrap: release to work\n"
+    assert ANSI_RE.search(no_color_stdout.getvalue() + env_stdout.getvalue()) is None

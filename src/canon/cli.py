@@ -159,6 +159,10 @@ def _bootstrap_result(parsed: argparse.Namespace):
             profile=parsed.profile,
             offline=parsed.offline,
             run_id=parsed.run_id,
+            records_path=parsed.records,
+            atoms_path=parsed.atoms,
+            readiness_response_path=parsed.readiness_response,
+            started_at=parsed.started_at,
         )
     )
     return make_result(
@@ -209,6 +213,10 @@ def _add_bootstrap_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--profile", default="handoff", help="capsule profile")
     parser.add_argument("--offline", action="store_true", help="avoid later online work")
     parser.add_argument("--run-id", required=True, help="bootstrap run id")
+    parser.add_argument("--records", default=None, help="Record JSONL input path")
+    parser.add_argument("--atoms", default=None, help="CanonAtom JSONL input path")
+    parser.add_argument("--readiness-response", default=None, help="readiness response JSON path")
+    parser.add_argument("--started-at", default="not-recorded", help="explicit witness start time")
 
 
 def _add_compile_args(parser: argparse.ArgumentParser, *, include_out: bool) -> None:

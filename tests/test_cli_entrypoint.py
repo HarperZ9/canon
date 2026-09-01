@@ -22,10 +22,8 @@ COMMANDS = (
     "bootstrap",
 )
 BOOTSTRAP_ARGS = (
-    "--workspace",
-    "C:/work/canon",
     "--state-dir",
-    "C:/work/canon/.canon",
+    ".canon",
     "--target",
     "chatgpt-app",
     "--tier",
@@ -37,6 +35,7 @@ BOOTSTRAP_ARGS = (
     "run-cli",
 )
 SECRET_FIXTURE = Path(__file__).parent / "fixtures" / "bootstrap" / "secret_atoms.jsonl"
+BOOTSTRAP_FIXTURES = Path(__file__).parent / "fixtures" / "bootstrap"
 
 
 class _TtyStringIO(io.StringIO):
@@ -46,6 +45,16 @@ class _TtyStringIO(io.StringIO):
 
 def _canary() -> str:
     return json.loads(SECRET_FIXTURE.read_text(encoding="utf-8"))["value"]["summary"]
+
+
+def _copy_bootstrap_inputs(workspace: Path) -> None:
+    (workspace / "records.jsonl").write_bytes((BOOTSTRAP_FIXTURES / "records.jsonl").read_bytes())
+    (workspace / "atoms.jsonl").write_bytes((BOOTSTRAP_FIXTURES / "atoms.jsonl").read_bytes())
+    (workspace / "readiness_pass.json").write_bytes((BOOTSTRAP_FIXTURES / "readiness_pass.json").read_bytes())
+
+
+def _bootstrap_args(workspace: Path, *extra: str) -> list[str]:
+    return ["--workspace", str(workspace), *BOOTSTRAP_ARGS, *extra]
 
 
 def test_run_cli_help_uses_injected_stdout_and_lists_parser_surface(capsys: pytest.CaptureFixture[str]) -> None:
@@ -171,14 +180,16 @@ def test_placeholder_commands_emit_accessible_result_to_injected_stdout() -> Non
         assert stderr.getvalue() == ""
 
 
-def test_bootstrap_command_emits_accessible_result_to_injected_stdout() -> None:
+def test_bootstrap_command_emits_accessible_result_to_injected_stdout(tmp_path: Path) -> None:
     from canon.cli import run_cli
     from canon.exit_codes import EX_OK
 
+    workspace = tmp_path / "work"
+    workspace.mkdir()
     stdout = io.StringIO()
     stderr = io.StringIO()
 
-    assert run_cli(["bootstrap", *BOOTSTRAP_ARGS], stdout=stdout, stderr=stderr, environ={}) == EX_OK
+    assert run_cli(["bootstrap", *_bootstrap_args(workspace)], stdout=stdout, stderr=stderr, environ={}) == EX_OK
 
     assert stdout.getvalue() == "PASS bootstrap: release to work\n"
     assert stderr.getvalue() == ""
@@ -264,17 +275,19 @@ def test_python_module_json_stdout_is_utf8_bytes_with_lf_only() -> None:
     assert result.stderr == b""
 
 
-def test_bootstrap_json_output_is_canonical_and_contains_state_report() -> None:
+def test_bootstrap_json_output_is_canonical_and_contains_state_report(tmp_path: Path) -> None:
     import json
 
     from canon.canonical_json import canonical_json_text
     from canon.cli import run_cli
     from canon.exit_codes import EX_OK
 
+    workspace = tmp_path / "work"
+    workspace.mkdir()
     stdout = io.StringIO()
     stderr = io.StringIO()
 
-    exit_code = run_cli(["--json", "bootstrap", *BOOTSTRAP_ARGS], stdout=stdout, stderr=stderr, environ={})
+    exit_code = run_cli(["--json", "bootstrap", *_bootstrap_args(workspace)], stdout=stdout, stderr=stderr, environ={})
 
     assert exit_code == EX_OK
     assert stderr.getvalue() == ""
@@ -287,7 +300,73 @@ def test_bootstrap_json_output_is_canonical_and_contains_state_report() -> None:
     assert payload["data"]["adapter_id"] == "chatgpt-app"
     assert payload["data"]["authoritative_tier"] == "guided"
     assert payload["data"]["requested_tier"] == "guided"
+    assert payload["data"]["readiness_verdict"] == "unknown"
+    assert not Path(payload["data"]["witness_path"]).is_absolute()
     assert [event["state"] for event in payload["data"]["events"]][-1] == "release_to_work"
+
+
+def test_bootstrap_cli_sources_readiness_and_option_order_are_canonical(tmp_path: Path) -> None:
+    from canon.canonical_json import canonical_json_text
+    from canon.cli import run_cli
+    from canon.exit_codes import EX_OK
+
+    workspace = tmp_path / "work"
+    workspace.mkdir()
+    _copy_bootstrap_inputs(workspace)
+    args = _bootstrap_args(
+        workspace,
+        "--records",
+        "records.jsonl",
+        "--atoms",
+        "atoms.jsonl",
+        "--readiness-response",
+        "readiness_pass.json",
+        "--started-at",
+        "2026-08-30T00:00:00Z",
+    )
+    first_out, first_err = io.StringIO(), io.StringIO()
+    second_out, second_err = io.StringIO(), io.StringIO()
+
+    first = run_cli(["--json", "bootstrap", *args], stdout=first_out, stderr=first_err, environ={})
+    second = run_cli(["bootstrap", *args, "--json"], stdout=second_out, stderr=second_err, environ={})
+    first_payload = json.loads(first_out.getvalue())
+    second_payload = json.loads(second_out.getvalue())
+
+    assert first == second == EX_OK
+    assert first_err.getvalue() == second_err.getvalue() == ""
+    assert first_out.getvalue() == canonical_json_text(first_payload)
+    assert second_out.getvalue() == canonical_json_text(second_payload)
+    assert first_payload["data"]["readiness_verdict"] == "pass"
+    assert second_payload["data"]["cache_status"] == "hit"
+    assert first_payload["data"]["witness_path"] == second_payload["data"]["witness_path"]
+    assert "Feature-first. Words with weight." not in first_out.getvalue() + second_out.getvalue()
+
+
+@pytest.mark.parametrize(
+    "extra",
+    (
+        ("--records", "records.jsonl"),
+        ("--atoms", "atoms.jsonl"),
+        ("--records", "-", "--atoms", "atoms.jsonl"),
+    ),
+)
+def test_bootstrap_cli_rejects_source_pair_errors_and_stdin(tmp_path: Path, extra: tuple[str, ...]) -> None:
+    from canon.cli import run_cli
+    from canon.exit_codes import EX_USAGE
+
+    workspace = tmp_path / "work"
+    workspace.mkdir()
+    _copy_bootstrap_inputs(workspace)
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+
+    code = run_cli(["--json", "bootstrap", *_bootstrap_args(workspace, *extra)], stdout=stdout, stderr=stderr, environ={})
+
+    assert code == EX_USAGE
+    assert stderr.getvalue() == ""
+    payload = json.loads(stdout.getvalue())
+    assert payload["failure_code"] == "invalid_args"
+    assert "records.jsonl" not in stdout.getvalue()
 
 
 def test_python_module_json_parse_error_suppresses_parser_stderr() -> None:
