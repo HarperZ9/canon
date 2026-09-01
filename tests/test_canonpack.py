@@ -85,6 +85,9 @@ def _set_encrypted_flag(path: Path, name: str) -> None:
         "//server/share/a.json",
         "records\\a.json",
         "records/a.json:ads",
+        "records/C:",
+        "records/D:/x.json",
+        "records/C:/tmp/a.json",
         "records/./a.json",
         "records/a//b.json",
         "records/a.json\0x",
@@ -101,6 +104,16 @@ def test_manifest_rejects_unsafe_names(name: str) -> None:
 
 def test_normalize_manifest_path_accepts_canonical_relative_posix_name() -> None:
     assert normalize_manifest_path("records/a.json") == "records/a.json"
+
+
+def test_manifest_rejects_unicode_normalization_alias() -> None:
+    manifest = _manifest([
+        _manifest_entry("records/caf\u00e9.json"),
+        _manifest_entry("records/cafe\u0301.json"),
+    ])
+
+    with pytest.raises(CanonpackError, match="invalid-path"):
+        preflight_manifest(manifest)
 
 
 def test_manifest_rejects_duplicate_case_fold_names() -> None:
@@ -172,6 +185,41 @@ def test_zip_preflight_rejects_special_entry(tmp_path: Path) -> None:
 
     with pytest.raises(CanonpackError, match="special-entry"):
         preflight_zip(pack)
+
+
+def test_zip_preflight_rejects_nested_drive_designator_name(tmp_path: Path) -> None:
+    pack = tmp_path / "nested-drive.canonpack"
+    body = b"{}"
+    _write_pack(pack, _manifest([_manifest_entry("records/C:/tmp/a.json", body=body)]), {
+        "records/C:/tmp/a.json": body,
+    })
+
+    with pytest.raises(CanonpackError, match="invalid-path"):
+        preflight_zip(pack)
+
+
+def test_zip_preflight_rejects_non_nfc_central_name(tmp_path: Path) -> None:
+    pack = tmp_path / "unicode-alias.canonpack"
+    body = b"{}"
+    _write_pack(pack, _manifest([_manifest_entry("records/cafe\u0301.json", body=body)]), {
+        "records/cafe\u0301.json": body,
+    })
+
+    with pytest.raises(CanonpackError, match="invalid-path"):
+        preflight_zip(pack)
+
+
+def test_zip_preflight_validates_limits_before_opening_archive(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_init(*args: object, **kwargs: object) -> None:
+        raise AssertionError("invalid limits must fail before ZipFile opens")
+
+    monkeypatch.setattr(zipfile.ZipFile, "__init__", fail_init)
+
+    with pytest.raises(CanonpackError, match="invalid-limit"):
+        preflight_zip(tmp_path / "unused.canonpack", limits=True)  # type: ignore[arg-type]
 
 
 def test_zip_preflight_checks_digest_without_extracting(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

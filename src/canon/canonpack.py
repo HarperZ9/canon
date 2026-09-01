@@ -6,6 +6,7 @@ import os
 import posixpath
 import re
 import stat
+import unicodedata
 import zipfile
 from dataclasses import dataclass
 from json import JSONDecodeError
@@ -61,9 +62,11 @@ def normalize_manifest_path(name: str) -> str:
         raise CanonpackError("invalid-path", "path must be a non-empty string")
     if "\0" in name or any(ord(ch) < 32 or ord(ch) == 127 for ch in name):
         raise CanonpackError("invalid-path", name)
+    if unicodedata.normalize("NFC", name) != name:
+        raise CanonpackError("invalid-path", name)
     if "\\" in name or name.startswith(("/", "//")) or _DRIVE_RE.match(name):
         raise CanonpackError("invalid-path", name)
-    if is_windows_ads_path(name):
+    if is_windows_ads_path(name) or ":" in name:
         raise CanonpackError("invalid-path", name)
     if posixpath.normpath(name) != name:
         raise CanonpackError("invalid-path", name)
@@ -75,8 +78,7 @@ def normalize_manifest_path(name: str) -> str:
     return name
 
 def preflight_manifest(manifest: dict, *, limits: CanonpackLimits = CanonpackLimits()) -> CanonpackPreflight:
-    if not isinstance(limits, CanonpackLimits):
-        raise CanonpackError("invalid-limit", "limits must be CanonpackLimits")
+    _require_limits(limits)
     if not isinstance(manifest, dict) or set(manifest) != _MANIFEST_KEYS:
         raise CanonpackError("invalid-manifest")
     if manifest.get("schema") != MANIFEST_SCHEMA or not isinstance(manifest.get("entries"), list):
@@ -91,6 +93,7 @@ def preflight_manifest(manifest: dict, *, limits: CanonpackLimits = CanonpackLim
     return CanonpackPreflight(True, entries, digest, ())
 
 def preflight_zip(path: str | Path, *, limits: CanonpackLimits = CanonpackLimits()) -> CanonpackPreflight:
+    _require_limits(limits)
     archive = _coerce_archive_path(path)
     if is_reparse_point(archive):
         raise CanonpackError("archive-reparse", os.fspath(path))
@@ -114,6 +117,10 @@ def _reject_windows_alias(part: str, full: str) -> None:
     stem = part.split(".", 1)[0].casefold()
     if stem in _RESERVED:
         raise CanonpackError("invalid-path", full)
+
+def _require_limits(limits: object) -> None:
+    if not isinstance(limits, CanonpackLimits):
+        raise CanonpackError("invalid-limit", "limits must be CanonpackLimits")
 
 def _entry_from_json(raw: object, limits: CanonpackLimits) -> CanonpackEntry:
     if not isinstance(raw, dict) or set(raw) != _ENTRY_KEYS:
@@ -160,7 +167,7 @@ def _check_manifest_totals(entries: tuple[CanonpackEntry, ...], limits: Canonpac
 def _check_duplicate_paths(paths: object) -> None:
     seen: set[str] = set()
     for path in paths:
-        key = path.casefold()
+        key = unicodedata.normalize("NFC", path.casefold())
         if key in seen:
             raise CanonpackError("duplicate-path", path)
         seen.add(key)
