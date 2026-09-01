@@ -333,4 +333,182 @@ regression in R2's landed guarantees.
 contributor extending the read leg lands on `vault_reader.py` and
 `vault_read_fidelity.py`; the R2 surfaces stay under R2's own decisions.
 
-<!-- M4.3 versions and M4.4 canon_check decisions append below in later commits. -->
+## D-89 — pin per seam, not one pin per package
+**Status:** accepted (M4.3, 2026-08-31).
+**Context:** every band ships a wire canon owns: F0's record envelope, R0's
+region markers and textblock grammar, R2's frontmatter and note codec, V2's
+drift-verdict shape, V3's persona-thesis payload, V4's reconcile-gate policy
+and run-witness kind, M4.1's transport seam, M4.2's vault frontend, plus the
+textutil helpers M4.1 and M4.2 share. A single package-wide `CANON_VERSION`
+would collapse every seam into one bump, so a change to the frontmatter codec
+would bump the record envelope too, and every fixture at rest would rewrite.
+**Decision:** one `SchemaPin` per seam. Sixteen constants ship at M4.3
+(`PIN_RECORD`, `PIN_BACKEND_SEAM`, `PIN_TEXTBLOCK_GRAMMAR`, `PIN_REGION_MARKER`,
+`PIN_FRONTMATTER`, `PIN_VAULT_NOTE`, `PIN_VAULT_IDENTITY_DIGEST`,
+`PIN_VAULT_HUB_MARKER`, `PIN_DRIFT_VERDICT`, `PIN_WRITING_GATE_REGISTER`,
+`PIN_PERSONA_THESIS_PAYLOAD`, `PIN_RECONCILE_GATE_POLICY`, `PIN_RUN_WITNESS`,
+`PIN_TRANSPORT_SEAM`, `PIN_VAULT_FRONTEND`, `PIN_TEXTUTIL`) named by their
+short-name in the closed `SEAM_PINS` vocabulary.
+**Consequence:** a rev to any one seam ships its own pin bump without
+disturbing the rest. A caller that wires two seams (a transport that carries
+records) reads two pins and compares each independently.
+
+## D-90 — semver-lite exact match at v0 and v1; wider policy deferred
+**Status:** accepted (M4.3).
+**Context:** full semver is a policy surface with rules for pre-release,
+build metadata, and range comparisons; canon does not need any of that in
+Wave 0. Every seam is either at `v0` (still-shifting design, no external
+migration owed) or `v1` (frozen wire, canonical form).
+**Decision:** `_VERSION_RE = ^v(0|[1-9]\d*)(\.(0|[1-9]\d*))?$`. Two pins are
+compatible iff their `name`, `version`, and `kind_tag` are byte-equal;
+`adr_ref` is metadata and does not count. Wider policy (range comparison,
+pre-release qualifiers, build metadata) lands under its own approval when a
+real caller needs it.
+**Consequence:** `is_compatible` is a three-field equality check the caller
+reads without ceremony. A future band adding a `v2` writes an explicit
+migrator (D-95) or refuses `IncompatiblePin`.
+
+## D-91 — `v0` is canonical; `v0.0` refused at construction
+**Status:** accepted (M4.3).
+**Context:** the semver-lite regex admits both `v0` and `v0.0`. Two spellings
+for the same version would hash and compare unequal (`is_compatible` is
+byte-equality on the version string), so a caller passing `"v0.0"` where the
+registry holds `"v0"` would silently fail cross-pin equality.
+**Decision:** `SchemaPin.__post_init__` refuses `version == "v0.0"` with
+`ValueError`. `v0` is the canonical zero spelling. Every other version is one
+or two integer segments; a trailing `.0` on a non-zero major is a wiring
+fault too (`_VERSION_RE` accepts `v1.0` but a future decision may narrow
+this if it becomes a problem in practice).
+**Consequence:** the registry has exactly one representation per version.
+Cross-pin equality is a stable comparison; a fixture pinning a version cannot
+disagree with the registry over a spelling.
+
+## D-92 — `SEAM_PINS` is a closed vocabulary; Wave 1 short-names are refused
+**Status:** accepted (M4.3).
+**Context:** Wave 1 names (`atom`, `capsule`, `omission`, `transform-receipt`,
+`readiness-probe`, `bootstrap-witness`, `adapter`) belong to a future band and
+have not been designed. A pin quietly landed under one of those names now
+would preempt the design work and constrain what the eventual seam can be.
+**Decision:** `SEAM_PINS: frozenset[str]` is the closed vocabulary of pin
+short-names. `SchemaPin.__post_init__` refuses any `name` not in `SEAM_PINS`.
+A module-level assertion enforces `SEAM_PINS.isdisjoint(_WAVE_ONE_NAMES)` at
+import time; a future contributor adding a Wave 1 pin without adding the
+short-name to `SEAM_PINS` first fails loud.
+**Consequence:** `pin_for` on a Wave 1 short-name refuses `UnknownPin`. A
+future Wave 1 band lands its own decision widening `SEAM_PINS`.
+
+## D-93 — pin drift is loud, not silent
+**Status:** accepted (M4.3).
+**Context:** a caller who wires a seam expects the pin they read to match
+the wire they speak. A silent fallthrough (returning `None` on an unknown
+pin, or returning a default pin on a bad kind_tag) would push the diagnosis
+downstream into whatever tries to use the wire; a loud refusal at the pin
+lookup lands the diagnosis at the coupling site.
+**Decision:** every failure path refuses a typed exception. `pin_for` on an
+unknown name → `UnknownPin`. `pin_from_schema_field` on a malformed kind_tag
+→ `MalformedPin`. `pin_from_schema_field` on a well-shaped kind_tag no pin
+matches → `UnknownPin`. `is_compatible` on a non-SchemaPin argument →
+`MalformedPin`. `migrate` cross-pin with no registered migrator →
+`IncompatiblePin`. Every constructor error → `ValueError` (a wiring fault).
+**Consequence:** a caller catches `VersionError` to handle every runtime
+version fault at once, or catches a specific subclass to react by fault
+class.
+
+## D-94 — backward compat by aliasing; the wire literal lives in one place
+**Status:** accepted (M4.3, landed as commit 8).
+**Context:** `canon.schema.SCHEMA = "canon.record/v1"` shipped in F0 and is
+read by `frontmatter.py`, `vault.py`, and every fixture on disk. Moving the
+literal into `versions.PIN_RECORD.kind_tag` without an alias would break
+every downstream module and rewrite every fixture; keeping two independent
+literals would let one drift while the other stayed put.
+**Decision:** the literal `"canon.record/v1"` lives in `versions.PIN_RECORD`.
+`schema.py` aliases it via a bottom-of-module import: `from canon.versions
+import PIN_RECORD; SCHEMA = PIN_RECORD.kind_tag`, followed by an `assert
+SCHEMA == "canon.record/v1"` that fails loud at import time on drift.
+`versions.py` imports nothing from `canon.schema`, so the late import has no
+cycle.
+**Consequence:** every downstream reader of `SCHEMA` reads the same bytes as
+`pin_for('record').kind_tag`. A test at commit 8 pins the alias so a rewrite
+that unwires the import fails the suite.
+
+## D-95 — migration is explicit-migrator-or-refuse
+**Status:** accepted (M4.3).
+**Context:** an implicit migration path (auto-derive a converter from a
+schema diff, or apply a chain of registered migrators transitively) would
+land a large policy surface at Wave 0 with no caller. Same-pin migration is
+trivial (identity); cross-pin migration without a caller wiring an explicit
+converter has no correct behavior canon can pick for them.
+**Decision:** `migrate(rec, from_pin, to_pin)` is identity on
+`from_pin == to_pin` (fast path, no lookup). Cross-pin without a registered
+migrator refuses `IncompatiblePin`. `register_migrator` refuses
+`MigratorConflict` on duplicate `(from, to)` registration; `unregister` is
+idempotent. Any exception a migrator raises wraps as
+`MigratorRaised(cause=original)` (a `MigrationError` subclass caught without
+a bare `except Exception`). Zero migrators ship at M4.3 close;
+`test_no_migrators_registered_at_m4_close` gates the empty state.
+**Consequence:** a future band that owes a migration ships its migrator in
+its own package and registers it at import time. Canon carries no fallback,
+no chaining, no transitive resolver.
+
+## D-96 — `pin_registry_scope` uses `contextvars.ContextVar`, not `threading.Lock`
+**Status:** accepted (M4.3).
+**Context:** a test-side override for the pin registry needs isolation from
+concurrent tests. Canon carries no `threading` primitives elsewhere; adding a
+`threading.Lock` would import a concern the container has never needed and
+would give the wrong isolation (a mutex serializes access; the tests want
+per-context state).
+**Decision:** `_REGISTRY_OVERRIDE` and `_MIGRATORS_OVERRIDE` are
+`contextvars.ContextVar`s. `pin_registry_scope` snapshots both into fresh
+mutable dicts and yields the pin dict; on exit (including on exception) both
+tokens reset and the prior context is restored. A test that installs a fake
+pin sees the fake inside the `with` block; a concurrent test in another
+context sees the default registry.
+**Consequence:** per-context isolation, not concurrent-mutation safety. Two
+tasks in the same context racing `register_migrator` still race; canon does
+not promise thread-safety on the registry.
+
+## D-97 — `SchemaPin` is frozen and constructor-validated
+**Status:** accepted (M4.3).
+**Context:** an unfrozen pin could be mutated at rest and break equality
+comparisons; a lazily-validated pin could pass a malformed `kind_tag` into
+`pin_from_schema_field` and confuse the reverse lookup.
+**Decision:** `SchemaPin` is `@dataclass(frozen=True, slots=True)`. Every
+field validates at `__post_init__` (split into `_validate_name`,
+`_validate_version`, `_validate_kind_tag`, `_validate_adr_ref`; each under
+15 lines to stay well under the 50-line function gate). A bad construction
+refuses `ValueError`, distinct from the runtime `VersionError` hierarchy.
+**Consequence:** a pin at rest is a byte-stable value the registry hands out
+by reference. Two `SchemaPin(...)` calls with the same fields are equal and
+hash to the same slot.
+
+## D-98 — the M4.1 and M4.2 seam pins ship at M4.3 close
+**Status:** accepted (M4.3).
+**Context:** `M4.1` lands `canon.transport-seam/v0` and `M4.2` lands
+`canon.vault-frontend/v0`. Deferring their pins to a later band would leave
+those two wires unnamed for one release cycle.
+**Decision:** `PIN_TRANSPORT_SEAM` and `PIN_VAULT_FRONTEND` ship in
+`versions.py` at M4.3 close (this branch). `M4.1`'s and `M4.2`'s prose
+contracts (already committed) reference their pin names in plain text; a
+future caller doing pin lookup gets a real answer immediately.
+**Consequence:** every seam that lands anywhere in M4 has a pin at M4 close.
+A caller that wires the transport reads `pin_for("transport-seam")`; a
+caller that wires the vault frontend reads `pin_for("vault-frontend")`.
+
+## D-99 — `vault-identity-digest` is a separate pin from `vault-note`
+**Status:** accepted (M4.3).
+**Context:** R2 D-29 named the on-disk file by digesting the record's
+`(scope, id)` key. The digest domain (the exact input bytes, the hash
+function, the truncation length) is separate from the note codec (the
+frontmatter shape, the body layout, the trailer). A rewrite of the digest
+domain rewrites every filename on disk; a rewrite of the note codec rewrites
+every file's content. The two concerns need to bump independently.
+**Decision:** `PIN_VAULT_NOTE` (`canon.vault-note/v0`) covers the note codec;
+`PIN_VAULT_IDENTITY_DIGEST` (`canon.vault-identity-digest/v1`) covers the
+digest domain. The digest domain ships at `v1` because R2 froze it as a
+one-way identity contract; the note codec ships at `v0` because the body
+layout may still shift under a future decision.
+**Consequence:** a future rewrite of the file-naming scheme bumps the digest
+pin without touching the note pin. A caller inspecting a vault reads both
+pins and knows exactly which concern moved.
+
+<!-- M4.4 canon_check decisions append below in a later commit. -->

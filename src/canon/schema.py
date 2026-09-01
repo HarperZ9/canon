@@ -30,8 +30,6 @@ import json
 import re
 from dataclasses import dataclass, replace
 
-SCHEMA = "canon.record/v1"
-
 # The five record kinds. Order is stable and load-bearing for fixtures.
 KIND_PERSONALITY_BLOCK = "personality-block"
 KIND_EPISODIC_MEMORY = "episodic-memory"
@@ -201,3 +199,16 @@ class Record:
 
     def with_temporal(self, temporal: Temporal | None) -> "Record":
         return replace(self, temporal=temporal)
+
+
+# D-94: canon.record/v1 lives as PIN_RECORD.kind_tag in versions.py; schema
+# aliases it here so every downstream reader of `SCHEMA` reads the same bytes,
+# and a drift between the pin and the wire literal fails loud at import time.
+# The bottom-of-module late import keeps the top-of-file surface clean and
+# avoids a cycle (versions.py imports nothing from canon.schema).
+from canon.versions import PIN_RECORD  # noqa: E402
+
+SCHEMA = PIN_RECORD.kind_tag
+assert SCHEMA == "canon.record/v1", (
+    f"PIN_RECORD.kind_tag drifted from the canon.record/v1 wire literal; "
+    f"got {SCHEMA!r}")
