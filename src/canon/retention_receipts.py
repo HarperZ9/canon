@@ -43,8 +43,9 @@ def _receipt(
     omission: Omission,
     retain_content_hash: bool,
 ) -> TransformReceipt:
-    output_hash = canonical_sha256(_receipt_payload(subject_id, action, refs, tombstone, omission))
-    input_hash = tombstone.content_sha256 if retain_content_hash else _unretained_input_hash(subject_id, action)
+    keep_hashes = retain_content_hash is True
+    output_hash = canonical_sha256(_receipt_payload(subject_id, action, refs, tombstone, omission, keep_hashes))
+    input_hash = tombstone.content_sha256 if keep_hashes else _unretained_input_hash(subject_id, action)
     return TransformReceipt(
         transform="redaction",
         method_id="retention-plan-v1",
@@ -66,23 +67,24 @@ def _receipt_payload(
     refs: tuple[object, ...],
     tombstone: object,
     omission: Omission,
+    retain_content_hash: bool,
 ) -> dict[str, object]:
     return {
         "action": action,
         "atom_schema": CanonAtom.atom_schema,
         "deleted_paths": [],
-        "refs_to_purge": [_ref_dict(ref) for ref in refs],
+        "refs_to_purge": [_ref_dict(ref, retain_content_hash) for ref in refs],
         "subject_id": subject_id,
         "tombstone": _tombstone_dict(tombstone),
         "omissions": [omission.to_dict()],
     }
 
 
-def _ref_dict(ref: object) -> dict[str, object]:
+def _ref_dict(ref: object, retain_content_hash: bool) -> dict[str, object]:
     return {
         "store": ref.store,
         "locator": ref.locator,
-        "content_sha256": ref.content_sha256,
+        "content_sha256": ref.content_sha256 if retain_content_hash else None,
         "contains_raw": ref.contains_raw,
     }
 

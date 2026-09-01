@@ -81,7 +81,7 @@ def validate_retention_policy(policy: RetentionPolicy) -> tuple[str, ...]:
     violations: list[str] = []
     if not _safe_identifier(policy.subject_id):
         _add(violations, "invalid-subject-id")
-    if policy.action not in RETENTION_ACTIONS:
+    if type(policy.action) is not str or policy.action not in RETENTION_ACTIONS:
         _add(violations, "invalid-action")
     if type(policy.retain_content_hash) is not bool:
         _add(violations, "invalid-retain-content-hash")
@@ -106,7 +106,7 @@ def make_tombstone(
         _add(violations, "invalid-purged-at-ord")
     if type(retain_content_hash) is not bool:
         _add(violations, "invalid-retain-content-hash")
-    if retain_content_hash is True and not is_sha256_ref(content_sha256):
+    if retain_content_hash is True and not _is_sha256_ref(content_sha256):
         _add(violations, "invalid-content-sha256")
     if violations:
         raise ValueError("invalid-tombstone: " + "; ".join(violations))
@@ -125,10 +125,12 @@ def plan_retention(
     ref_violations, valid_refs = _validate_refs(derived_refs)
     violations = policy_violations + list(ref_violations)
     checked_subject = subject_id if _safe_identifier(subject_id) else ""
-    action = policy.action if type(policy) is RetentionPolicy and isinstance(policy.action, str) else ""
+    action = policy.action if type(policy) is RetentionPolicy and type(policy.action) is str else ""
     if type(policy) is RetentionPolicy:
         _validate_plan_inputs(subject_id, policy, content_sha256, violations)
-    selected = _selected_refs(policy, valid_refs) if type(policy) is RetentionPolicy and not ref_violations else ()
+    selected = ()
+    if _can_select_refs(policy) and not ref_violations:
+        selected = _refs_for_policy(policy, _selected_refs(policy, valid_refs))
     _validate_coverage(policy, valid_refs, violations)
     if violations:
         return _plan(False, checked_subject, action, selected, None, (), (), tuple(violations))
@@ -168,10 +170,10 @@ def _validate_plan_inputs(
         _add(violations, "invalid-subject-id")
     elif _safe_identifier(policy.subject_id) and subject_id != policy.subject_id:
         _add(violations, "subject-policy-mismatch")
-    if policy.action != "retain" and policy.retain_content_hash is True:
+    if type(policy.action) is str and policy.action != "retain" and policy.retain_content_hash is True:
         if content_sha256 is None:
             _add(violations, "missing-content-sha256")
-        elif not is_sha256_ref(content_sha256):
+        elif not _is_sha256_ref(content_sha256):
             _add(violations, "invalid-content-sha256")
 
 
@@ -180,15 +182,15 @@ def _validate_policy_stores(stores: object, violations: list[str]) -> None:
         _add(violations, "invalid-derived-stores")
         return
     seen: set[str] = set()
-    for store in stores:
+    for index, store in enumerate(stores):
         if not _safe_identifier(store):
             _add(violations, "invalid-derived-store")
             continue
         normalized = _normalize(store)
         if store not in DERIVED_STORES:
-            _add(violations, f"unknown-derived-store:{store}")
+            _add(violations, f"unknown-derived-store:{index}")
         if normalized in seen:
-            _add(violations, f"duplicate-derived-store:{normalized}")
+            _add(violations, f"duplicate-derived-store:{index}")
         seen.add(normalized)
 
 
@@ -198,29 +200,29 @@ def _validate_refs(refs: object) -> tuple[tuple[str, ...], tuple[DerivedArtifact
         return ("invalid-derived-refs",), ()
     valid: list[DerivedArtifactRef] = []
     seen: set[tuple[str, str]] = set()
-    for ref in refs:
+    for index, ref in enumerate(refs):
         if type(ref) is not DerivedArtifactRef:
             _add(violations, "invalid-derived-ref")
             continue
-        if _validate_ref(ref, violations):
+        if _validate_ref(ref, index, violations):
             key = (_normalize(ref.store), _normalize(ref.locator))
             if key in seen:
-                _add(violations, f"duplicate-derived-ref:{key[0]}:{key[1]}")
+                _add(violations, f"duplicate-derived-ref:{index}")
                 continue
             seen.add(key)
             valid.append(ref)
     return tuple(violations), tuple(valid)
 
 
-def _validate_ref(ref: DerivedArtifactRef, violations: list[str]) -> bool:
+def _validate_ref(ref: DerivedArtifactRef, index: int, violations: list[str]) -> bool:
     before = len(violations)
     if not _safe_identifier(ref.store):
         _add(violations, "invalid-derived-store")
     elif ref.store not in DERIVED_STORES:
-        _add(violations, f"unknown-derived-store:{ref.store}")
+        _add(violations, f"unknown-derived-ref-store:{index}")
     if not _safe_locator(ref.locator):
         _add(violations, "invalid-derived-locator")
-    if ref.content_sha256 is not None and not is_sha256_ref(ref.content_sha256):
+    if ref.content_sha256 is not None and not _is_sha256_ref(ref.content_sha256):
         _add(violations, "invalid-derived-content-sha256")
     if type(ref.contains_raw) is not bool:
         _add(violations, "invalid-derived-contains-raw")
@@ -241,13 +243,30 @@ def _validate_coverage(
     refs: tuple[DerivedArtifactRef, ...],
     violations: list[str],
 ) -> None:
-    if type(policy) is not RetentionPolicy or policy.action != "purge-derived":
+    if type(policy) is not RetentionPolicy or type(policy.action) is not str or policy.action != "purge-derived":
         return
     stores = policy.derived_stores if type(policy.derived_stores) is tuple else ()
-    for ref in refs:
+    for index, ref in enumerate(refs):
         if ref.contains_raw is True and ref.store not in stores:
-            _add(violations, f"uncovered-derived-store:{ref.store}")
+            _add(violations, f"uncovered-derived-store:{index}")
 
 
 def _sort_refs(refs: tuple[DerivedArtifactRef, ...]) -> tuple[DerivedArtifactRef, ...]:
     return tuple(sorted(refs, key=lambda ref: (_normalize(ref.store), _normalize(ref.locator), ref.content_sha256 or "")))
+
+
+def _can_select_refs(policy: object) -> bool:
+    return type(policy) is RetentionPolicy and type(policy.action) is str and policy.action in RETENTION_ACTIONS
+
+
+def _refs_for_policy(
+    policy: RetentionPolicy,
+    refs: tuple[DerivedArtifactRef, ...],
+) -> tuple[DerivedArtifactRef, ...]:
+    if policy.retain_content_hash is True:
+        return refs
+    return tuple(DerivedArtifactRef(ref.store, ref.locator, None, ref.contains_raw) for ref in refs)
+
+
+def _is_sha256_ref(value: object) -> bool:
+    return type(value) is str and is_sha256_ref(value)

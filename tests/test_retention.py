@@ -22,6 +22,15 @@ HASH_B = "sha256:" + "b" * 64
 HASH_C = "sha256:" + "c" * 64
 
 
+class BadEq:
+    def __eq__(self, other: object) -> bool:
+        raise AssertionError("validator must reject before equality")
+
+
+class BadStr(str):
+    pass
+
+
 def _ref(
     store: str = "files",
     locator: str = "global/a.json",
@@ -71,7 +80,7 @@ def test_unknown_derived_store_is_reported() -> None:
         derived_stores=("unknown-store",),
     )
 
-    assert validate_retention_policy(policy) == ("unknown-derived-store:unknown-store",)
+    assert validate_retention_policy(policy) == ("unknown-derived-store:0",)
 
 
 def test_invalid_policy_problems_are_aggregated_deterministically() -> None:
@@ -86,19 +95,58 @@ def test_invalid_policy_problems_are_aggregated_deterministically() -> None:
         "invalid-subject-id",
         "invalid-action",
         "invalid-retain-content-hash",
-        "unknown-derived-store:unknown-store",
-        "duplicate-derived-store:files",
+        "unknown-derived-store:0",
+        "duplicate-derived-store:2",
     )
 
 
 @pytest.mark.parametrize(
     "subject_id",
-    ["", ".", "..", "../atom", "atom/id", "atom\\id", "atom:id", "atom\nid", "atom\0id", "cafe\u0301"],
+    [
+        "",
+        ".",
+        "..",
+        "../atom",
+        "atom/id",
+        "atom\\id",
+        "atom:id",
+        "atom\nid",
+        "atom\0id",
+        "cafe\u0301",
+        "atom\u200did",
+        "atom\u202eid",
+    ],
 )
 def test_policy_rejects_empty_control_non_nfc_and_unsafe_subject_ids(subject_id: str) -> None:
     policy = RetentionPolicy(subject_id, "retain", False, ())
 
     assert validate_retention_policy(policy) == ("invalid-subject-id",)
+
+
+def test_policy_rejects_hostile_action_without_equality() -> None:
+    policy = RetentionPolicy("atom-1", BadEq(), False, ())  # type: ignore[arg-type]
+
+    assert validate_retention_policy(policy) == ("invalid-action",)
+
+
+def test_plan_rejects_hostile_action_without_equality() -> None:
+    policy = RetentionPolicy("atom-1", BadEq(), False, ())  # type: ignore[arg-type]
+
+    plan = plan_retention("atom-1", policy=policy, derived_refs=(_ref(),), content_sha256=None)
+
+    assert not plan.ok
+    assert plan.violations == ("invalid-action",)
+    assert plan.refs_to_purge == ()
+
+
+def test_public_boundaries_reject_str_subclasses_before_normalization() -> None:
+    policy = RetentionPolicy(BadStr("atom-1"), BadStr("retain"), False, (BadStr("files"),))
+
+    assert validate_retention_policy(policy) == (
+        "invalid-subject-id",
+        "invalid-action",
+        "invalid-derived-store",
+    )
 
 
 def test_purge_tombstone_does_not_retain_hash_when_policy_disallows_it() -> None:
@@ -126,6 +174,17 @@ def test_tombstone_retains_valid_hash_only_when_policy_allows_it() -> None:
     assert tombstone.content_sha256 == HASH_A
 
 
+def test_tombstone_rejects_str_subclass_hash() -> None:
+    with pytest.raises(ValueError, match="invalid-content-sha256"):
+        make_tombstone(
+            "atom-1",
+            reason_code="operator-request",
+            purged_at_ord=44,
+            retain_content_hash=True,
+            content_sha256=BadStr(HASH_A),
+        )
+
+
 def test_make_tombstone_rejects_invalid_inputs_without_leaking_raw_text() -> None:
     canary = "sk-live-abcdefghijklmnopqrstuvwxyz012345"
 
@@ -142,7 +201,7 @@ def test_make_tombstone_rejects_invalid_inputs_without_leaking_raw_text() -> Non
     assert canary not in str(excinfo.value)
 
 
-def test_plan_retention_covers_all_refs_but_does_not_delete() -> None:
+def test_plan_retention_covers_all_refs_but_does_not_delete_or_retain_hashes() -> None:
     refs = (
         _ref("files", "global/a.json", "sha256:" + "1" * 64),
         _ref("vault", "workspace/a.md", "sha256:" + "2" * 64),
@@ -157,7 +216,10 @@ def test_plan_retention_covers_all_refs_but_does_not_delete() -> None:
     plan = plan_retention("atom-1", policy=policy, derived_refs=refs, content_sha256=HASH_A)
 
     assert plan.ok
-    assert plan.refs_to_purge == refs
+    assert plan.refs_to_purge == (
+        DerivedArtifactRef("files", "global/a.json", None, True),
+        DerivedArtifactRef("vault", "workspace/a.md", None, True),
+    )
     assert plan.deleted_paths == ()
     assert plan.tombstone is not None
     assert isinstance(plan.omissions[0], Omission)
@@ -202,7 +264,11 @@ def test_purge_all_selects_all_refs_in_deterministic_order() -> None:
     plan = plan_retention("atom-1", policy=policy, derived_refs=refs, content_sha256=HASH_A)
 
     assert plan.ok
-    assert plan.refs_to_purge == (refs[2], refs[1], refs[0])
+    assert plan.refs_to_purge == (
+        DerivedArtifactRef("backup", "snapshots/c.json", None, False),
+        DerivedArtifactRef("files", "global/a.json", None, True),
+        DerivedArtifactRef("vault", "workspace/b.md", None, True),
+    )
     assert plan.deleted_paths == ()
 
 
@@ -217,8 +283,8 @@ def test_purge_derived_reports_raw_derived_store_coverage_gap() -> None:
     plan = plan_retention("atom-1", policy=policy, derived_refs=refs, content_sha256=HASH_A)
 
     assert not plan.ok
-    assert "uncovered-derived-store:vault" in plan.violations
-    assert plan.refs_to_purge == (refs[0],)
+    assert "uncovered-derived-store:1" in plan.violations
+    assert plan.refs_to_purge == (DerivedArtifactRef("files", "global/a.json", None, True),)
     assert plan.deleted_paths == ()
 
 
@@ -259,7 +325,7 @@ def test_invalid_refs_are_aggregated_and_raw_locator_is_not_retained() -> None:
     assert set(plan.violations) == {
         "invalid-derived-locator",
         "invalid-derived-content-sha256",
-        "unknown-derived-store:unknown-store",
+        "unknown-derived-ref-store:1",
         "invalid-derived-contains-raw",
     }
     assert plan.refs_to_purge == ()
@@ -277,8 +343,8 @@ def test_duplicate_normalized_stores_and_refs_are_reported() -> None:
 
     assert not plan.ok
     assert plan.violations == (
-        "duplicate-derived-store:files",
-        "duplicate-derived-ref:files:global/a.json",
+        "duplicate-derived-store:1",
+        "duplicate-derived-ref:1",
     )
 
 
@@ -296,6 +362,74 @@ def test_retention_receipts_and_omissions_are_deterministic_and_hash_bound() -> 
     assert plan_a.tombstone.content_sha256 == HASH_C
     assert plan_a.receipts[0].input_span_hash == HASH_C
     assert is_sha256_ref(plan_a.receipts[0].output_hash)
+
+
+def test_disabled_hash_retention_does_not_bind_derived_hashes_in_receipts() -> None:
+    refs_a = (_ref("files", "global/a.json", HASH_A),)
+    refs_b = (_ref("files", "global/a.json", HASH_B),)
+    policy = RetentionPolicy("atom-1", "purge-all", False, ())
+
+    plan_a = plan_retention("atom-1", policy=policy, derived_refs=refs_a, content_sha256=HASH_C)
+    plan_b = plan_retention("atom-1", policy=policy, derived_refs=refs_b, content_sha256=HASH_C)
+    receipt_body = repr(plan_a.receipts[0].to_dict())
+
+    assert plan_a.refs_to_purge == (DerivedArtifactRef("files", "global/a.json", None, True),)
+    assert plan_a.receipts[0].to_dict() == plan_b.receipts[0].to_dict()
+    assert HASH_A not in repr(plan_a.refs_to_purge)
+    assert HASH_A not in receipt_body
+    assert HASH_C not in receipt_body
+
+
+def test_enabled_hash_retention_keeps_derived_hashes_and_binds_receipts() -> None:
+    refs_a = (_ref("files", "global/a.json", HASH_A),)
+    refs_b = (_ref("files", "global/a.json", HASH_B),)
+    policy = RetentionPolicy("atom-1", "purge-all", True, ())
+
+    plan_a = plan_retention("atom-1", policy=policy, derived_refs=refs_a, content_sha256=HASH_C)
+    plan_b = plan_retention("atom-1", policy=policy, derived_refs=refs_b, content_sha256=HASH_C)
+
+    assert plan_a.refs_to_purge == refs_a
+    assert plan_a.receipts[0].input_span_hash == HASH_C
+    assert plan_a.receipts[0].output_hash != plan_b.receipts[0].output_hash
+
+
+def test_safe_shaped_store_and_locator_canaries_do_not_leak_from_violations() -> None:
+    canary = "sk-live-abcdefghijklmnopqrstuvwxyz012345"
+    policy = RetentionPolicy("atom-1", "purge-all", False, (canary, canary))
+    refs = (
+        _ref(canary, f"workspace/{canary}.md", HASH_A),
+        _ref("files", "workspace/a.md", HASH_B),
+        _ref("files", "workspace/a.md", HASH_C),
+    )
+
+    plan = plan_retention("atom-1", policy=policy, derived_refs=refs, content_sha256=HASH_A)
+
+    assert not plan.ok
+    assert canary not in repr(plan)
+    assert all(canary not in violation for violation in plan.violations)
+
+
+def test_plan_rejects_str_subclass_ref_and_content_hashes() -> None:
+    ref = DerivedArtifactRef(BadStr("files"), BadStr("global/a.json"), BadStr(HASH_A), True)
+    policy = RetentionPolicy("atom-1", "purge-all", False, ())
+
+    plan = plan_retention("atom-1", policy=policy, derived_refs=(ref,), content_sha256=None)
+
+    assert plan.violations == (
+        "invalid-derived-store",
+        "invalid-derived-locator",
+        "invalid-derived-content-sha256",
+    )
+
+
+@pytest.mark.parametrize("locator", ["workspace/\u200bnote.md", "workspace/\u202enote.md"])
+def test_plan_rejects_unicode_format_controls_in_locators(locator: str) -> None:
+    ref = _ref("files", locator, HASH_A)
+    policy = RetentionPolicy("atom-1", "purge-all", False, ())
+
+    plan = plan_retention("atom-1", policy=policy, derived_refs=(ref,), content_sha256=None)
+
+    assert plan.violations == ("invalid-derived-locator",)
 
 
 def test_plan_retention_rejects_non_exact_policy_and_refs_tuple() -> None:

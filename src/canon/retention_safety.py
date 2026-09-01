@@ -22,11 +22,13 @@ def non_bool_int(value: object) -> bool:
 
 
 def normalize(value: str) -> str:
+    if type(value) is not str:
+        raise TypeError("value must be an exact str")
     return unicodedata.normalize("NFC", value).casefold()
 
 
 def safe_identifier(value: object) -> bool:
-    if not isinstance(value, str) or value == "":
+    if type(value) is not str or value == "":
         return False
     if _has_control(value) or unicodedata.normalize("NFC", value) != value:
         return False
@@ -38,7 +40,7 @@ def safe_identifier(value: object) -> bool:
 
 
 def safe_locator(value: object) -> bool:
-    if not isinstance(value, str) or value == "":
+    if type(value) is not str or value == "":
         return False
     if _has_control(value) or unicodedata.normalize("NFC", value) != value:
         return False
@@ -57,4 +59,4 @@ def tuple_or_original(value: object) -> object:
 
 
 def _has_control(value: str) -> bool:
-    return any(ord(ch) < 32 or ord(ch) == 127 for ch in value)
+    return any(unicodedata.category(ch) in {"Cc", "Cf"} for ch in value)
