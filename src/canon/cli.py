@@ -8,6 +8,7 @@ import sys
 from collections.abc import Mapping
 from typing import TextIO
 
+from .bootstrap import BootstrapConfig, run_bootstrap
 from .cli_format import color_enabled, make_result, write_result
 from .exit_codes import EX_OK, EX_USAGE
 
@@ -98,9 +99,8 @@ def run_cli(
             return write_result(result, stdout=stdout, stderr=stderr, json_output=True, color=False)
         return error.status
 
-    result = make_result(ok=True, command=parsed.command, failure_code="ok", message="ready")
     return write_result(
-        result,
+        _command_result(parsed),
         stdout=stdout,
         stderr=stderr,
         json_output=parsed.json_output,
@@ -112,6 +112,33 @@ def main(argv: list[str] | None = None) -> int:
     """Run canon from process-global streams."""
     tokens = list(sys.argv[1:] if argv is None else argv)
     return run_cli(tokens, stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr, environ=os.environ)
+
+
+def _command_result(parsed: argparse.Namespace):
+    if parsed.command == "bootstrap":
+        return _bootstrap_result(parsed)
+    return make_result(ok=True, command=parsed.command, failure_code="ok", message="ready")
+
+
+def _bootstrap_result(parsed: argparse.Namespace):
+    report = run_bootstrap(
+        BootstrapConfig(
+            workspace=parsed.workspace,
+            state_dir=parsed.state_dir,
+            target=parsed.target,
+            tier=parsed.tier,
+            profile=parsed.profile,
+            offline=parsed.offline,
+            run_id=parsed.run_id,
+        )
+    )
+    return make_result(
+        ok=report.ok,
+        command="bootstrap",
+        failure_code=report.failure_code,
+        message=report.message,
+        data=report.to_result_data(),
+    )
 
 
 def _build_parser(stdout: TextIO | None = None, stderr: TextIO | None = None) -> _CanonArgumentParser:
@@ -128,7 +155,19 @@ def _build_parser(stdout: TextIO | None = None, stderr: TextIO | None = None) ->
         subparser = subparsers.add_parser(command, help=f"{command} placeholder")
         subparser._canon_stdout = parser._canon_stdout
         subparser._canon_stderr = parser._canon_stderr
+        if command == "bootstrap":
+            _add_bootstrap_args(subparser)
     return parser
+
+
+def _add_bootstrap_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--workspace", default=".", help="workspace path")
+    parser.add_argument("--state-dir", default=".canon", help="state directory path")
+    parser.add_argument("--target", required=True, help="adapter target id")
+    parser.add_argument("--tier", required=True, help="requested integration tier")
+    parser.add_argument("--profile", default="handoff", help="capsule profile")
+    parser.add_argument("--offline", action="store_true", help="avoid later online work")
+    parser.add_argument("--run-id", required=True, help="bootstrap run id")
 
 
 def _argv_copy(argv: list[str], stderr: TextIO) -> list[str] | None:

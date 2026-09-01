@@ -20,6 +20,21 @@ COMMANDS = (
     "undo",
     "bootstrap",
 )
+BOOTSTRAP_ARGS = (
+    "--workspace",
+    "C:/work/canon",
+    "--state-dir",
+    "C:/work/canon/.canon",
+    "--target",
+    "chatgpt-app",
+    "--tier",
+    "guided",
+    "--profile",
+    "handoff",
+    "--offline",
+    "--run-id",
+    "run-cli",
+)
 
 
 def test_run_cli_help_uses_injected_stdout_and_lists_parser_surface(capsys: pytest.CaptureFixture[str]) -> None:
@@ -90,12 +105,25 @@ def test_placeholder_commands_emit_accessible_result_to_injected_stdout() -> Non
     from canon.cli import run_cli
     from canon.exit_codes import EX_OK
 
-    for command in COMMANDS:
+    for command in tuple(command for command in COMMANDS if command != "bootstrap"):
         stdout = io.StringIO()
         stderr = io.StringIO()
         assert run_cli([command], stdout=stdout, stderr=stderr, environ={}) == EX_OK
         assert stdout.getvalue() == f"PASS {command}: ready\n"
         assert stderr.getvalue() == ""
+
+
+def test_bootstrap_command_emits_accessible_result_to_injected_stdout() -> None:
+    from canon.cli import run_cli
+    from canon.exit_codes import EX_OK
+
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+
+    assert run_cli(["bootstrap", *BOOTSTRAP_ARGS], stdout=stdout, stderr=stderr, environ={}) == EX_OK
+
+    assert stdout.getvalue() == "PASS bootstrap: release to work\n"
+    assert stderr.getvalue() == ""
 
 
 def test_run_cli_does_not_mutate_caller_argv() -> None:
@@ -166,6 +194,32 @@ def test_python_module_json_stdout_is_utf8_bytes_with_lf_only() -> None:
     )
     assert b"\r" not in result.stdout
     assert result.stderr == b""
+
+
+def test_bootstrap_json_output_is_canonical_and_contains_state_report() -> None:
+    import json
+
+    from canon.canonical_json import canonical_json_text
+    from canon.cli import run_cli
+    from canon.exit_codes import EX_OK
+
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+
+    exit_code = run_cli(["--json", "bootstrap", *BOOTSTRAP_ARGS], stdout=stdout, stderr=stderr, environ={})
+
+    assert exit_code == EX_OK
+    assert stderr.getvalue() == ""
+    assert stdout.getvalue().endswith("\n")
+    assert "\r" not in stdout.getvalue()
+    payload = json.loads(stdout.getvalue())
+    assert stdout.getvalue() == canonical_json_text(payload)
+    assert payload["command"] == "bootstrap"
+    assert payload["message"] == "release to work"
+    assert payload["data"]["adapter_id"] == "chatgpt-app"
+    assert payload["data"]["authoritative_tier"] == "guided"
+    assert payload["data"]["requested_tier"] == "guided"
+    assert [event["state"] for event in payload["data"]["events"]][-1] == "release_to_work"
 
 
 def test_python_module_json_parse_error_suppresses_parser_stderr() -> None:
