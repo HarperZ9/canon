@@ -6,7 +6,6 @@ import os
 from pathlib import Path
 import stat
 import tempfile
-
 from . import concurrency_windows_api as _win
 from .canonical_json import CanonicalJSONError, canonical_json_text, sha256_text
 from .path_policy import PathPolicyError, resolve_under_root
@@ -18,11 +17,9 @@ _BUNDLES = "bundles"
 _CURRENT = "current.json"
 _TEMP_ATTEMPTS = 8
 _WIN_FILE_DIRECTORY_FILE = 0x1
-
 class SourceStateCacheError(ValueError):
     def __init__(self, code: str, message: str) -> None:
         self.code = code; super().__init__(f"{code}: {message}")
-
 class SourceStateCache:
     def __init__(self, root: str | Path) -> None:
         self._root = Path(root)
@@ -47,9 +44,7 @@ class SourceStateCache:
         root_h = _open_root(self._root)
         try:
             path = self._entry_path(digest)
-            if not _directory_or_missing(path.parent, role="cache-directory"): return None
-            if not _regular_file_or_missing(path, role="cache-entry"): return None
-            return _read_object(root_h, (_BUNDLES,), path.name, "cache-entry")
+            return _read_object(root_h, (_BUNDLES,), path.name, "cache-entry", required=False)
         finally: _close_root(root_h)
     def put(self, cache_key: str, bundle: object) -> Path:
         digest = _cache_digest(cache_key)
@@ -70,12 +65,11 @@ class SourceStateCache:
         root_h = _open_root(self._root)
         try:
             path = self._current_path()
-            if not _regular_file_or_missing(path, role="current-pointer"): return None
-            key = _current_key(_read_object(root_h, (), _CURRENT, "current-pointer"))
+            pointer = _read_object(root_h, (), path.name, "current-pointer", required=False)
+            if pointer is None: return None
+            key = _current_key(pointer)
             entry = self._entry_path(_cache_digest(key))
-            if not _directory_or_missing(entry.parent, role="cache-directory") or not _regular_file_or_missing(entry, role="cache-entry"):
-                raise SourceStateCacheError("missing-current-entry", "current entry is missing")
-            current = _read_object(root_h, (_BUNDLES,), entry.name, "cache-entry")
+            current = _read_object(root_h, (_BUNDLES,), entry.name, "cache-entry", required=False)
             if current is None: raise SourceStateCacheError("missing-current-entry", "current entry is missing")
             return current
         finally: _close_root(root_h)
@@ -89,7 +83,6 @@ class SourceStateCache:
     def _root_missing(self) -> bool:
         try: return not self._root.exists() and not self._root.is_symlink()
         except OSError: return False
-
 def _snapshot_items(items: object) -> tuple[SourceStateItem, ...]:
     try: return tuple(items)  # type: ignore[arg-type]
     except Exception as exc: raise SourceStateError("invalid-source-state", "items must be a sequence") from exc
@@ -133,11 +126,10 @@ def _kind_or_missing(path: Path, *, role: str, want, noun: str) -> bool:
     return True
 def _regular_file_or_missing(path: Path, *, role: str) -> bool:
     return _kind_or_missing(path, role=role, want=stat.S_ISREG, noun="regular file")
-def _directory_or_missing(path: Path, *, role: str) -> bool:
-    return _kind_or_missing(path, role=role, want=stat.S_ISDIR, noun="directory")
-def _read_object(root_h: int, parent: tuple[str, ...], name: str, role: str) -> dict[str, object]:
+def _read_object(root_h: int, parent: tuple[str, ...], name: str, role: str, *, required: bool = True) -> dict[str, object] | None:
     try:
         data = _win_read(root_h, parent, name, role) if os.name == "nt" else _posix_read(root_h, parent, name, role)
+        if data is None and not required: return None
         if data is None: raise SourceStateCacheError("corrupt-cache-entry", "cache entry is corrupt")
         text = data.decode("utf-8"); value = json.loads(text)
     except SourceStateCacheError: raise
@@ -163,17 +155,18 @@ def _verify_root_identity(st: os.stat_result, handle: int) -> None:
     if os.name == "nt":
         info = _win.handle_info(handle); attrs = int(info.dwFileAttributes)
         index = (int(info.nFileIndexHigh) << 32) | int(info.nFileIndexLow)
-        same = index == st.st_ino and attrs & _win.FILE_ATTRIBUTE_DIRECTORY and not attrs & _win.FILE_ATTRIBUTE_REPARSE_POINT
+        same = (st.st_dev & 0xFFFFFFFF) == int(info.dwVolumeSerialNumber) and index == st.st_ino and attrs & _win.FILE_ATTRIBUTE_DIRECTORY and not attrs & _win.FILE_ATTRIBUTE_REPARSE_POINT
     else:
         info = os.fstat(handle); same = (info.st_dev, info.st_ino) == (st.st_dev, st.st_ino)
     if not same: raise SourceStateCacheError("unsafe-cache-path", "cache root identity changed")
 def _close_root(handle: int) -> None:
     _win.close_handle(handle) if os.name == "nt" else os.close(handle)
-
 def _posix_supported() -> bool:
-    return os.name != "nt" and os.open in os.supports_dir_fd and os.mkdir in os.supports_dir_fd and os.replace in os.supports_dir_fd and os.unlink in os.supports_dir_fd and hasattr(os, "pread") and all(hasattr(os, n) for n in ("O_DIRECTORY", "O_NOFOLLOW"))
+    return os.name != "nt" and os.open in os.supports_dir_fd and os.mkdir in os.supports_dir_fd and os.rename in os.supports_dir_fd and os.unlink in os.supports_dir_fd and hasattr(os, "pread") and all(hasattr(os, n) for n in ("O_DIRECTORY", "O_NOFOLLOW"))
 def _posix_open_dir(path: str | Path, dir_fd: int | None = None) -> int:
     try: return os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW) if dir_fd is None else os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=dir_fd)
+    except FileNotFoundError: raise
+    except NotADirectoryError as exc: raise SourceStateCacheError("nonregular-cache-directory", "cache path is not a directory") from exc
     except OSError as exc: raise SourceStateCacheError("unsafe-cache-path", "cache path is unsafe") from exc
 def _posix_put(root_fd: int, entry_name: str, body: str, pointer: str) -> None:
     try: os.mkdir(_BUNDLES, 0o700, dir_fd=root_fd)
@@ -191,7 +184,7 @@ def _posix_write(dir_fd: int, name: str, text: str, code: str, role: str) -> Non
         except FileExistsError: continue
         try:
             _posix_write_all(fd, data); os.fsync(fd); os.close(fd)
-            os.replace(temp, name, src_dir_fd=dir_fd, dst_dir_fd=dir_fd); return
+            os.rename(temp, name, src_dir_fd=dir_fd, dst_dir_fd=dir_fd); return
         except OSError as exc:
             try: os.close(fd)
             except OSError: pass
@@ -208,7 +201,10 @@ def _posix_read(root_fd: int, parent: tuple[str, ...], name: str, role: str) -> 
     parent_fd = None
     try:
         dir_fd = root_fd
-        if parent: parent_fd = _posix_open_dir(parent[0], root_fd); dir_fd = parent_fd
+        if parent:
+            try: parent_fd = _posix_open_dir(parent[0], root_fd)
+            except FileNotFoundError: return None
+            dir_fd = parent_fd
         return _posix_read_at(dir_fd, name, role)
     finally:
         if parent_fd is not None: os.close(parent_fd)
@@ -239,7 +235,6 @@ def _posix_pread_all(fd: int, size: int) -> bytes:
 def _posix_unlink(dir_fd: int, name: str) -> None:
     try: os.unlink(name, dir_fd=dir_fd)
     except FileNotFoundError: pass
-
 def _win_put(root_h: int, root: Path, bundle_path: Path, body: str, pointer: str) -> None:
     bundle_dir = root / _BUNDLES
     try: bundle_dir.mkdir(exist_ok=True)
@@ -254,7 +249,10 @@ def _win_open_dir(path: Path | tuple[int, str]) -> int:
             handle = _win.nt_create_relative(path[0], path[1], _win.GENERIC_READ, _win.FILE_SHARE_READ | _win.FILE_SHARE_WRITE, _win.FILE_OPEN, _WIN_FILE_DIRECTORY_FILE | _win.FILE_OPEN_REPARSE_POINT)
         else:
             handle = _win.create_file(str(path), _win.GENERIC_READ, _win.FILE_SHARE_READ | _win.FILE_SHARE_WRITE, _win.OPEN_EXISTING, _win.FILE_FLAG_BACKUP_SEMANTICS | _win.FILE_FLAG_OPEN_REPARSE_POINT)
-    except OSError as exc: raise SourceStateCacheError("unsafe-cache-path", "cache path is unsafe") from exc
+    except FileNotFoundError: raise
+    except OSError as exc:
+        if getattr(exc, "errno", None) in (errno.ENOTDIR, 267): raise SourceStateCacheError("nonregular-cache-directory", "cache path is not a directory") from exc
+        raise SourceStateCacheError("unsafe-cache-path", "cache path is unsafe") from exc
     try:
         attrs = _win.handle_info(handle).dwFileAttributes
         if not attrs & _win.FILE_ATTRIBUTE_DIRECTORY or attrs & _win.FILE_ATTRIBUTE_REPARSE_POINT: raise SourceStateCacheError("unsafe-cache-path", "cache path is unsafe")
@@ -279,7 +277,10 @@ def _win_read(root_h: int, parent: tuple[str, ...], name: str, role: str) -> byt
     parent_h = None
     try:
         dir_h = root_h
-        if parent: parent_h = _win_open_dir((root_h, parent[0])); dir_h = parent_h
+        if parent:
+            try: parent_h = _win_open_dir((root_h, parent[0]))
+            except FileNotFoundError: return None
+            dir_h = parent_h
         return _win_read_at(dir_h, name, role)
     finally:
         if parent_h is not None: _win.close_handle(parent_h)

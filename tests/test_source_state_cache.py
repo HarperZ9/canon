@@ -313,22 +313,18 @@ def test_get_uses_pinned_root_when_ancestor_swapped_after_validation(
     key = _cache_key("5")
     target = _write_entry(root, key, {"inside": True}).resolve()
     _write_entry(outside_root, key, {"outside": True})
-    real_regular = source_state_cache._regular_file_or_missing
+    real_entry_path = SourceStateCache._entry_path
     attempted = False
 
-    def swap_after_validation(path: Path, *, role: str) -> bool:
+    def swap_after_path(self: SourceStateCache, digest: str) -> Path:
         nonlocal attempted
-        exists = real_regular(path, role=role)
-        if path == target and role == "cache-entry" and not attempted:
+        path = real_entry_path(self, digest)
+        if path == target and not attempted:
             attempted = True
             _swap_dir_to_symlink(parent, outside_parent, displaced)
-        return exists
+        return path
 
-    monkeypatch.setattr(
-        source_state_cache,
-        "_regular_file_or_missing",
-        swap_after_validation,
-    )
+    monkeypatch.setattr(SourceStateCache, "_entry_path", swap_after_path)
 
     assert SourceStateCache(root).get(key) == {"inside": True}
     assert attempted
@@ -350,25 +346,126 @@ def test_current_uses_pinned_root_when_ancestor_swapped_after_validation(
     _write_current(root, first)
     _write_entry(outside_root, second, {"version": 2})
     _write_current(outside_root, second)
-    real_regular = source_state_cache._regular_file_or_missing
+    real_current_path = SourceStateCache._current_path
     attempted = False
 
-    def swap_after_validation(path: Path, *, role: str) -> bool:
+    def swap_after_path(self: SourceStateCache) -> Path:
         nonlocal attempted
-        exists = real_regular(path, role=role)
-        if path == current.resolve() and role == "current-pointer" and not attempted:
+        path = real_current_path(self)
+        if path == current.resolve() and not attempted:
             attempted = True
             _swap_dir_to_symlink(parent, outside_parent, displaced)
-        return exists
+        return path
+
+    monkeypatch.setattr(SourceStateCache, "_current_path", swap_after_path)
+
+    assert SourceStateCache(root).current() == {"version": 1}
+    assert attempted
+
+
+def test_get_does_not_false_miss_from_swapped_ancestor_namespace(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parent = tmp_path / "anchor"
+    root = parent / "cache"
+    outside_parent = tmp_path / "outside-anchor"
+    displaced = tmp_path / "displaced-anchor"
+    key = _cache_key("b")
+    target = _write_entry(root, key, {"inside": True}).resolve()
+    (outside_parent / "cache").mkdir(parents=True)
+    real_entry_path = SourceStateCache._entry_path
+    attempted = False
+
+    def swap_after_path(self: SourceStateCache, digest: str) -> Path:
+        nonlocal attempted
+        path = real_entry_path(self, digest)
+        if path == target and not attempted:
+            attempted = True
+            _swap_dir_to_symlink(parent, outside_parent, displaced)
+        return path
+
+    monkeypatch.setattr(SourceStateCache, "_entry_path", swap_after_path)
+
+    assert SourceStateCache(root).get(key) == {"inside": True}
+    assert attempted
+
+
+def test_current_does_not_false_miss_from_swapped_ancestor_namespace(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parent = tmp_path / "anchor"
+    root = parent / "cache"
+    outside_parent = tmp_path / "outside-anchor"
+    displaced = tmp_path / "displaced-anchor"
+    key = _cache_key("c")
+    current = root / "current.json"
+    _write_entry(root, key, {"inside": True})
+    _write_current(root, key)
+    (outside_parent / "cache").mkdir(parents=True)
+    real_current_path = SourceStateCache._current_path
+    attempted = False
+
+    def swap_after_path(self: SourceStateCache) -> Path:
+        nonlocal attempted
+        path = real_current_path(self)
+        if path == current.resolve() and not attempted:
+            attempted = True
+            _swap_dir_to_symlink(parent, outside_parent, displaced)
+        return path
+
+    monkeypatch.setattr(SourceStateCache, "_current_path", swap_after_path)
+
+    assert SourceStateCache(root).current() == {"inside": True}
+    assert attempted
+
+
+def test_get_does_not_use_absolute_child_check_for_pinned_root_miss(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "cache"
+    key = _cache_key("d")
+    _write_entry(root, key, {"inside": True})
+
+    def false_outside_miss(path: Path, *, role: str) -> bool:
+        if role == "cache-directory":
+            return False
+        return source_state_cache._regular_file_or_missing(path, role=role)
+
+    monkeypatch.setattr(
+        source_state_cache,
+        "_directory_or_missing",
+        false_outside_miss,
+        raising=False,
+    )
+
+    assert SourceStateCache(root).get(key) == {"inside": True}
+
+
+def test_current_does_not_use_absolute_pointer_check_for_pinned_root_miss(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "cache"
+    key = _cache_key("e")
+    _write_entry(root, key, {"inside": True})
+    _write_current(root, key)
+    real_regular = source_state_cache._regular_file_or_missing
+
+    def false_outside_miss(path: Path, *, role: str) -> bool:
+        if role == "current-pointer":
+            return False
+        return real_regular(path, role=role)
 
     monkeypatch.setattr(
         source_state_cache,
         "_regular_file_or_missing",
-        swap_after_validation,
+        false_outside_miss,
     )
 
-    assert SourceStateCache(root).current() == {"version": 1}
-    assert attempted
+    assert SourceStateCache(root).current() == {"inside": True}
 
 
 def test_put_uses_pinned_root_when_ancestor_swapped_after_path_validation(
@@ -473,6 +570,65 @@ def test_windows_root_identity_mismatch_closes_open_handle(
     assert closed
 
 
+def test_windows_root_identity_rejects_same_index_on_different_volume(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    if source_state_cache.os.name != "nt":
+        pytest.skip("Windows handle identity probe")
+    root = tmp_path / "cache"
+    (root / "bundles").mkdir(parents=True)
+    st = root.lstat()
+    real_handle_info = source_state_cache._win.handle_info
+    real_close = source_state_cache._win.close_handle
+    closed: list[int] = []
+
+    class FakeInfo:
+        dwFileAttributes = source_state_cache._win.FILE_ATTRIBUTE_DIRECTORY
+        dwVolumeSerialNumber = (st.st_dev & 0xFFFFFFFF) ^ 1
+        nFileIndexHigh = st.st_ino >> 32
+        nFileIndexLow = st.st_ino & 0xFFFFFFFF
+
+    def fake_handle_info(handle: int) -> object:
+        info = real_handle_info(handle)
+        if int(info.dwFileAttributes) & source_state_cache._win.FILE_ATTRIBUTE_DIRECTORY:
+            return FakeInfo()
+        return info
+
+    def record_close(handle: int) -> None:
+        closed.append(handle)
+        real_close(handle)
+
+    monkeypatch.setattr(source_state_cache._win, "handle_info", fake_handle_info)
+    monkeypatch.setattr(source_state_cache._win, "close_handle", record_close)
+
+    with pytest.raises(SourceStateCacheError, match="unsafe-cache-path"):
+        SourceStateCache(root).get(_cache_key("d"))
+    assert closed
+    assert list(root.glob("*.tmp")) == []
+
+
+def test_posix_support_accepts_rename_dir_fd_without_replace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(source_state_cache.os, "name", "posix")
+    monkeypatch.setattr(source_state_cache.os, "O_DIRECTORY", 0, raising=False)
+    monkeypatch.setattr(source_state_cache.os, "O_NOFOLLOW", 0, raising=False)
+    monkeypatch.setattr(source_state_cache.os, "pread", object(), raising=False)
+    monkeypatch.setattr(
+        source_state_cache.os,
+        "supports_dir_fd",
+        {
+            source_state_cache.os.open,
+            source_state_cache.os.mkdir,
+            source_state_cache.os.rename,
+            source_state_cache.os.unlink,
+        },
+    )
+
+    assert source_state_cache._posix_supported()
+
+
 def test_get_rejects_entry_swapped_to_symlink_after_validation(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -481,24 +637,23 @@ def test_get_rejects_entry_swapped_to_symlink_after_validation(
     key = _cache_key("6")
     target = _write_entry(root, key, {"inside": True})
     outside = tmp_path / "outside-entry.json"
-    outside.write_text(canonical_json_text({"outside": True}), encoding="utf-8")
-    real_regular = source_state_cache._regular_file_or_missing
+    outside.write_bytes(canonical_json_text({"outside": True}).encode("utf-8"))
+    real_entry_path = SourceStateCache._entry_path
     swapped = False
 
-    def swap_after_lstat(path: Path, *, role: str) -> bool:
+    def swap_after_path(self: SourceStateCache, digest: str) -> Path:
         nonlocal swapped
-        exists = real_regular(path, role=role)
-        if path == target.resolve() and role == "cache-entry" and not swapped:
+        path = real_entry_path(self, digest)
+        if path == target.resolve() and not swapped:
             swapped = True
-            path.unlink()
-            path.symlink_to(outside)
-        return exists
+            try:
+                path.unlink()
+                path.symlink_to(outside)
+            except OSError:
+                pytest.skip("current platform blocks file swap under open root")
+        return path
 
-    monkeypatch.setattr(
-        source_state_cache,
-        "_regular_file_or_missing",
-        swap_after_lstat,
-    )
+    monkeypatch.setattr(SourceStateCache, "_entry_path", swap_after_path)
 
     with pytest.raises(SourceStateCacheError, match="unsafe-cache-path"):
         SourceStateCache(root).get(key)
@@ -515,26 +670,25 @@ def test_current_rejects_pointer_swapped_to_symlink_after_validation(
     _write_entry(root, first, {"version": 1})
     _write_entry(root, second, {"version": 2})
     current = root / "current.json"
-    current.write_text(canonical_json_text({"cache_key": first}), encoding="utf-8")
+    current.write_bytes(canonical_json_text({"cache_key": first}).encode("utf-8"))
     outside = tmp_path / "outside-current.json"
-    outside.write_text(canonical_json_text({"cache_key": second}), encoding="utf-8")
-    real_regular = source_state_cache._regular_file_or_missing
+    outside.write_bytes(canonical_json_text({"cache_key": second}).encode("utf-8"))
+    real_current_path = SourceStateCache._current_path
     swapped = False
 
-    def swap_after_lstat(path: Path, *, role: str) -> bool:
+    def swap_after_path(self: SourceStateCache) -> Path:
         nonlocal swapped
-        exists = real_regular(path, role=role)
-        if path == current.resolve() and role == "current-pointer" and not swapped:
+        path = real_current_path(self)
+        if path == current.resolve() and not swapped:
             swapped = True
-            path.unlink()
-            path.symlink_to(outside)
-        return exists
+            try:
+                path.unlink()
+                path.symlink_to(outside)
+            except OSError:
+                pytest.skip("current platform blocks file swap under open root")
+        return path
 
-    monkeypatch.setattr(
-        source_state_cache,
-        "_regular_file_or_missing",
-        swap_after_lstat,
-    )
+    monkeypatch.setattr(SourceStateCache, "_current_path", swap_after_path)
 
     with pytest.raises(SourceStateCacheError, match="unsafe-cache-path"):
         SourceStateCache(root).current()
