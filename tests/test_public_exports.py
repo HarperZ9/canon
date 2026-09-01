@@ -104,7 +104,57 @@ _FOUNDATION_EXPORTS = (
     "verify_canon_md",
 )
 
-_EXPECTED_EXPORTS = _EXISTING_EXPORTS + _FOUNDATION_EXPORTS
+# The M4 seam (versions/migration + canon_check) merged from main. main inserts
+# its public names between backends' guard_put and validate_put_record, and the
+# merge keeps them there; the stable surface splices the block into that seam.
+_VERSIONS_EXPORTS = (
+    "SEAM_PINS",
+    "SchemaPin",
+    "PIN_REGISTRY",
+    "PIN_RECORD",
+    "PIN_BACKEND_SEAM",
+    "PIN_TEXTBLOCK_GRAMMAR",
+    "PIN_REGION_MARKER",
+    "PIN_FRONTMATTER",
+    "PIN_VAULT_NOTE",
+    "PIN_VAULT_IDENTITY_DIGEST",
+    "PIN_VAULT_HUB_MARKER",
+    "PIN_DRIFT_VERDICT",
+    "PIN_WRITING_GATE_REGISTER",
+    "PIN_PERSONA_THESIS_PAYLOAD",
+    "PIN_RECONCILE_GATE_POLICY",
+    "PIN_RUN_WITNESS",
+    "PIN_TRANSPORT_SEAM",
+    "PIN_VAULT_FRONTEND",
+    "PIN_TEXTUTIL",
+    "pin_for",
+    "all_pins",
+    "is_compatible",
+    "describe",
+    "pin_from_schema_field",
+    "pin_registry_scope",
+    "VersionError",
+    "UnknownPin",
+    "IncompatiblePin",
+    "MalformedPin",
+    "MigrationError",
+    "MigratorConflict",
+    "MigratorRaised",
+    "MigrationFn",
+    "migrate",
+    "register_migrator",
+    "unregister_migrator",
+    "CanonCheckReport",
+    "canon_check",
+    "canon_check_exit_code",
+)
+
+_EXPECTED_EXPORTS = (
+    _EXISTING_EXPORTS[:-1]
+    + _VERSIONS_EXPORTS
+    + _EXISTING_EXPORTS[-1:]
+    + _FOUNDATION_EXPORTS
+)
 
 _EXPECTED_SCHEMAS = {
     "ATOM_SCHEMA": "canon.atom/v1",
