@@ -76,8 +76,7 @@ class FilesBackend:
             for f in sorted(scope_dir.glob("*.json")):
                 rec = Record.from_json(f.read_text(encoding="utf-8"))
                 guard_put(self, rec)
-                if rec.scope != scope:
-                    raise InvalidRecord(
-                        f"path scope {scope!r} does not match record scope {rec.scope!r}")
+                if rec.scope != scope or f.name != quote(rec.id, safe="") + ".json":
+                    raise InvalidRecord("record key mismatch")
                 out.append(rec)
         return out

@@ -133,6 +133,55 @@ def test_records_enumerates_all_scopes(tmp_path) -> None:
     assert {r.kind for r in got} == set(RECORD_FILES)
 
 
+def test_records_rejects_filename_id_mismatch_without_body_leak(tmp_path) -> None:
+    rec = replace(
+        load_record(RECORD_FILES["personality-block"]),
+        id="poison-id",
+        data={"title": "Poison", "body": "DO-NOT-LEAK-RECORDS-BODY"},
+    )
+    _write_record_at_key(tmp_path, "workspace/expected-id", rec)
+
+    with pytest.raises(InvalidRecord) as caught:
+        FilesBackend(tmp_path).records()
+
+    assert str(caught.value) == "record key mismatch"
+    assert "DO-NOT-LEAK-RECORDS-BODY" not in str(caught.value)
+
+
+def test_records_accepts_canonical_slash_filename_and_rejects_pre_encoded_id(tmp_path) -> None:
+    valid = replace(load_record(RECORD_FILES["personality-block"]), id="voice/canon")
+    FilesBackend(tmp_path / "valid").put(valid)
+    got = FilesBackend(tmp_path / "valid").records()
+    assert [r.to_dict() for r in got] == [valid.to_dict()]
+
+    poison = replace(load_record(RECORD_FILES["personality-block"]), id="voice%2Fcanon")
+    _write_record_at_key(tmp_path / "poison", "workspace/voice/canon", poison)
+
+    with pytest.raises(InvalidRecord, match="record key mismatch"):
+        FilesBackend(tmp_path / "poison").records()
+
+
+def test_records_rejects_unicode_normalization_filename_mismatch(tmp_path) -> None:
+    valid = replace(load_record(RECORD_FILES["personality-block"]), id="caf\u00e9")
+    FilesBackend(tmp_path / "valid").put(valid)
+    got = FilesBackend(tmp_path / "valid").records()
+    assert [r.to_dict() for r in got] == [valid.to_dict()]
+
+    poison = replace(load_record(RECORD_FILES["personality-block"]), id="cafe\u0301")
+    _write_record_at_key(tmp_path / "poison", "workspace/caf\u00e9", poison)
+
+    with pytest.raises(InvalidRecord, match="record key mismatch"):
+        FilesBackend(tmp_path / "poison").records()
+
+
+def test_records_rejects_case_variant_filename_mismatch(tmp_path) -> None:
+    rec = load_record(RECORD_FILES["personality-block"])
+    _write_record_at_key(tmp_path, "workspace/Voice-Canon", rec)
+
+    with pytest.raises(InvalidRecord, match="record key mismatch"):
+        FilesBackend(tmp_path).records()
+
+
 def test_scope_lands_in_its_own_subdirectory(tmp_path) -> None:
     be = FilesBackend(tmp_path)
     be.put(load_record(RECORD_FILES["episodic-memory"]))     # scope=global
@@ -189,10 +238,19 @@ def test_records_ignores_unknown_scope_directories(tmp_path) -> None:
 
 def test_records_rejects_path_scope_mismatch(tmp_path) -> None:
     be = FilesBackend(tmp_path)
-    rec = load_record(RECORD_FILES["episodic-memory"])
+    rec = replace(
+        load_record(RECORD_FILES["episodic-memory"]),
+        data={
+            **load_record(RECORD_FILES["episodic-memory"]).data,
+            "text": "DO-NOT-LEAK-RECORDS-SCOPE-BODY",
+        },
+    )
     scope_dir = tmp_path / "workspace"
     scope_dir.mkdir()
     (scope_dir / (quote(rec.id, safe="") + ".json")).write_text(rec.to_json(), encoding="utf-8")
 
-    with pytest.raises(InvalidRecord, match="path scope"):
+    with pytest.raises(InvalidRecord) as caught:
         be.records()
+
+    assert str(caught.value) == "record key mismatch"
+    assert "DO-NOT-LEAK-RECORDS-SCOPE-BODY" not in str(caught.value)
