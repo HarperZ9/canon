@@ -159,6 +159,49 @@ drift verdict:
   documented caller-wiring corrected and verified out-of-suite, plus the recorded
   audit.
 
+V4 is the reconcile band. It is the first band that decides, per surface, whether
+a byte-drift is a safe mechanical fast-forward or a conflict a human must
+adjudicate, then acts: it writes the fast-forwards and raises a durable human gate
+for the conflicts. The fast-forward-vs-conflict call consumes the external
+crucible persona verdict from V3, not a self-report:
+- `src/canon/reconcile_gate.py` — the pure gate/deadline kernel, clock-free and
+  IO-free. `ConflictGatePolicy` configures how a conflict gate lapses;
+  `resolve_with_deadline` folds a frozen absolute deadline against an injected
+  clock (now == deadline expires; the default on_expiry is reject, so a gate no one
+  answered lapses closed); `reconcile_action` maps a resolution to the one commit
+  bit and raises on an out-of-vocabulary resolution.
+- `src/canon/reconcile.py` — the pure per-surface decision. `persona_fold` lifts
+  V3's single-persona fold to a set (any proven drift outranks any honest null);
+  `classify` is the total lattice over (drift verdict, persona fold) and fails
+  closed to REFUSED on any out-of-vocabulary input; `classify_surface` scores the
+  drift against the personality-block subset (which keeps `surface_drift` total),
+  folds the crucible persona verdict in only on a byte-drift (the sole fork where
+  it changes the write decision), and overlays any gate on file, reading a durable
+  deadline frozen at raise time. Read-only.
+- `src/canon/reconcile_run.py` — the two-phase orchestrator. `reconcile`
+  classifies every surface (reads only), then commits: it batch-writes the
+  fast-forwards and approved overrides through the exact writer the drift check
+  mirrors, raises a fresh durable gate for each surface that still needs a human,
+  and witnesses the run once (even all-clean). `run_witness_payload` is the
+  path-clean receipt (a pool_digest binding the inputs, per-surface region hashes
+  binding each decision to content, no absolute host path emitted);
+  `reconcile_exit_code` gates a build.
+- `project-docs/V4-DECISIONS.md` — D-51 drift against on-disk (no recorded base),
+  D-52 the four catalog surfaces as target (vault reconcile scoped out), D-53
+  scope-coarse persona-to-surface coupling, D-54 the classification lattice and
+  which classifications gate, D-55 an unverifiable basis holds like a conflict,
+  D-56 classify fails closed to REFUSED, D-57 the assessor fires only on a
+  byte-drift, D-58 the block filter (and the disclosed latent V2 mixed-pool
+  defect), D-59 the pure gate/deadline kernel, D-60 the deadline and on_expiry
+  frozen at raise (the read side takes no policy; a materialized reply missing a
+  frozen field is a loud wiring fault), D-61 the path-clean gate identity, D-62
+  two-phase then witness once, D-63 per-surface independence, D-64 the path-clean
+  pool-bound run witness, D-65 the commit writes through the writer the drift
+  check mirrors, D-66 the commit is not transactional across seams (disclosed
+  boundary), D-67 the classify/raise gate double-read is a benign staleness window
+  (disclosed boundary), plus the recorded audit (0 critical, 1 warning folded, 2
+  info disclosed).
+
 Later phases (verifier, migration legs, region installation, the global SOUL.md
 and GEMINI.md surfaces) aim at this same envelope. Each lands on its own branch.
 

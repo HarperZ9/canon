@@ -30,7 +30,12 @@ from canon.registry import (
     write_surface,
     write_surfaces,
 )
-from canon.schema import KIND_PERSONALITY_BLOCK, Provenance, Record
+from canon.schema import (
+    KIND_EPISODIC_MEMORY,
+    KIND_PERSONALITY_BLOCK,
+    Provenance,
+    Record,
+)
 
 HOME = os.path.join("fake", "home")
 WS = os.path.join("fake", "ws")
@@ -153,6 +158,46 @@ def test_merged_workspace_file_drifts_from_the_authored_split():
     d = surface_drift(CLAUDE_WS, pool, home=HOME, workspace=WS,
                       read_text=fs.read_text)
     assert d.verdict == VERDICT_DRIFT
+
+
+def test_mixed_pool_with_non_block_record_is_refused_not_raised():
+    # D-58: layering rejects a non-personality-block record inside the pool,
+    # and that raise reaches surface_drift through render_surface. drift must
+    # fold the layering refusal into a verdict, never leak, so the totality
+    # guarantee ("every refusal is a verdict") holds for a realistic mixed
+    # pool a caller supplies (e.g. personality blocks alongside episodic
+    # memories from the same store).
+    ep = Record(kind=KIND_EPISODIC_MEMORY, id="ep-1", scope="workspace",
+                data={"body": "a raw turn"},
+                provenance=Provenance(harness="claude-code",
+                                      source_hash="b" * 64, create_ord=5))
+    pool = [_block("tone", "workspace", "W tone", 20), ep]
+    path = resolve_surface_path(CLAUDE_WS, home=HOME, workspace=WS)
+    fs = FakeFS({path: _host("workspace")})
+    d = surface_drift(CLAUDE_WS, pool, home=HOME, workspace=WS,
+                      read_text=fs.read_text)
+    assert d.verdict == VERDICT_REFUSED
+    assert d.reason is not None
+    assert "personality-block" in d.reason
+
+
+def test_drift_report_over_mixed_pool_does_not_raise():
+    # The whole-catalog report must also stay total when the pool carries a
+    # non-personality-block record. Every surface refuses, the report is not
+    # ok, and the exit code is one -- no LayeringError leaks out of drift.
+    ep = Record(kind=KIND_EPISODIC_MEMORY, id="ep-1", scope="workspace",
+                data={"body": "a raw turn"},
+                provenance=Provenance(harness="claude-code",
+                                      source_hash="b" * 64, create_ord=5))
+    pool = [_block("tone", "workspace", "W tone", 20), ep]
+    files = {resolve_surface_path(s, home=HOME, workspace=WS): _host(s.scope)
+             for s in SURFACE_CATALOG}
+    fs = FakeFS(files)
+    report = drift_report(pool, home=HOME, workspace=WS,
+                          read_text=fs.read_text)
+    assert not report.ok
+    assert drift_exit_code(report) == 1
+    assert all(d.verdict == VERDICT_REFUSED for d in report.surfaces)
 
 
 def test_drift_report_mirrors_write_surfaces_and_exit_code():
