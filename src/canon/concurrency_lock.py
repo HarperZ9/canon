@@ -94,8 +94,14 @@ def release_lock(owner: object, root: object, name: object, token: object, path:
         return
     try:
         _backend.verify_capability(capability)
+    except LockError:
+        _close_and_unregister(owner, capability)
+        raise
+    try:
         _backend.delete_capability(capability)
         capability.released = True
+    except _backend.RetryableReleaseError:
+        raise
     except LockError:
         _close_and_unregister(owner, capability)
         raise

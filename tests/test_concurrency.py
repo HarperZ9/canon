@@ -294,9 +294,34 @@ def test_windows_conflict_uses_stable_parent_handle_not_full_path_open(
     try:
         with pytest.raises(LockError, match="lock-held"):
             acquire_run_lock(tmp_path, "workspace")
-        assert first.path.read_text(encoding="utf-8") == first.token
+        assert concurrency_capability.lookup(first) is not None
     finally:
         release_run_lock(first)
+
+
+def test_windows_create_uses_delete_capable_create_new_handle(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, int] = {}
+
+    def fake_create(
+        dir_handle: int,
+        name: str,
+        access: int,
+        share: int,
+        disposition: int,
+        options: int,
+    ) -> int:
+        captured.update(access=access, share=share, disposition=disposition, options=options)
+        return 123
+
+    monkeypatch.setattr(concurrency_windows._api, "nt_create_relative", fake_create)
+    monkeypatch.setattr(concurrency_windows, "_write_file", lambda handle, data: None)
+
+    assert concurrency_windows.create_lock_file(7, "workspace.lock", "token") == 123
+    assert captured["access"] & concurrency_windows._api.DELETE
+    assert captured["share"] & concurrency_windows._api.FILE_SHARE_DELETE
+    assert captured["disposition"] == concurrency_windows._api.FILE_CREATE
 
 
 def test_acquire_handle_cleanup_survives_lock_directory_swap(
@@ -411,6 +436,120 @@ def test_acquire_registers_capability_after_fake_backend_namespace_swap(
         _restore_displaced_lock_dir(root / ".canon-locks", displaced)
 
 
+def test_windows_release_uses_same_child_handle_before_close_replacement(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    lock_dir = tmp_path / ".canon-locks"
+    lock_path = lock_dir / "workspace.lock"
+    token = "same-handle-token"
+    lock_dir.mkdir()
+    lock_path.write_text(token, encoding="utf-8")
+    lock = RunLock(root=tmp_path, name="workspace", token=token, path=lock_path)
+    cap = concurrency_capability.LockCapability(
+        tmp_path, "workspace", "workspace.lock", token, lock_path, "windows", 100, 200, (1,)
+    )
+    calls: list[tuple[object, ...]] = []
+    concurrency_lock.register_lock(lock, cap)
+
+    def fake_close(handle: int) -> None:
+        calls.append(("close", handle))
+        if handle == 200:
+            lock_path.write_text("replacement-token", encoding="utf-8")
+
+    def fake_delete_name(dir_ref: int, name: str) -> None:
+        calls.append(("delete-name", dir_ref, name))
+        lock_path.unlink(missing_ok=True)
+
+    monkeypatch.setattr(concurrency_windows, "file_id", lambda handle: (1,))
+    monkeypatch.setattr(concurrency_windows, "read_token", lambda handle: token)
+    monkeypatch.setattr(concurrency_windows, "delete_open_file", lambda handle: calls.append(("delete-open", handle)), raising=False)
+    monkeypatch.setattr(concurrency_windows, "close_handle", fake_close)
+    monkeypatch.setattr(concurrency_windows, "delete_lock_file", fake_delete_name, raising=False)
+
+    release_run_lock(lock)
+
+    assert ("delete-open", 200) in calls
+    assert not any(call[0] == "delete-name" for call in calls)
+    assert calls.index(("delete-open", 200)) < calls.index(("close", 200))
+    assert lock_path.read_text(encoding="utf-8") == "replacement-token"
+
+
+def test_windows_release_delete_failure_preserves_capability_for_retry(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    lock_path = tmp_path / ".canon-locks" / "workspace.lock"
+    lock_path.parent.mkdir()
+    lock = RunLock(root=tmp_path, name="workspace", token="retry-token", path=lock_path)
+    cap = concurrency_capability.LockCapability(
+        tmp_path, "workspace", "workspace.lock", "retry-token", lock_path, "windows", 10, 20, (2,)
+    )
+    attempts = 0
+    closed: list[int] = []
+    concurrency_lock.register_lock(lock, cap)
+
+    def delete_open(handle: int) -> None:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise OSError(errno.EACCES, "delete denied")
+
+    monkeypatch.setattr(concurrency_windows, "file_id", lambda handle: (2,))
+    monkeypatch.setattr(concurrency_windows, "read_token", lambda handle: "retry-token")
+    monkeypatch.setattr(concurrency_windows, "delete_open_file", delete_open, raising=False)
+    monkeypatch.setattr(
+        concurrency_windows,
+        "delete_lock_file",
+        lambda dir_ref, name: pytest.fail("must not reopen by name"),
+        raising=False,
+    )
+    monkeypatch.setattr(concurrency_windows, "close_handle", lambda handle: closed.append(handle))
+
+    with pytest.raises(LockError, match="lock-release"):
+        release_run_lock(lock)
+
+    assert concurrency_capability.lookup(lock) is cap
+    assert (cap.dir_ref, cap.file_ref, cap.released) == (10, 20, False)
+    assert closed == []
+
+    release_run_lock(lock)
+
+    assert attempts == 2
+    assert cap.released
+    assert (cap.dir_ref, cap.file_ref) == (-1, -1)
+    assert closed == [20, 10]
+
+
+def test_windows_release_native_replacement_after_child_close_survives(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    if os.name != "nt":
+        pytest.skip("Windows same-handle delete regression")
+    lock = acquire_run_lock(tmp_path, "workspace")
+    cap = concurrency_capability.lookup(lock)
+    assert cap is not None
+    survivor = tmp_path / "survivor.lock"
+    real_close = concurrency_windows.close_handle
+
+    def close_then_replace(handle: int) -> None:
+        real_close(handle)
+        if handle == cap.file_ref:
+            try:
+                lock.path.rename(survivor)
+            except FileNotFoundError:
+                pass
+            lock.path.write_text("replacement-token", encoding="utf-8")
+
+    monkeypatch.setattr(concurrency_windows, "close_handle", close_then_replace)
+
+    release_run_lock(lock)
+
+    assert lock.path.read_text(encoding="utf-8") == "replacement-token"
+    assert not survivor.exists()
+
+
 def test_release_refuses_lock_path_outside_lock_root(tmp_path: Path) -> None:
     outside = tmp_path / "outside.lock"
     outside.write_text("token", encoding="utf-8")
@@ -421,23 +560,34 @@ def test_release_refuses_lock_path_outside_lock_root(tmp_path: Path) -> None:
     assert outside.exists()
 
 
-def test_release_checks_token_ownership_without_deleting(tmp_path: Path) -> None:
+def test_release_checks_token_ownership_without_deleting(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     lock = acquire_run_lock(tmp_path, "workspace")
-    lock.path.write_text("other-token", encoding="utf-8")
+    if os.name == "nt":
+        monkeypatch.setattr(concurrency_windows, "read_token", lambda handle: "other-token")
+    else:
+        lock.path.write_text("other-token", encoding="utf-8")
 
     with pytest.raises(LockError, match="lock-token-mismatch"):
         release_run_lock(lock)
     assert lock.path.exists()
 
 
-def test_failed_release_makes_lock_capability_stale(tmp_path: Path) -> None:
+def test_failed_release_makes_lock_capability_stale(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
     lock = acquire_run_lock(tmp_path, "workspace")
-    lock.path.write_text("other-token", encoding="utf-8")
+    if os.name == "nt":
+        monkeypatch.setattr(concurrency_windows, "read_token", lambda handle: "other-token")
+    else:
+        lock.path.write_text("other-token", encoding="utf-8")
 
     with pytest.raises(LockError, match="lock-token-mismatch"):
         release_run_lock(lock)
 
-    lock.path.write_text(lock.token, encoding="utf-8")
     with pytest.raises(LockError, match="lock-stale"):
         release_run_lock(lock)
 
@@ -543,23 +693,27 @@ def test_release_swap_back_cannot_authorize_with_outside_token(
     root.mkdir()
     outside.mkdir()
     lock = acquire_run_lock(root, "workspace")
-    lock.path.write_text("tampered-token", encoding="utf-8")
+    if os.name == "nt":
+        monkeypatch.setattr(concurrency_windows, "read_token", lambda handle: "tampered-token")
+    else:
+        lock.path.write_text("tampered-token", encoding="utf-8")
     (outside / "workspace.lock").write_text(lock.token, encoding="utf-8")
-    real_read = concurrency_lock._read_lock_token
+    real_verify = concurrency_lock_backend.verify_capability
     swapped = False
 
-    def read_through_swap_back(path: Path) -> str:
+    def verify_through_swap_back(capability: object) -> None:
         nonlocal swapped
-        if not swapped and path == lock.path:
+        if not swapped:
             swapped = True
             _swap_lock_dir_to_symlink(root / ".canon-locks", displaced, outside)
             try:
-                return real_read(path)
+                real_verify(capability)
             finally:
                 _restore_displaced_lock_dir(root / ".canon-locks", displaced)
-        return real_read(path)
+        else:
+            real_verify(capability)
 
-    monkeypatch.setattr(concurrency_lock, "_read_lock_token", read_through_swap_back)
+    monkeypatch.setattr(concurrency_lock_backend, "verify_capability", verify_through_swap_back)
 
     with pytest.raises(LockError, match="lock-token-mismatch"):
         release_run_lock(lock)

@@ -12,6 +12,10 @@ from .concurrency_errors import LockError
 VerifyDir = Callable[[Path, tuple[Path, int, int]], None]
 
 
+class RetryableReleaseError(LockError):
+    pass
+
+
 def write_windows(
     lock_dir: Path,
     lock_name: str,
@@ -74,24 +78,21 @@ def verify_capability(capability: _caps.LockCapability) -> None:
 def delete_capability(capability: _caps.LockCapability) -> None:
     try:
         if capability.backend == "windows":
-            _win.close_handle(capability.file_ref)
-            capability.file_ref = -1
-            _win.delete_lock_file(capability.dir_ref, capability.lock_name)
+            _delete_windows_capability(capability)
         else:
             _posix.delete_lock_file(capability.dir_ref, capability.lock_name)
     except OSError as exc:
         raise LockError("lock-release", str(exc)) from exc
     finally:
-        close_capability(capability)
+        if capability.backend != "windows" or capability.file_ref < 0:
+            close_capability(capability)
 
 
 def cleanup_refs(backend: str, dir_ref: int, file_ref: int, lock_name: str = "") -> None:
     if file_ref >= 0:
         try:
             if backend == "windows":
-                _win.close_handle(file_ref)
-                _win.delete_lock_file(dir_ref, lock_name)
-                file_ref = -1
+                _win.delete_open_file(file_ref)
             else:
                 _posix.delete_lock_file(dir_ref, lock_name)
         except OSError:
@@ -129,6 +130,14 @@ def _create_windows_file(dir_handle: int, lock_name: str, token: str, lock_dir: 
         raise LockError("lock-write", str(exc)) from exc
     except OSError as exc:
         raise LockError("lock-open", str(exc)) from exc
+
+
+def _delete_windows_capability(capability: _caps.LockCapability) -> None:
+    try:
+        _win.delete_open_file(capability.file_ref)
+    except OSError as exc:
+        raise RetryableReleaseError("lock-release", str(exc)) from exc
+    close_capability(capability)
 
 
 def _create_posix_file(dir_fd: int, lock_name: str, token: str, lock_dir: Path) -> int:
