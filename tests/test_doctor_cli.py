@@ -93,6 +93,12 @@ class _HostileStr(str):
         return "sk-doctorCanary123456789012345"
 
 
+def _clean_finding():
+    import canon.doctor as doctor
+
+    return doctor.DoctorFinding("adapter_descriptor_valid", "info", "ok", "adapter descriptor valid")
+
+
 def test_clean_doctor_reports_descriptor_sources_and_exact_source_state(tmp_path: Path) -> None:
     workspace = tmp_path / "work"
     workspace.mkdir()
@@ -328,6 +334,90 @@ def test_public_types_are_immutable_and_revalidate_tampering_without_hostile_rep
         report.to_dict()
 
     assert _canary() not in str(tampered.value) + str(hostile.value) + str(hostile_report.value)
+
+
+def test_doctor_config_repr_hides_paths_and_rejects_stdin_secret_metadata() -> None:
+    import canon.doctor as doctor
+    from canon.cli_artifacts import SourceBytes
+
+    config = doctor.DoctorConfig(
+        workspace="C:/private/canon",
+        target="codex-cli",
+        records="records.jsonl",
+        atoms="atoms.jsonl",
+    )
+    assert "C:/private/canon" not in repr(config)
+    assert "records.jsonl" not in repr(config)
+
+    with pytest.raises(doctor.DoctorConfigError) as excinfo:
+        doctor.DoctorConfig(
+            workspace=".",
+            target="codex-cli",
+            records="-",
+            stdin_source=SourceBytes(f"stdin-{_canary()}", b""),
+        )
+    assert _canary() not in str(excinfo.value)
+
+
+def test_doctor_public_types_reject_secret_leaves_without_json_or_exception_leak() -> None:
+    import canon.doctor as doctor
+
+    for build in (
+        lambda: doctor.DoctorFinding("adapter_descriptor_valid", "info", "ok", _canary()),
+        lambda: doctor.DoctorFinding("adapter_descriptor_valid", "info", "ok", "ready", {"nested": [_canary()]}),
+        lambda: doctor.DoctorReport(True, "ok", "ready", (_clean_finding(),), {"nested": {"token": _canary()}}),
+    ):
+        with pytest.raises((TypeError, doctor.DoctorConfigError)) as excinfo:
+            build()
+        assert _canary() not in str(excinfo.value)
+
+    report = doctor.DoctorReport(True, "ok", "ready", (_clean_finding(),), {"safe": True})
+    object.__setattr__(report.findings[0], "message", _canary())
+    object.__setattr__(report, "data", {"nested": [_canary()]})
+    assert _canary() not in repr(report.findings[0]) + repr(report)
+    for serialize in (report.to_dict, report.to_result_data):
+        with pytest.raises(TypeError) as excinfo:
+            serialize()
+        assert _canary() not in str(excinfo.value)
+
+    finding = _clean_finding()
+    object.__setattr__(finding, "evidence", {"nested": [_canary()]})
+    assert _canary() not in repr(finding)
+    with pytest.raises(TypeError) as excinfo:
+        finding.to_dict()
+    assert _canary() not in str(excinfo.value)
+
+
+def test_doctor_report_rejects_unknown_codes_and_noncanonical_priority() -> None:
+    import canon.doctor as doctor
+
+    with pytest.raises(TypeError):
+        doctor.DoctorFinding("future", "blocker", "future-code", "future failure")
+
+    secret = doctor.DoctorFinding("secret_quarantine", "blocker", "secret_quarantine", "source quarantined")
+    drift = doctor.DoctorFinding("source_changed", "blocker", "source_changed", "source state changed")
+    with pytest.raises(TypeError):
+        doctor.DoctorReport(False, "source_changed", "doctor diagnostics complete", (drift, secret))
+
+    report = doctor.DoctorReport(False, "secret_quarantine", "doctor diagnostics complete", (secret, drift))
+    object.__setattr__(report, "findings", (drift, secret))
+    object.__setattr__(report, "failure_code", "source_changed")
+    object.__setattr__(report, "exit_code", EX_GATE)
+    with pytest.raises(TypeError):
+        report.to_dict()
+
+
+def test_direct_stdin_source_respects_exact_max_source_bytes() -> None:
+    import canon.doctor as doctor
+    from canon.cli_artifacts import MAX_SOURCE_BYTES, SourceBytes
+
+    exact = SourceBytes("stdin-records", b"\n" * MAX_SOURCE_BYTES)
+    assert doctor.DoctorConfig(workspace=".", target="codex-cli", records="-", stdin_source=exact).stdin_source == exact
+
+    over = SourceBytes("stdin-records", b"\n" * (MAX_SOURCE_BYTES + 1))
+    with pytest.raises(doctor.DoctorConfigError) as excinfo:
+        doctor.DoctorConfig(workspace=".", target="codex-cli", records="-", stdin_source=over)
+    assert _canary() not in str(excinfo.value)
 
 
 def test_option_ordering_is_canonical_and_secret_has_failure_priority(tmp_path: Path) -> None:

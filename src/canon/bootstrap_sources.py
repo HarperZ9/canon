@@ -6,11 +6,21 @@ from dataclasses import dataclass, field
 
 from .bootstrap_validation import require_serializable_data, safe_text, snapshot_data, thaw_mapping_or_none
 from .canonical_json import is_sha256_ref
-from .cli_artifacts import SourceBytes
+from .cli_artifacts import MAX_SOURCE_BYTES, SourceBytes
 from .exit_codes import exit_code_for
+from .secret_quarantine import scan_text
 
 _BOMS = (b"\xef\xbb\xbf", b"\xff\xfe", b"\xfe\xff", b"\x00\x00\xfe\xff", b"\xff\xfe\x00\x00")
 _ADAPTER_ID_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+DOCTOR_FAILURE_PRIORITY = {
+    "secret_quarantine": 0,
+    "source_changed": 1,
+    "invalid_args": 2,
+    "source_unreachable": 3,
+    "unsafe_path": 4,
+    "unsupported_lifecycle": 5,
+}
+DOCTOR_FAILURE_CODES = frozenset({"ok", *DOCTOR_FAILURE_PRIORITY})
 
 
 class SourceParseError(ValueError):
@@ -30,14 +40,14 @@ class JsonLine:
     value: dict
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, repr=False)
 class DoctorConfig:
-    workspace: str = "."
-    target: str = ""
-    records: str | None = None
-    atoms: str | None = None
+    workspace: str = field(default=".", repr=False)
+    target: str = field(default="", repr=False)
+    records: str | None = field(default=None, repr=False)
+    atoms: str | None = field(default=None, repr=False)
     offline: bool = False
-    expected_source_state: str | None = None
+    expected_source_state: str | None = field(default=None, repr=False)
     stdin_source: SourceBytes | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
@@ -45,17 +55,17 @@ class DoctorConfig:
             object.__setattr__(self, name, value)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, repr=False)
 class DoctorFinding:
     code: str
     severity: str
     failure_code: str
-    message: str
+    message: str = field(repr=False)
     evidence: object = field(default_factory=dict, repr=False)
 
     def __post_init__(self) -> None:
         _check_finding_fields(self)
-        object.__setattr__(self, "evidence", snapshot_data(self.evidence))
+        object.__setattr__(self, "evidence", _snapshot_public_data(self.evidence, "invalid doctor finding"))
 
     def to_dict(self) -> dict[str, object]:
         check_doctor_finding(self)
@@ -64,18 +74,18 @@ class DoctorFinding:
                 "severity": self.severity}
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, repr=False)
 class DoctorReport:
     ok: bool
     failure_code: str
-    message: str
+    message: str = field(repr=False)
     findings: tuple[DoctorFinding, ...]
     data: object = field(default_factory=dict, repr=False)
     exit_code: int = field(init=False)
 
     def __post_init__(self) -> None:
         _check_report_fields(self)
-        object.__setattr__(self, "data", snapshot_data(self.data))
+        object.__setattr__(self, "data", _snapshot_public_data(self.data, "invalid doctor report"))
         object.__setattr__(self, "exit_code", exit_code_for(self.failure_code))
 
     def to_dict(self) -> dict[str, object]:
@@ -106,7 +116,7 @@ def snapshot_doctor_config(config: DoctorConfig) -> dict[str, object]:
 def check_doctor_finding(finding: DoctorFinding) -> None:
     try:
         _check_finding_fields(finding)
-        require_serializable_data(finding.evidence, "invalid doctor finding")
+        _check_public_data(finding.evidence, "invalid doctor finding")
     except TypeError:
         raise TypeError("invalid doctor finding") from None
 
@@ -118,7 +128,7 @@ def check_doctor_report(report: DoctorReport) -> None:
             check_doctor_finding(finding)
         if type(report.exit_code) is not int or report.exit_code != exit_code_for(report.failure_code):
             raise TypeError("invalid doctor report")
-        require_serializable_data(report.data, "invalid doctor report")
+        _check_public_data(report.data, "invalid doctor report")
     except TypeError:
         raise TypeError("invalid doctor report") from None
 
@@ -161,6 +171,9 @@ def _stdin_snapshot(value: object) -> SourceBytes | None:
         return None
     if type(value) is not SourceBytes or type(value.path) is not str or type(value.data) is not bytes:
         raise DoctorConfigError("invalid doctor config")
+    _scan_config_text(value.path)
+    if len(value.data) > MAX_SOURCE_BYTES:
+        raise DoctorConfigError("invalid doctor config")
     return SourceBytes(value.path, bytes(value.data))
 
 
@@ -191,9 +204,11 @@ def _bool(value: object) -> bool:
 
 
 def _check_finding_fields(finding: DoctorFinding) -> None:
-    safe_text(finding.code, "doctor finding code")
-    safe_text(finding.failure_code, "doctor finding failure_code")
-    safe_text(finding.message, "doctor finding message")
+    _safe_public_text(finding.code, "doctor finding code", "invalid doctor finding")
+    _safe_public_text(finding.failure_code, "doctor finding failure_code", "invalid doctor finding")
+    _safe_public_text(finding.message, "doctor finding message", "invalid doctor finding")
+    if finding.failure_code not in DOCTOR_FAILURE_CODES:
+        raise TypeError("invalid doctor finding")
     if type(finding.severity) is not str or finding.severity not in ("blocker", "warning", "info"):
         raise TypeError("invalid doctor finding")
     if (finding.severity == "blocker") == (finding.failure_code == "ok"):
@@ -203,10 +218,15 @@ def _check_finding_fields(finding: DoctorFinding) -> None:
 def _check_report_fields(report: DoctorReport) -> None:
     if type(report.ok) is not bool or type(report.findings) is not tuple:
         raise TypeError("invalid doctor report")
-    safe_text(report.failure_code, "doctor report failure_code")
-    safe_text(report.message, "doctor report message")
+    _safe_public_text(report.failure_code, "doctor report failure_code", "invalid doctor report")
+    _safe_public_text(report.message, "doctor report message", "invalid doctor report")
+    if report.failure_code not in DOCTOR_FAILURE_CODES:
+        raise TypeError("invalid doctor report")
     if any(type(finding) is not DoctorFinding for finding in report.findings):
         raise TypeError("invalid doctor findings")
+    for finding in report.findings:
+        _check_finding_fields(finding)
+    _check_finding_order(report.findings)
     blockers = [finding for finding in report.findings if finding.severity == "blocker"]
     if report.ok != (report.failure_code == "ok" and not blockers):
         raise TypeError("invalid doctor report")
@@ -218,16 +238,59 @@ def _has_control(value: str) -> bool:
     return "\0" in value or any(ord(char) < 32 or ord(char) == 127 for char in value)
 
 
-__all__ = [
-    "DoctorConfig",
-    "DoctorConfigError",
-    "DoctorFinding",
-    "DoctorReport",
-    "JsonLine",
-    "SourceParseError",
-    "check_doctor_finding",
-    "check_doctor_report",
-    "snapshot_doctor_config",
-    "strict_jsonl_objects",
-    "utf8_text",
-]
+def _snapshot_public_data(data: object, message: str) -> object:
+    try:
+        _check_public_data(data, message)
+        return snapshot_data(data)
+    except TypeError:
+        raise TypeError(message) from None
+
+
+def _check_public_data(data: object, message: str) -> None:
+    require_serializable_data(data, message)
+    _scan_public_value(thaw_mapping_or_none(data), message)
+
+
+def _scan_public_value(value: object, message: str) -> None:
+    if type(value) is str:
+        _safe_public_text(value, "doctor data", message)
+    elif type(value) is dict:
+        for key, item in value.items():
+            _safe_public_text(key, "doctor data key", message)
+            _scan_public_value(item, message)
+    elif type(value) is list:
+        for item in value:
+            _scan_public_value(item, message)
+
+
+def _safe_public_text(value: object, name: str, message: str) -> str:
+    try:
+        text = safe_text(value, name)
+    except TypeError:
+        raise TypeError(message) from None
+    if scan_text(text, source_id="doctor-public"):
+        raise TypeError(message)
+    return text
+
+
+def _scan_config_text(value: str) -> None:
+    if scan_text(value, source_id="doctor-config"):
+        raise DoctorConfigError("invalid doctor config")
+
+
+def _finding_priority(finding: DoctorFinding) -> int:
+    return 100 if finding.severity != "blocker" else DOCTOR_FAILURE_PRIORITY[finding.failure_code]
+
+
+def _check_finding_order(findings: tuple[DoctorFinding, ...]) -> None:
+    priorities = [_finding_priority(finding) for finding in findings]
+    if priorities != sorted(priorities):
+        raise TypeError("invalid doctor report")
+
+
+__all__ = (
+    "DoctorConfig", "DoctorConfigError", "DoctorFinding", "DoctorReport",
+    "DOCTOR_FAILURE_PRIORITY", "JsonLine", "SourceParseError",
+    "check_doctor_finding", "check_doctor_report", "snapshot_doctor_config",
+    "strict_jsonl_objects", "utf8_text",
+)

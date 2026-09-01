@@ -8,6 +8,7 @@ from .bootstrap_sources import (
     DoctorConfigError,
     DoctorFinding,
     DoctorReport,
+    DOCTOR_FAILURE_PRIORITY,
     SourceParseError,
     snapshot_doctor_config,
     strict_jsonl_objects,
@@ -21,9 +22,6 @@ from .schema import Record
 from .secret_quarantine import scan_text
 from .source_state import SourceStateError, assert_source_state, source_state_sha256
 from .validator import validate_record
-
-_PRIORITY = {"secret_quarantine": 0, "source_changed": 1, "invalid_args": 2,
-             "source_unreachable": 3, "unsafe_path": 4, "unsupported_lifecycle": 5}
 
 @dataclass(frozen=True, slots=True)
 class _Source:
@@ -218,7 +216,7 @@ def _safe_label(source: _Source) -> str:
     return source.bytes.path
 
 def _priority(finding: DoctorFinding) -> int:
-    return 100 if finding.severity != "blocker" else _PRIORITY.get(finding.failure_code, 90)
+    return 100 if finding.severity != "blocker" else DOCTOR_FAILURE_PRIORITY[finding.failure_code]
 
 def _has_blocker(findings: list[DoctorFinding], codes: set[str]) -> bool:
     return any(finding.severity == "blocker" and finding.failure_code in codes for finding in findings)
