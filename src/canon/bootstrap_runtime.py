@@ -8,6 +8,7 @@ from .atom import CanonAtom
 from .bootstrap_runtime_cache import BootstrapCacheResult, cache_entry_from_bundle, cache_failure, select_cache
 from .bootstrap_runtime_error import BootstrapRuntimeError
 from .bootstrap_runtime_inputs import load_bootstrap_inputs, source_item_dict
+from .bootstrap_state_root import BootstrapStateRoot, BootstrapStateRootError, open_bootstrap_state_root
 from .canonical_json import canonical_json_text, canonical_sha256, sha256_text
 from .capsule import Budget, CapsuleBuildError, CapsuleCompileRequest, CapsuleTarget, SourceState, compile_capsule
 from .cli_artifacts import ArtifactError, SourceBytes, WorkspaceRoot, checked_workspace
@@ -25,6 +26,7 @@ BOOTSTRAP_COMPILER_CONTRACT = "canon.bootstrap-runtime/2026-08-30"
 class BootstrapRuntime:
     workspace: WorkspaceRoot
     state_dir: Path
+    state_root: BootstrapStateRoot
     adapter: AdapterDescriptor
     target: CapsuleTarget
     source_state: SourceState
@@ -58,6 +60,9 @@ def resolve_workspace(raw_workspace: object, raw_state_dir: object) -> tuple[Wor
 
 def load_runtime(snapshot: dict[str, object], descriptor: AdapterDescriptor, *, workspace: WorkspaceRoot, state_dir: Path) -> BootstrapRuntime:
     loaded = load_bootstrap_inputs(snapshot, workspace)
+    try: state_root = open_bootstrap_state_root(workspace, state_dir)
+    except BootstrapStateRootError as exc:
+        raise BootstrapRuntimeError(exc.code, "unsafe bootstrap path") from exc
     target = CapsuleTarget(descriptor.adapter_id, "CANON.md", snapshot["tier"], False)  # type: ignore[arg-type]
     compiler_key = _compiler_key(descriptor)
     cache_key = SourceStateCache.key_for(
@@ -65,7 +70,7 @@ def load_runtime(snapshot: dict[str, object], descriptor: AdapterDescriptor, *, 
         budget=loaded.budget_key, compiler_version=compiler_key, offline=snapshot["offline"],  # type: ignore[arg-type]
     )
     return BootstrapRuntime(
-        workspace, state_dir, descriptor, target, loaded.source_state, loaded.source_items,
+        workspace, state_dir, state_root, descriptor, target, loaded.source_state, loaded.source_items,
         loaded.source_inputs, loaded.records, loaded.atoms, loaded.budget, loaded.budget_key,
         compiler_key, cache_key, loaded.readiness_response, _limitations(descriptor, snapshot["offline"]),
         snapshot["profile"], snapshot["offline"], snapshot["run_id"], snapshot["tier"], snapshot["started_at"],  # type: ignore[arg-type]

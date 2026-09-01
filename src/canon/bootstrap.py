@@ -54,7 +54,8 @@ def run_bootstrap(config: BootstrapConfig) -> BootstrapReport:
     try: runtime = load_runtime(snapshot, descriptor, workspace=workspace, state_dir=state_dir)
     except BootstrapRuntimeError as exc: return _terminal(events, "collect_source_state", exc.code, str(exc), base)
     events.append(make_event("collect_source_state", "collected source state", {"source_state": runtime.source_state.to_dict()}))
-    return _run_checked(events, runtime, base)
+    try: return _run_checked(events, runtime, base)
+    finally: runtime.state_root.close()
 
 
 def _run_checked(events: list[BootstrapEvent], runtime: object, base: dict[str, object]) -> BootstrapReport:
@@ -75,7 +76,7 @@ def _run_checked(events: list[BootstrapEvent], runtime: object, base: dict[str, 
 
 def _emit_witness(events: list[BootstrapEvent], runtime: object, cache: object, readiness: object, observed: bool, data: dict[str, object]) -> BootstrapReport:
     witness = build_witness(runtime, cache, readiness, observed=observed)
-    try: write = write_bootstrap_witness(witness, workspace=runtime.workspace, state_dir=runtime.state_dir)
+    try: write = write_bootstrap_witness(witness, workspace=runtime.workspace, state_dir=runtime.state_dir, state_root=runtime.state_root)
     except BootstrapWitnessStoreError as exc:
         return _terminal(events, "emit_witness", exc.code, "bootstrap witness write failed", data)
     data = result_data(runtime, cache, readiness, witness_path=write.relative_path, observed=observed)

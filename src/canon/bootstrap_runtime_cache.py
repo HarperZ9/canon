@@ -2,11 +2,16 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+import os
+from pathlib import Path
 
 from .bootstrap_runtime_inputs import source_item_dict
-from .canonical_json import is_sha256_ref, sha256_text
+from . import source_state_cache as _cache
+from .atom import atoms_from_records
+from .canonical_json import canonical_json_text, is_sha256_ref, sha256_text
 from .capsule import Capsule, CapsuleBundle, validate_capsule
-from .readiness import ReadinessProbe, validate_readiness_probe
+from .capsule_rules import atom_sort_key, critical_sets
+from .readiness import CRITICAL_SET_KEYS, ReadinessProbe, validate_readiness_probe
 from .source_state_cache import SourceStateCache, SourceStateCacheError
 
 BOOTSTRAP_CACHE_SCHEMA = "canon.bootstrap-cache-entry/v1"
@@ -24,7 +29,7 @@ class BootstrapCacheResult:
 
 
 def select_cache(context: object, make_entry: Callable[[object], dict[str, object]]) -> BootstrapCacheResult:
-    cache = SourceStateCache(context.state_dir / "cache")  # type: ignore[attr-defined]
+    cache = _cache_store(context)
     current = cache.current()
     if current is not None and current.get("cache_key") == context.cache_key:  # type: ignore[attr-defined]
         return _cache_result(_validate_entry(current, context), "hit")
@@ -50,7 +55,9 @@ def cache_entry_from_bundle(context: object, bundle: CapsuleBundle) -> dict[str,
 
 
 def cache_failure(exc: SourceStateCacheError) -> str:
-    return "conflict" if exc.code == "semantic-cache-mismatch" else "io_error"
+    if exc.code == "semantic-cache-mismatch": return "conflict"
+    if exc.code == "unsafe-cache-path": return "unsafe_path"
+    return "io_error"
 
 
 def _validate_entry(entry: dict[str, object], context: object) -> dict[str, object]:
@@ -67,6 +74,12 @@ def _validate_entry(entry: dict[str, object], context: object) -> dict[str, obje
     if capsule.source_state.to_dict() != context.source_state.to_dict():  # type: ignore[attr-defined]
         raise SourceStateCacheError("semantic-cache-mismatch", "cache entry does not match request")
     if capsule.target.to_dict() != context.target.to_dict():  # type: ignore[attr-defined]
+        raise SourceStateCacheError("semantic-cache-mismatch", "cache entry does not match request")
+    if capsule.records != context.records or capsule.atoms != _expected_atoms(context):  # type: ignore[attr-defined]
+        raise SourceStateCacheError("semantic-cache-mismatch", "cache entry does not match request")
+    if capsule.budget.to_dict() != context.budget.to_dict() or capsule.profile != context.profile:  # type: ignore[attr-defined]
+        raise SourceStateCacheError("semantic-cache-mismatch", "cache entry does not match request")
+    if probe.to_dict() != _expected_probe(context, capsule).to_dict():
         raise SourceStateCacheError("semantic-cache-mismatch", "cache entry does not match request")
     return entry
 
@@ -94,6 +107,96 @@ def _cache_result(entry: dict[str, object], status: str) -> BootstrapCacheResult
         ReadinessProbe.from_dict(entry["readiness_probe"]), entry["manifest_sha256"],
         entry["canon_md_sha256"], tuple(entry["does_not_prove"]),  # type: ignore[arg-type]
     )
+
+
+def _cache_store(context: object) -> object:
+    state_root = getattr(context, "state_root", None)
+    if state_root is None:
+        return SourceStateCache(context.state_dir / "cache")  # type: ignore[attr-defined]
+    return _BoundBootstrapCache(state_root)
+
+
+class _BoundBootstrapCache:
+    def __init__(self, state_root: object) -> None:
+        self._state_root = state_root
+
+    def current(self) -> dict[str, object] | None:
+        root = self._open_cache(create=False)
+        if root is None: return None
+        try:
+            pointer = _cache._read_object(root.ref, (), _cache._CURRENT, "current-pointer", required=False)
+            if pointer is None: return None
+            key = _cache._current_key(pointer)
+            entry = _cache._read_object(root.ref, (_cache._BUNDLES,), _entry_name(key), "cache-entry", required=False)
+            if entry is None: raise SourceStateCacheError("missing-current-entry", "current entry is missing")
+            self._state_root.verify_live()
+            return entry
+        finally: root.close()
+
+    def get(self, cache_key: str) -> dict[str, object] | None:
+        root = self._open_cache(create=False)
+        if root is None: return None
+        try:
+            entry = _cache._read_object(root.ref, (_cache._BUNDLES,), _entry_name(cache_key), "cache-entry", required=False)
+            self._state_root.verify_live()
+            return entry
+        finally: root.close()
+
+    def put(self, cache_key: str, entry: object) -> Path:
+        root = self._open_cache(create=True)
+        if root is None: raise SourceStateCacheError("unsafe-cache-path", "cache path is unsafe")
+        body = _cache._canonical_text(_cache._snapshot_bundle(entry), code="invalid-cache-bundle")
+        pointer = _cache._canonical_text({"cache_key": cache_key}, code="invalid-cache-bundle")
+        try:
+            self._state_root.verify_live()
+            if os.name == "nt":
+                _cache._win_put(root.ref, root.path, root.path / _cache._BUNDLES / _entry_name(cache_key), body, pointer)
+            else:
+                _cache._posix_put(root.ref, _entry_name(cache_key), body, pointer)
+            self._state_root.verify_live()
+            return root.path / _cache._BUNDLES / _entry_name(cache_key)
+        finally: root.close()
+
+    def _open_cache(self, *, create: bool) -> object | None:
+        try: return self._state_root.open_child_dir("cache", create=create)
+        except Exception as exc:
+            code = getattr(exc, "code", "unsafe-cache-path")
+            raise SourceStateCacheError(code if code != "unsafe_path" else "unsafe-cache-path", "cache path is unsafe") from exc
+
+
+def _entry_name(cache_key: object) -> str:
+    return _cache._cache_digest(cache_key) + ".json"
+
+
+def _expected_atoms(context: object) -> tuple[object, ...]:
+    try:
+        atoms = tuple(context.atoms) + tuple(atoms_from_records(tuple(context.records)))  # type: ignore[attr-defined]
+        return tuple(sorted(atoms, key=atom_sort_key))
+    except Exception as exc:
+        raise SourceStateCacheError("semantic-cache-mismatch", "cache entry does not match request") from exc
+
+
+def _expected_probe(context: object, capsule: Capsule) -> ReadinessProbe:
+    return ReadinessProbe(
+        _probe_id(context.target, context.source_state, context.profile),  # type: ignore[attr-defined]
+        capsule.capsule_id,
+        _readiness_target(context.adapter, context.target),  # type: ignore[attr-defined]
+        critical_sets(capsule.atoms),
+        {"format": "json", "required_fields": list(CRITICAL_SET_KEYS)},
+        {"method": "exact-id-set-and-status-match", "pass_threshold": "all-critical"},
+    )
+
+
+def _probe_id(target: object, source_state: object, profile: str) -> str:
+    payload = {"profile": profile, "source_state": source_state.to_dict(), "target": target.to_dict()}
+    return "probe-" + sha256_text(canonical_json_text(payload)).removeprefix("sha256:")[:16]
+
+
+def _readiness_target(descriptor: object, target: object) -> dict[str, object]:
+    return {"adapter": target.adapter, "bootstrap": descriptor.bootstrap,
+            "host_enforcement_observed": target.host_enforcement_observed,
+            "integration_tier": target.integration_tier,
+            "known_unknowns": list(descriptor.known_unknowns), "surface": target.surface}
 
 
 __all__ = ["BOOTSTRAP_CACHE_SCHEMA", "BootstrapCacheResult", "cache_entry_from_bundle", "cache_failure", "select_cache"]

@@ -5,15 +5,15 @@ from dataclasses import dataclass
 
 from .atom import CanonAtom, validate_atom
 from .bootstrap_runtime_error import BootstrapRuntimeError
+from .bootstrap_validation import thaw_mapping_or_none
 from .bootstrap_sources import SourceParseError, strict_jsonl_objects, utf8_text
-from .canonical_json import canonical_json_text
+from .canonical_json import CanonicalJSONError, canonical_json_text
 from .capsule import Budget, SourceState
 from .cli_artifacts import ArtifactError, SourceBytes, WorkspaceRoot, read_source_file
 from .schema import Record
 from .secret_quarantine import scan_text
 from .source_state import SourceStateItem, source_state_sha256
 from .validator import validate_record
-from .bootstrap_validation import thaw_mapping_or_none
 
 _BUDGETS = {"needle": 2048, "handoff": 8192, "archive": 32768, "custom": 8192}
 
@@ -97,7 +97,10 @@ def _readiness_response(snapshot: dict[str, object], workspace: WorkspaceRoot) -
     if path is not None:
         if path == "-": raise BootstrapRuntimeError("invalid_args", "invalid readiness response path")
         return _json_object(_read_source(path, workspace))
-    try: return thaw_mapping_or_none(direct)  # type: ignore[arg-type]
+    try:
+        response = thaw_mapping_or_none(direct)  # type: ignore[arg-type]
+        if response is not None: _scan_readiness_response(response)
+        return response
     except TypeError as exc:
         raise BootstrapRuntimeError("invalid_args", "invalid readiness response") from exc
 
@@ -108,7 +111,30 @@ def _json_object(source: SourceBytes) -> dict[str, object]:
     except (json.JSONDecodeError, ValueError) as exc:
         raise BootstrapRuntimeError("invalid_args", "invalid readiness response") from exc
     if type(value) is not dict: raise BootstrapRuntimeError("invalid_args", "invalid readiness response")
+    _scan_readiness_response(value)
     return value
+
+
+def _scan_readiness_response(response: dict[str, object]) -> None:
+    try: rendered = canonical_json_text(response)
+    except (CanonicalJSONError, TypeError, ValueError) as exc:
+        raise BootstrapRuntimeError("invalid_args", "invalid readiness response") from exc
+    if scan_text(rendered, source_id="readiness-response"):
+        raise BootstrapRuntimeError("secret_quarantine", "secret quarantine")
+    for value in _string_leaves(response):
+        if scan_text(value, source_id="readiness-response"):
+            raise BootstrapRuntimeError("secret_quarantine", "secret quarantine")
+
+
+def _string_leaves(value: object):
+    if type(value) is str:
+        yield value
+    elif type(value) is dict:
+        for item in value.values():
+            yield from _string_leaves(item)
+    elif type(value) is list:
+        for item in value:
+            yield from _string_leaves(item)
 
 
 def _vetted_text(source: SourceBytes) -> str:

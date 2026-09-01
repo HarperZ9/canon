@@ -28,19 +28,25 @@ def write_bootstrap_witness(
     *,
     workspace: WorkspaceRoot,
     state_dir: Path,
+    state_root: object | None = None,
 ) -> WitnessWrite:
     if validate_bootstrap_witness(witness):
         raise BootstrapWitnessStoreError("io_error")
     _assert_workspace_stable(workspace)
-    root = _witness_root(state_dir)
+    _verify_state_root(state_root)
+    root = _witness_root(state_dir, state_root)
     target = _target_path(root, witness.run_id)
     data = witness.to_json().encode("utf-8")
+    _verify_state_root(state_root)
     status = _write_once(target, data)
+    _verify_state_root(state_root)
     _assert_workspace_stable(workspace)
     return WitnessWrite(_relative_text(target, workspace.path), status)
 
 
-def _witness_root(state_dir: Path) -> Path:
+def _witness_root(state_dir: Path, state_root: object | None = None) -> Path:
+    if state_root is not None:
+        return _witness_root_bound(state_root)
     try:
         root = resolve_under_root("witnesses", root=state_dir)
     except Exception as exc:
@@ -59,6 +65,32 @@ def _witness_root(state_dir: Path) -> Path:
     return root
 
 
+def _witness_root_bound(state_root: object) -> Path:
+    try:
+        handle = state_root.open_child_dir("witnesses", create=True)
+        if handle is None:
+            raise BootstrapWitnessStoreError("unsafe_path")
+        try: return handle.path
+        finally: handle.close()
+    except BootstrapWitnessStoreError:
+        raise
+    except Exception as exc:
+        _raise_non_dir_witness_child(state_root)
+        raise BootstrapWitnessStoreError("unsafe_path") from exc
+
+
+def _raise_non_dir_witness_child(state_root: object) -> None:
+    path = getattr(state_root, "path", None)
+    if not isinstance(path, Path):
+        return
+    try:
+        info = (path / "witnesses").lstat()
+    except OSError:
+        return
+    if not stat.S_ISDIR(info.st_mode) and not is_reparse_point(path / "witnesses"):
+        raise BootstrapWitnessStoreError("io_error")
+
+
 def _target_path(root: Path, run_id: str) -> Path:
     digest = sha256_text(run_id).removeprefix("sha256:")
     try:
@@ -72,8 +104,11 @@ def _write_once(path: Path, data: bytes) -> str:
         return _existing_status(path, data)
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
     flags |= getattr(os, "O_NOFOLLOW", 0)
+    fd: int | None = None
+    created_key: tuple[int, int] | None = None
     try:
         fd = os.open(path, flags, 0o600)
+        created_key = _stat_key(os.fstat(fd))
     except FileExistsError:
         return _existing_status(path, data)
     except OSError as exc:
@@ -81,11 +116,15 @@ def _write_once(path: Path, data: bytes) -> str:
     try:
         _write_all(fd, data)
         os.fsync(fd)
+        _close_created(fd)
+        fd = None
     except OSError as exc:
+        if fd is not None:
+            _close_silently(fd)
+        _cleanup_created(path, created_key)
         raise BootstrapWitnessStoreError("io_error") from exc
-    finally:
-        os.close(fd)
     if _read_existing(path) != data:
+        _cleanup_created(path, created_key)
         raise BootstrapWitnessStoreError("io_error")
     return "created"
 
@@ -121,6 +160,44 @@ def _write_all(fd: int, data: bytes) -> None:
         if written <= 0:
             raise OSError("short witness write")
         offset += written
+
+
+def _close_created(fd: int) -> None:
+    os.close(fd)
+
+
+def _close_silently(fd: int) -> None:
+    try:
+        os.close(fd)
+    except OSError:
+        pass
+
+
+def _cleanup_created(path: Path, expected_key: tuple[int, int] | None) -> None:
+    if expected_key is None:
+        return
+    try:
+        info = path.lstat()
+        if not stat.S_ISREG(info.st_mode) or is_reparse_point(path) or _stat_key(info) != expected_key:
+            raise BootstrapWitnessStoreError("io_error")
+        path.unlink()
+    except FileNotFoundError:
+        return
+    except BootstrapWitnessStoreError:
+        raise
+    except OSError as exc:
+        raise BootstrapWitnessStoreError("io_error") from exc
+
+
+def _verify_state_root(state_root: object | None) -> None:
+    if state_root is None:
+        return
+    try:
+        state_root.verify_live()
+    except BootstrapWitnessStoreError:
+        raise
+    except Exception as exc:
+        raise BootstrapWitnessStoreError("unsafe_path") from exc
 
 
 def _assert_workspace_stable(workspace: WorkspaceRoot) -> None:

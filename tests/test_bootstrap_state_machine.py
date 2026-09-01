@@ -102,6 +102,41 @@ def _cache_entry(report: object, workspace: Path) -> dict[str, object]:
     return _read_json(workspace / ".canon" / "cache" / "bundles" / f"{key.removeprefix('sha256:')}.json")
 
 
+def _write_cache_entry(report: object, workspace: Path, entry: dict[str, object]) -> None:
+    from canon.canonical_json import canonical_json_text
+
+    key = report.to_result_data()["cache_key"]  # type: ignore[index]
+    assert type(key) is str
+    path = workspace / ".canon" / "cache" / "bundles" / f"{key.removeprefix('sha256:')}.json"
+    path.write_bytes(canonical_json_text(entry).encode("utf-8"))
+
+
+def _rehash_cached_capsule(entry: dict[str, object]) -> None:
+    from canon.capsule import Capsule, capsule_digest
+
+    capsule_data = entry["capsule"]
+    assert isinstance(capsule_data, dict)
+    digest = capsule_digest(Capsule.from_dict(capsule_data))
+    capsule_data["capsule_id"] = digest
+    integrity = capsule_data["integrity"]
+    assert isinstance(integrity, dict)
+    integrity["manifest_sha256"] = digest
+    entry["manifest_sha256"] = digest
+    probe = entry["readiness_probe"]
+    assert isinstance(probe, dict)
+    probe["capsule_id"] = digest
+
+
+def _try_swap_dir_to_symlink(path: Path, outside: Path, displaced: Path) -> bool:
+    try:
+        path.rename(displaced)
+        path.symlink_to(outside, target_is_directory=True)
+        return True
+    except (NotImplementedError, OSError) as exc:
+        assert not outside.joinpath(path.name).exists()
+        return False
+
+
 def _assert_no_raw_material(rendered: str, workspace: Path) -> None:
     assert "Feature-first. Words with weight." not in rendered
     assert "# CANON" not in rendered
@@ -284,6 +319,23 @@ def test_direct_readiness_response_is_evaluated_after_config_snapshot(tmp_path: 
     assert data["readiness_response_hash"] is not None
 
 
+def test_direct_readiness_response_secret_is_quarantined_without_public_leak(tmp_path: Path) -> None:
+    canary = "sk-live-abcdefghijklmnopqrstuvwxyz012345"
+    workspace = tmp_path / "work"
+    workspace.mkdir()
+    _copy_inputs(workspace)
+    response = _read_json(workspace / "readiness_pass.json")
+    response["operator_note"] = canary
+
+    report = _run_source_bootstrap(workspace, readiness_response=response, readiness_response_path=None)
+    rendered = json.dumps(report.to_dict(), sort_keys=True) + repr(report)
+
+    assert report.ok is False
+    assert report.failure_code == "secret_quarantine"
+    assert canary not in rendered
+    assert not (workspace / ".canon").exists()
+
+
 def test_second_identical_bootstrap_reuses_cache_without_compiling(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -366,6 +418,86 @@ def test_corrupt_cache_state_fails_closed_without_recompile_or_witness(
 
     assert report.ok is False
     assert report.failure_code in ("io_error", "conflict")
+    assert report.events[-1].state == "compile_or_reuse_capsule"
+    assert "release_to_work" not in _event_states(report)
+    assert _tree(workspace / ".canon" / "witnesses") == witnesses_before
+
+
+def test_forged_cache_readiness_probe_cannot_hide_missing_critical_ids(tmp_path: Path) -> None:
+    workspace = tmp_path / "work"
+    workspace.mkdir()
+    _copy_inputs(workspace)
+    first = _run_source_bootstrap(workspace)
+    witnesses_before = _tree(workspace / ".canon" / "witnesses")
+    entry = _cache_entry(first, workspace)
+    probe = entry["readiness_probe"]
+    assert isinstance(probe, dict)
+    critical_sets = probe["critical_sets"]
+    assert isinstance(critical_sets, dict)
+    critical_sets["active_goal_ids"] = []
+    _write_cache_entry(first, workspace, entry)
+
+    report = _run_source_bootstrap(
+        workspace,
+        readiness_response_path="readiness_fail_missing_goal.json",
+        run_id="run-forged-probe",
+    )
+
+    assert report.ok is False
+    assert report.events[-1].state == "compile_or_reuse_capsule"
+    assert "release_to_work" not in _event_states(report)
+    assert _tree(workspace / ".canon" / "witnesses") == witnesses_before
+
+
+@pytest.mark.parametrize("field", ("records", "atoms"))
+def test_forged_cache_capsule_payload_must_match_current_sources(tmp_path: Path, field: str) -> None:
+    workspace = tmp_path / "work"
+    workspace.mkdir()
+    _copy_inputs(workspace)
+    first = _run_source_bootstrap(workspace)
+    witnesses_before = _tree(workspace / ".canon" / "witnesses")
+    entry = _cache_entry(first, workspace)
+    capsule = entry["capsule"]
+    assert isinstance(capsule, dict)
+    capsule[field] = []
+    if field == "atoms":
+        probe = entry["readiness_probe"]
+        assert isinstance(probe, dict)
+        critical_sets = probe["critical_sets"]
+        assert isinstance(critical_sets, dict)
+        for key in critical_sets:
+            critical_sets[key] = []
+        response_path = "readiness_empty.json"
+        (workspace / response_path).write_text(
+            json.dumps(
+                {
+                    "schema": "canon.readiness-response/v1",
+                    "active_goal_ids": [],
+                    "constraint_ids": [],
+                    "frontier_state_ids": [],
+                    "permission_ids": [],
+                    "prohibition_ids": [],
+                    "unknown_ids": [],
+                    "unresolved_conflict_ids": [],
+                    "statuses": {},
+                    "expected_statuses": {},
+                },
+                sort_keys=True,
+            ) + "\n",
+            encoding="utf-8",
+        )
+    else:
+        response_path = "readiness_pass.json"
+    _rehash_cached_capsule(entry)
+    _write_cache_entry(first, workspace, entry)
+
+    report = _run_source_bootstrap(
+        workspace,
+        readiness_response_path=response_path,
+        run_id=f"run-forged-{field}",
+    )
+
+    assert report.ok is False
     assert report.events[-1].state == "compile_or_reuse_capsule"
     assert "release_to_work" not in _event_states(report)
     assert _tree(workspace / ".canon" / "witnesses") == witnesses_before
@@ -519,6 +651,113 @@ def test_witness_directory_failure_is_terminal_before_release(tmp_path: Path) ->
     assert report.failure_code == "io_error"
     assert report.events[-1].state == "emit_witness"
     assert "release_to_work" not in _event_states(report)
+
+
+@pytest.mark.parametrize("phase", ("cache", "witness"))
+def test_state_dir_ancestor_swap_writes_no_outside_artifacts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    phase: str,
+) -> None:
+    import canon.bootstrap as bootstrap
+    import canon.bootstrap_runtime as runtime
+
+    workspace = tmp_path / "work"
+    workspace.mkdir()
+    _copy_inputs(workspace)
+    state_dir = workspace / ".canon" / "state"
+    state_dir.mkdir(parents=True)
+    outside = tmp_path / "outside"
+    displaced = tmp_path / "displaced-canon"
+    outside.mkdir()
+    swapped = False
+    swap_blocked = False
+
+    def swap_state_parent() -> None:
+        nonlocal swap_blocked, swapped
+        if not swapped:
+            swapped = _try_swap_dir_to_symlink(workspace / ".canon", outside, displaced)
+            swap_blocked = not swapped
+
+    if phase == "cache":
+        real_compile = runtime.compile_capsule
+
+        def compile_after_swap(*args: object, **kwargs: object) -> object:
+            swap_state_parent()
+            return real_compile(*args, **kwargs)
+
+        monkeypatch.setattr(runtime, "compile_capsule", compile_after_swap)
+    else:
+        seed = _run_source_bootstrap(workspace, state_dir=".canon/state", run_id="run-seed")
+        assert seed.ok is True
+        real_build_witness = bootstrap.build_witness
+
+        def build_witness_after_swap(*args: object, **kwargs: object) -> object:
+            witness = real_build_witness(*args, **kwargs)
+            swap_state_parent()
+            return witness
+
+        monkeypatch.setattr(bootstrap, "build_witness", build_witness_after_swap)
+
+    report = _run_source_bootstrap(workspace, state_dir=".canon/state", run_id=f"run-state-swap-{phase}")
+
+    assert swapped or swap_blocked
+    if swapped:
+        assert report.ok is False
+        assert report.failure_code == "unsafe_path"
+        assert "release_to_work" not in _event_states(report)
+    assert not (outside / "state" / "cache").exists()
+    assert not (outside / "state" / "witnesses").exists()
+
+
+@pytest.mark.parametrize("failure", ("write", "fsync", "close"))
+def test_witness_created_file_is_removed_after_partial_write_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+) -> None:
+    import canon.bootstrap_witness_store as store
+    from canon.cli_artifacts import checked_workspace
+    from canon.witness import BootstrapWitness
+
+    source = tmp_path / "source"
+    source.mkdir()
+    _copy_inputs(source)
+    report = _run_source_bootstrap(source)
+    witness = BootstrapWitness.from_dict(_read_json(_witness_path(report, source)))
+    workspace = tmp_path / "target"
+    workspace.mkdir()
+    (workspace / ".canon").mkdir()
+    target_root = workspace / ".canon" / "witnesses"
+
+    if failure == "write":
+        real_write = store.os.write
+
+        def fail_write(fd: int, data: bytes) -> int:
+            real_write(fd, data[:1])
+            raise OSError("synthetic witness write failure")
+
+        monkeypatch.setattr(store.os, "write", fail_write)
+    elif failure == "fsync":
+        monkeypatch.setattr(
+            store.os,
+            "fsync",
+            lambda fd: (_ for _ in ()).throw(OSError("synthetic fsync failure")),
+        )
+    else:
+        real_close = store.os.close
+
+        def fail_close(fd: int) -> None:
+            real_close(fd)
+            raise OSError("synthetic close failure")
+
+        monkeypatch.setattr(store.os, "close", fail_close)
+
+    with pytest.raises(store.BootstrapWitnessStoreError) as excinfo:
+        store.write_bootstrap_witness(witness, workspace=checked_workspace(str(workspace)), state_dir=workspace / ".canon")
+
+    assert excinfo.value.code == "io_error"
+    assert not target_root.exists() or list(target_root.iterdir()) == []
 
 
 @pytest.mark.parametrize(
