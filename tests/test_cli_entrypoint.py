@@ -105,7 +105,8 @@ def test_placeholder_commands_emit_accessible_result_to_injected_stdout() -> Non
     from canon.cli import run_cli
     from canon.exit_codes import EX_OK
 
-    for command in tuple(command for command in COMMANDS if command != "bootstrap"):
+    active = {"bootstrap", "compile", "preview"}
+    for command in tuple(command for command in COMMANDS if command not in active):
         stdout = io.StringIO()
         stderr = io.StringIO()
         assert run_cli([command], stdout=stdout, stderr=stderr, environ={}) == EX_OK

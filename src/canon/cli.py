@@ -79,10 +79,10 @@ def run_cli(
     environ: Mapping[str, str],
 ) -> int:
     """Run canon's CLI with caller-owned streams and environment."""
-    del stdin
     tokens = _argv_copy(argv, stderr)
     if tokens is None:
         return EX_USAGE
+    tokens = _normalize_global_options(tokens)
 
     json_requested = _json_requested(tokens)
     parser_stderr = io.StringIO() if json_requested else stderr
@@ -99,6 +99,17 @@ def run_cli(
             )
             return write_result(result, stdout=stdout, stderr=stderr, json_output=True, color=False)
         return error.status
+
+    if parsed.command in ("compile", "preview"):
+        from .cli_compile import run_compile_command
+
+        return run_compile_command(
+            parsed,
+            stdin=stdin,
+            stdout=stdout,
+            stderr=stderr,
+            color=color_enabled(environ=environ, no_color=parsed.no_color, is_tty=_is_tty(stdout)),
+        )
 
     return write_result(
         _command_result(parsed),
@@ -173,6 +184,8 @@ def _build_parser(stdout: TextIO | None = None, stderr: TextIO | None = None) ->
             _add_init_args(subparser)
         elif command == "bootstrap":
             _add_bootstrap_args(subparser)
+        elif command in ("compile", "preview"):
+            _add_compile_args(subparser, include_out=command == "compile")
     return parser
 
 
@@ -192,14 +205,31 @@ def _add_bootstrap_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--run-id", required=True, help="bootstrap run id")
 
 
+def _add_compile_args(parser: argparse.ArgumentParser, *, include_out: bool) -> None:
+    parser.add_argument("--workspace", default=".", help="workspace path")
+    parser.add_argument("--records", required=True, help="Record JSONL input path or '-'")
+    parser.add_argument("--atoms", required=True, help="CanonAtom JSONL input path or '-'")
+    parser.add_argument("--target", required=True, help="adapter target id")
+    parser.add_argument("--profile", default="handoff", help="capsule profile")
+    parser.add_argument("--offline", action="store_true", help="avoid later online work")
+    if include_out:
+        parser.add_argument("--out", default=None, help="output directory below workspace")
+
+
 def _argv_copy(argv: list[str], stderr: TextIO) -> list[str] | None:
-    if not isinstance(argv, list):
+    if type(argv) is not list:
         stderr.write("canon: argv must be list[str]\n")
         return None
-    if any(not isinstance(item, str) for item in argv):
+    if any(type(item) is not str for item in argv):
         stderr.write("canon: argv entries must be str\n")
         return None
     return list(argv)
+
+
+def _normalize_global_options(tokens: list[str]) -> list[str]:
+    global_options = [item for item in tokens if item in ("--json", "--no-color")]
+    rest = [item for item in tokens if item not in ("--json", "--no-color")]
+    return global_options + rest
 
 
 def _is_tty(stream: TextIO) -> bool:
