@@ -18,6 +18,7 @@ _FAILURE_EXIT_CODES = {
     "source_changed": EX_GATE,
     "invalid_args": EX_USAGE,
     "source_unreachable": EX_UNAVAILABLE,
+    "unsafe_path": EX_SECURITY,
     "secret_quarantine": EX_SECURITY,
     "conflict": EX_CONFLICT,
     "critical_atom_loss": EX_BUDGET,

@@ -10,6 +10,7 @@ from typing import TextIO
 
 from .bootstrap import BootstrapConfig, run_bootstrap
 from .cli_format import color_enabled, make_result, write_result
+from .cli_init import run_init
 from .exit_codes import EX_OK, EX_USAGE
 
 COMMANDS = (
@@ -115,9 +116,22 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _command_result(parsed: argparse.Namespace):
+    if parsed.command == "init":
+        return _init_result(parsed)
     if parsed.command == "bootstrap":
         return _bootstrap_result(parsed)
     return make_result(ok=True, command=parsed.command, failure_code="ok", message="ready")
+
+
+def _init_result(parsed: argparse.Namespace):
+    report = run_init(workspace=parsed.workspace, state_dir=parsed.state_dir, apply=parsed.apply)
+    return make_result(
+        ok=report.ok,
+        command="init",
+        failure_code=report.failure_code,
+        message=report.message,
+        data=report.data,
+    )
 
 
 def _bootstrap_result(parsed: argparse.Namespace):
@@ -155,9 +169,17 @@ def _build_parser(stdout: TextIO | None = None, stderr: TextIO | None = None) ->
         subparser = subparsers.add_parser(command, help=f"{command} placeholder")
         subparser._canon_stdout = parser._canon_stdout
         subparser._canon_stderr = parser._canon_stderr
-        if command == "bootstrap":
+        if command == "init":
+            _add_init_args(subparser)
+        elif command == "bootstrap":
             _add_bootstrap_args(subparser)
     return parser
+
+
+def _add_init_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--workspace", default=".", help="workspace path")
+    parser.add_argument("--state-dir", default=None, help="state directory path")
+    parser.add_argument("--apply", action="store_true", help="create Canon-owned local state")
 
 
 def _add_bootstrap_args(parser: argparse.ArgumentParser) -> None:

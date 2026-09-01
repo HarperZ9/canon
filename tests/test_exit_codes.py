@@ -35,6 +35,7 @@ def test_failure_codes_map_to_stable_process_exit_codes() -> None:
     assert exit_code_for("source_changed") == 1
     assert exit_code_for("invalid_args") == 2
     assert exit_code_for("source_unreachable") == 3
+    assert exit_code_for("unsafe_path") == 4
     assert exit_code_for("secret_quarantine") == 4
     assert exit_code_for("conflict") == 5
     assert exit_code_for("critical_atom_loss") == 6

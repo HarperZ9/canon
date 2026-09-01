@@ -109,7 +109,8 @@ def test_placeholder_commands_emit_accessible_result_to_injected_stdout() -> Non
         stdout = io.StringIO()
         stderr = io.StringIO()
         assert run_cli([command], stdout=stdout, stderr=stderr, environ={}) == EX_OK
-        assert stdout.getvalue() == f"PASS {command}: ready\n"
+        message = "preview ready" if command == "init" else "ready"
+        assert stdout.getvalue() == f"PASS {command}: {message}\n"
         assert stderr.getvalue() == ""
 
 
