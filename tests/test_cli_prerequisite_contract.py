@@ -30,6 +30,7 @@ def test_foundation_cli_contract_imports() -> None:
     from canon.import_review import ImportItem, review_import_items
     from canon.path_policy import (
         PathPolicyError,
+        PathPolicyViolation,
         assert_not_protected,
         assert_operational_surface_path,
         assert_operational_vault_path,
@@ -64,6 +65,7 @@ def test_foundation_cli_contract_imports() -> None:
     assert callable(source_state_sha256)
     assert ImportItem.__name__ == "ImportItem"
     assert PathPolicyError.__name__ == "PathPolicyError"
+    assert PathPolicyViolation.__name__ == "PathPolicyViolation"
     assert SourceStateItem.__name__ == "SourceStateItem"
     assert ReadinessProbe.__name__ == "ReadinessProbe"
     assert ReadinessResult.__name__ == "ReadinessResult"
@@ -456,6 +458,61 @@ def test_security_source_state_contracts_are_authoritative() -> None:
     assert invalid.value.code == "invalid-source-state"
 
 
+def test_security_path_policy_contracts_are_authoritative(tmp_path) -> None:
+    from canon.path_policy import (
+        PathPolicyViolation,
+        assert_not_protected,
+        assert_operational_surface_path,
+        assert_operational_vault_path,
+        resolve_under_root,
+    )
+
+    assert _field_names(PathPolicyViolation) == ("code", "path", "reason")
+
+    resolve_sig = signature(resolve_under_root)
+    assert tuple(resolve_sig.parameters) == ("path", "root", "must_exist", "reject_reparse")
+    assert resolve_sig.parameters["path"].kind is Parameter.POSITIONAL_OR_KEYWORD
+    assert resolve_sig.parameters["root"].kind is Parameter.KEYWORD_ONLY
+    assert resolve_sig.parameters["root"].default is Parameter.empty
+    assert resolve_sig.parameters["must_exist"].kind is Parameter.KEYWORD_ONLY
+    assert resolve_sig.parameters["must_exist"].default is False
+    assert resolve_sig.parameters["reject_reparse"].kind is Parameter.KEYWORD_ONLY
+    assert resolve_sig.parameters["reject_reparse"].default is True
+
+    surface_sig = signature(assert_operational_surface_path)
+    assert tuple(surface_sig.parameters) == ("path", "root")
+    assert surface_sig.parameters["path"].kind is Parameter.POSITIONAL_OR_KEYWORD
+    assert surface_sig.parameters["root"].kind is Parameter.KEYWORD_ONLY
+    assert surface_sig.parameters["root"].default is Parameter.empty
+
+    vault_sig = signature(assert_operational_vault_path)
+    assert tuple(vault_sig.parameters) == ("path", "vault")
+    assert vault_sig.parameters["path"].kind is Parameter.POSITIONAL_OR_KEYWORD
+    assert vault_sig.parameters["vault"].kind is Parameter.KEYWORD_ONLY
+    assert vault_sig.parameters["vault"].default is Parameter.empty
+
+    root = tmp_path / "root"
+    vault = tmp_path / "vault"
+    root.mkdir()
+    vault.mkdir()
+    surface = root / "docs" / "AGENTS.md"
+    note = vault / "workspace" / "note.md"
+    assert resolve_under_root(surface, root=root) == surface.resolve()
+    assert assert_operational_surface_path(surface, root=root) == surface.resolve()
+    assert assert_operational_vault_path(note, vault=vault) == note.resolve()
+
+    assert _path_policy_codes(lambda: resolve_under_root(root / ".." / "escape.md", root=root)) == (
+        "outside-root",
+    )
+    assert _path_policy_codes(lambda: resolve_under_root(root, root=root)) == ("root-target",)
+    assert _path_policy_codes(lambda: resolve_under_root("AGENTS.md:secret", root=root)) == ("ads",)
+    assert _path_policy_codes(lambda: assert_not_protected(root / ".env")) == ("protected-path",)
+    assert _path_policy_codes(lambda: assert_not_protected(root / ".aws" / "credentials")) == (
+        "protected-path",
+        "protected-path",
+    )
+
+
 def test_security_import_review_contracts_are_authoritative() -> None:
     from canon.atom import CanonAtom
     from canon.import_review import ImportFinding, ImportItem, ImportReview, review_import_items
@@ -556,3 +613,11 @@ def test_security_import_review_contracts_are_authoritative() -> None:
 
 def _field_names(cls: type) -> tuple[str, ...]:
     return tuple(field.name for field in fields(cls))
+
+
+def _path_policy_codes(action) -> tuple[str, ...]:
+    from canon.path_policy import PathPolicyError
+
+    with pytest.raises(PathPolicyError) as error:
+        action()
+    return tuple(violation.code for violation in error.value.violations)
