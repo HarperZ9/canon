@@ -265,6 +265,25 @@ def test_bootstrap_sources_readiness_cache_witness_and_release(tmp_path: Path) -
     _assert_no_raw_material(witness_path.read_text(encoding="utf-8"), workspace)
 
 
+def test_direct_readiness_response_is_evaluated_after_config_snapshot(tmp_path: Path) -> None:
+    workspace = tmp_path / "work"
+    workspace.mkdir()
+    _copy_inputs(workspace)
+    response = _read_json(workspace / "readiness_pass.json")
+
+    report = _run_source_bootstrap(
+        workspace,
+        readiness_response=response,
+        readiness_response_path=None,
+        run_id="run-direct-response",
+    )
+    data = report.to_result_data()
+
+    assert report.ok is True
+    assert data["readiness_verdict"] == "pass"
+    assert data["readiness_response_hash"] is not None
+
+
 def test_second_identical_bootstrap_reuses_cache_without_compiling(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

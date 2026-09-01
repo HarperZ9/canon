@@ -13,6 +13,7 @@ from .schema import Record
 from .secret_quarantine import scan_text
 from .source_state import SourceStateItem, source_state_sha256
 from .validator import validate_record
+from .bootstrap_validation import thaw_mapping_or_none
 
 _BUDGETS = {"needle": 2048, "handoff": 8192, "archive": 32768, "custom": 8192}
 
@@ -96,7 +97,9 @@ def _readiness_response(snapshot: dict[str, object], workspace: WorkspaceRoot) -
     if path is not None:
         if path == "-": raise BootstrapRuntimeError("invalid_args", "invalid readiness response path")
         return _json_object(_read_source(path, workspace))
-    return direct if isinstance(direct, dict) else None
+    try: return thaw_mapping_or_none(direct)  # type: ignore[arg-type]
+    except TypeError as exc:
+        raise BootstrapRuntimeError("invalid_args", "invalid readiness response") from exc
 
 
 def _json_object(source: SourceBytes) -> dict[str, object]:
