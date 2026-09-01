@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
 import errno
 import hashlib
 import os
@@ -51,6 +52,29 @@ def _hostile_source_item() -> SourceStateItem:
     object.__setattr__(item, "_reads", {})
     object.__setattr__(item, "_armed", True)
     return item
+
+
+class _HostileSourceStateTuple(tuple):
+    def __new__(cls) -> "_HostileSourceStateTuple":
+        return super().__new__(cls, ())
+
+    def __init__(self) -> None:
+        self._reads = 0
+        self._valid = SourceStateItem(path="a.md", sha256=_sha("a"), size=1)
+        self._malicious = SourceStateItem(path="b.md", sha256=_sha("b"), size=2)
+        object.__setattr__(self._malicious, "path", "../escape.md")
+        object.__setattr__(self._malicious, "sha256", "sha256:" + "B" * 64)
+        object.__setattr__(self._malicious, "size", True)
+
+    def __iter__(self) -> Iterator[SourceStateItem]:
+        self._reads += 1
+        if self._reads == 1:
+            return iter((self._valid,))
+        return iter((self._malicious,))
+
+
+def _hostile_source_tuple() -> tuple[SourceStateItem, ...]:
+    return _HostileSourceStateTuple()
 
 
 def _hostile_source_digest() -> str:
@@ -328,6 +352,20 @@ def test_guarded_commit_rejects_hostile_item_subclass_without_calling_commit() -
 
     with pytest.raises(SourceStateError, match="invalid-source-state"):
         guarded_commit(_hostile_source_digest(), (_hostile_source_item(),), commit)
+
+    assert not called
+
+
+def test_guarded_commit_rejects_hostile_tuple_subclass_without_calling_commit() -> None:
+    called = False
+
+    def commit() -> str:
+        nonlocal called
+        called = True
+        return "written"
+
+    with pytest.raises(SourceStateError, match="invalid-source-state"):
+        guarded_commit(_hostile_source_digest(), _hostile_source_tuple(), commit)
 
     assert not called
 

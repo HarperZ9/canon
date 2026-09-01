@@ -58,8 +58,8 @@ def assert_source_state(
 
 
 def _require_items(items: object) -> tuple[SourceStateItem, ...]:
-    if not isinstance(items, tuple):
-        raise SourceStateError("invalid-source-state", "items must be a tuple")
+    if type(items) is not tuple:
+        raise SourceStateError("invalid-source-state", "items must be an exact tuple")
     seen: set[str] = set()
     for item in items:
         if type(item) is not SourceStateItem:
