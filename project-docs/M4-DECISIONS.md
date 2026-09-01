@@ -172,4 +172,165 @@ capability, disclosed here rather than left as a puzzle. The bridge is one
 line; the code cost of the rename is zero and the reader cost is a decision
 paragraph.
 
-<!-- M4.2 vault-reader and M4.3 versions decisions append below in later commits. -->
+## D-79 — the read leg mirrors the write leg through one lexical containment gate
+**Status:** accepted (M4.2, 2026-08-31).
+**Context:** R2's write leg refuses to touch a path that is not under the
+vault, not `{scope}/<name>.md`, or the vault root itself.
+`vault_mirror.is_vault_write_allowed` is the one function that decides. A read
+leg that used its own rule could drift over time from what the write leg would
+touch, and the two legs would then disagree on what a canon note is.
+**Decision:** the read leg imports `is_vault_write_allowed` verbatim and calls
+it as its own containment gate. A single edit to the write-side rule flows to
+the read side with no code change. Any path the write leg refuses to touch is a
+path the read leg refuses to source.
+**Consequence:** the two legs cannot disagree on what a canon note is. A
+caller reading a vault the write leg populated sees a pool that the write leg
+would recognize as its own on a rewrite. `SKIPPED_NOT_ALLOWED` is the reader's
+name for the write-leg predicate returning `False`.
+
+## D-80 — the read leg is total; every refusal is a NoteVerdict
+**Status:** accepted (M4.2).
+**Context:** the write leg's `plan_vault` raises `VaultError` on refusal; a
+read leg that raised on hostile input would force every caller to wrap
+`read_vault` in a `try` block, and one un-caught branch would surface as a
+crash inside a build gate.
+**Decision:** the read leg raises nothing on data. Every hostile input, every
+malformed frontmatter, every spoofed name, every mis-scoped file, every
+containment failure, every encoding surprise folds into a `NoteVerdict` that
+carries the relpath and the reason. `read_vault` returns the whole verdict
+list; `ok` is false iff any verdict's status is outside `OK_STATUSES`.
+`read_exit_code(result)` mirrors `drift_exit_code` and `reconcile_exit_code`.
+**Consequence:** the reader composes into a build gate the same way the
+existing two verify gates compose. A caller pattern-matches on
+`VaultReadResult.ok` and never on exception hierarchies. The one exception the
+API does raise (`ValueError` from `read_vault_scope` on an unknown scope
+string) is a wiring fault, separated by design (D-87).
+
+## D-81 — two-phase classify_vault + load_from_plan mirrors V4 D-62
+**Status:** accepted (M4.2).
+**Context:** V4's `reconcile` runs classify in one pass over the surfaces and
+commits in a second, so a caller can inspect every classification before any
+write happens. A monolithic `read_vault` would hide the same split.
+**Decision:** the reader ships the same two phases. `classify_vault` reads
+every file and returns a `ReadPlan` carrying one verdict per relpath;
+`load_from_plan` folds the plan into a `VaultReadResult` with the pool,
+refusals, and counts. `read_vault` is the convenience composition. A caller
+who wants to inspect verdicts before assembling a pool uses the two-phase form
+directly.
+**Consequence:** the reader's shape reads the same as V4's orchestrator. A
+caller who has learned V4's two-phase idiom applies it here unchanged.
+
+## D-82 — the hub file is skipped without a content read
+**Status:** accepted (M4.2).
+**Context:** the top-level `MEMORY.md` is a projection R2's write leg
+regenerates from the pool (R2 D-34). The hub is not a record source; a
+`canon:` fence inside it would still be write-leg output, not a hand-authored
+carrier. Reading the hub's body and classifying it would either duplicate
+records already loaded from the scope directories or invent verdicts for hub
+content the write leg owns.
+**Decision:** `MEMORY.md` at the vault root becomes `SKIPPED_HUB` on the
+containment step, before any content read. The reader never opens the hub's
+body.
+**Consequence:** the hub stays the write leg's projection surface with no
+read-side authority. A hand-edited hub does not shift the pool the reader
+returns; a hub deleted between listing and read does not become a
+`SKIPPED_ABSENT`. The write leg regenerates it on the next `plan_vault` run.
+
+## D-83 — dedupe by (scope, id) first-wins under sorted iteration
+**Status:** accepted (M4.2).
+**Context:** two files under different relpaths that both parse to a record
+with the same `(scope, id)` key would produce a pool with a duplicate record.
+The write leg cannot create this state (identity names the file), so it is a
+sign of external tampering, a hand-authored file with an off-identity name, or
+a race with a rename. The reader has to decide which record wins.
+**Decision:** the read leg iterates `sorted(list_dir(root))` and folds
+verdicts through `_dedupe_verdicts` in that order. First LOADED for a
+`(scope, id)` key wins; the second folds to `REFUSED_DUPLICATE_KEY` with the
+first entry's relpath cited in the reason. The name-collision branch
+(`REFUSED_NAME_COLLISION`) fires on the second of two loaded verdicts sharing
+a `normcase`d relpath, a defensive backstop for a hash-truncation collision
+that is astronomically improbable (D-77 for the transport twin).
+**Consequence:** a rerun on the same filesystem returns the same verdicts.
+No wall-clock heuristic, no filesystem enumeration order dependency. A caller
+who sees `REFUSED_DUPLICATE_KEY` reads the reason to learn which relpath won,
+resolves the collision on disk, and reruns.
+
+## D-84 — the scope-directory match refusal is REFUSED_MIS_SCOPE
+**Status:** accepted (M4.2).
+**Context:** a record whose `scope` is `workspace` living under a `global/`
+directory is a scope mismatch. R1 D-18 names the same rule on the surface
+renderer: a region's declared scope has to match the target scope. Reusing the
+name here holds the rule under one label across the two legs.
+**Decision:** the read leg emits `REFUSED_MIS_SCOPE` when the scope segment of
+the on-disk relpath fails to match `record.scope` under `normcase`. The
+`normcase` fold covers the case-insensitive-filesystem case where the write
+leg would have created the same file at a case-variant path.
+**Consequence:** a caller reading a mis-scoped vault sees the same refusal
+label the surface renderer emits on the same defect. The `normcase` fold means
+a Windows filesystem returning `Workspace/foo.md` is not spuriously refused.
+
+## D-85 — no per-note byte-size ceiling in M4.2
+**Status:** accepted (M4.2).
+**Context:** an oversized note could exhaust memory on a hostile vault. The
+transport seam ships `sized-payload-limit` for the same threat. A vault reader
+ceiling would fix a byte number into the container.
+**Decision:** the read leg ships no per-note ceiling. A caller who needs one
+imposes it by returning `None` from `read_text` above a threshold, or by
+raising there and catching outside. The reader classifies `None` as
+`SKIPPED_ABSENT` (D-83's neighbor); a caller-side raise never reaches the
+reader.
+**Consequence:** the container carries no arbitrary size number. Callers
+running against untrusted vaults wrap the injected IO with their own gate.
+Named as an honest null here rather than hidden as a defensive default.
+
+## D-86 — DECLARED_READ_DROPS is frozenset(); symmetric to DECLARED_NOTE_DROPS
+**Status:** accepted (M4.2).
+**Context:** R2's `vault_fidelity` gate declares an empty drop set: the
+one-note codec is lossless, so any observed field difference is UNDECLARED and
+fails the verdict closed. The read-leg fidelity gate has to make the same
+claim symmetrically, so a future contributor extending one but not the other
+trips a shared-asymmetry check.
+**Decision:** `vault_read_fidelity.DECLARED_READ_DROPS = frozenset()`. The
+symmetric report field-diffs pool_out against pool_in with the exact
+`classify_note_losses` helper R2's fidelity gate uses. Any diff is UNDECLARED;
+the verdict fails closed.
+**Consequence:** the two fidelity gates carry the same claim in the same
+shape. A codec regression on the write leg or a side-channel drop on the read
+leg surfaces as an UNDECLARED loss in the same taxonomy.
+
+## D-87 — read_vault_scope on an unknown scope raises ValueError; a missing scope directory is SKIPPED_NOT_ALLOWED
+**Status:** accepted (M4.2).
+**Context:** a caller passing `read_vault_scope(root, "workspaec", ...)` (a
+typo) and a filesystem that carries no `workspace/` directory look the same
+from a naive gate. Folding both into one verdict would hide a wiring fault
+behind a runtime data condition; raising on both would make an empty scope
+directory a build-gate failure.
+**Decision:** the API-level check on `scope in SCOPES` raises `ValueError`, a
+wiring fault distinct from data. The runtime pathway that visits a scope
+directory that happens to be empty classifies each of its (zero) entries and
+returns an empty pool with `ok=True`. A path under a directory that names a
+non-canon scope is a `SKIPPED_NOT_ALLOWED` verdict, not a raise.
+**Consequence:** a caller who miswires a scope string hears about it at the
+call site. A vault whose `global/` directory happens to hold no records reads
+as an empty pool with no refusals. The two failure modes are separately
+diagnosable.
+
+## D-88 — the read leg is additive-only; no edit to any existing module
+**Status:** accepted (M4.2).
+**Context:** the read leg touches concerns the write leg already models
+(containment, identity, frontmatter, one-note codec, single-record fidelity).
+Editing R2's modules to share more surface with the read leg would risk a
+regression in R2's landed guarantees.
+**Decision:** M4.2 ships two new source files (`vault_reader.py`,
+`vault_read_fidelity.py`) and two new test files. It edits nothing under
+`vault.py`, `vault_mirror.py`, `vault_fidelity.py`, `frontmatter.py`,
+`schema.py`, `backends/base.py`, or `validator.py`. The reader imports
+`is_vault_write_allowed` from `vault_mirror`, `derive_note_name` and
+`ingest_note` from `vault`, `parse_frontmatter` from `frontmatter`,
+`classify_note_losses` from `vault_fidelity`, and `_normalize_newlines` from
+`textutil`. No re-export is added anywhere.
+**Consequence:** every landed R2 guarantee holds unchanged. A future
+contributor extending the read leg lands on `vault_reader.py` and
+`vault_read_fidelity.py`; the R2 surfaces stay under R2's own decisions.
+
+<!-- M4.3 versions and M4.4 canon_check decisions append below in later commits. -->
