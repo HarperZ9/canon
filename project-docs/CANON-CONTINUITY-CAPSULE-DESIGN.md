@@ -32,7 +32,7 @@ Recommended near-term product shape: **ship the deterministic local spine first:
 | Area | Verified current state | Claim state |
 |---|---|---|
 | Canon package | Local package metadata is `name = "canon"`, `version = "0.0.0"`, Python `>=3.11`, FSL-1.1-MIT, no runtime dependencies, no console scripts. | C: verified by `pyproject.toml` and validation spot-check. |
-| Tests | `python -m pytest -p no:cacheprovider` in `C:\dev\public\canon` passed `407 passed in 1.45s` during this synthesis. | C: verified. |
+| Tests | `python -m pytest -p no:cacheprovider` passed `407 passed in 1.45s` during this synthesis. | C: verified. |
 | Record core | `canon.record/v1` exists with five kinds: `personality-block`, `episodic-memory`, `synthesized-persona-l3`, `adr-decision`, `research-artifact-ref`. | C: verified, `P: src/canon/schema.py`. |
 | Scopes | Current record scopes are exactly `global` and `workspace`; `repo` is deliberately absent. | C: verified, `P: src/canon/schema.py`. |
 | Existing surfaces | Current catalog rows are Claude Code global `CLAUDE.md`, Claude Code workspace `CLAUDE.md`, Codex workspace `AGENTS.md`, and Hermes workspace `SOUL.md`. | C: verified, `P: src/canon/registry.py`. |
