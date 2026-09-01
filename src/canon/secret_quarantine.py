@@ -7,7 +7,7 @@ from pathlib import Path
 
 from .canonical_json import canonical_sha256, sha256_text
 from .omission import Omission
-from .path_policy import PathPolicyError, classify_protected_path, is_reparse_point
+from .path_policy import PathPolicyError, classify_protected_path, is_reparse_point, is_windows_ads_path
 from .transform import TransformReceipt
 
 _PATTERNS = (
@@ -68,19 +68,18 @@ def quarantine_path(path: str | Path, *, source_id: str, critical: bool = False)
     checked_source = _require_source_id(source_id)
     checked_path, raw_path = _require_path(path)
     unresolved = _unresolved_absolute(checked_path)
-    protected = _has_protected_path(raw_path, unresolved)
-    if protected:
-        finding = _metadata_finding("protected-path", checked_source, raw_path)
-        if critical is True:
-            raise SecretQuarantineError(f"critical-secret: {checked_source}")
-        return _quarantine((finding,), source_id=checked_source, input_hash=finding.sha256)
+    ads_path = _ads_path(raw_path, unresolved)
+    if ads_path is not None:
+        return _path_quarantine("ads-path", checked_source, ads_path, critical)
+    if _has_protected_path(raw_path, unresolved):
+        return _path_quarantine("protected-path", checked_source, raw_path, critical)
     _reject_reparse_chain(unresolved, checked_source)
     resolved = _resolve_target(unresolved)
+    ads_path = _ads_path(resolved)
+    if ads_path is not None:
+        return _path_quarantine("ads-path", checked_source, ads_path, critical)
     if _has_protected_path(resolved):
-        finding = _metadata_finding("protected-path", checked_source, raw_path)
-        if critical is True:
-            raise SecretQuarantineError(f"critical-secret: {checked_source}")
-        return _quarantine((finding,), source_id=checked_source, input_hash=finding.sha256)
+        return _path_quarantine("protected-path", checked_source, str(resolved), critical)
     text = _read_utf8_text(resolved, checked_source)
     return quarantine_text(text, source_id=checked_source, critical=critical)
 
@@ -190,11 +189,28 @@ def _has_protected_path(*paths: str | Path) -> bool:
     return any(_classify_protected(path) for path in paths)
 
 
+def _ads_path(*paths: str | Path) -> str | None:
+    for path in paths:
+        try:
+            if is_windows_ads_path(path):
+                return os.fspath(path)
+        except PathPolicyError as exc:
+            raise SecretQuarantineError("invalid-path: rejected by path policy") from exc
+    return None
+
+
 def _classify_protected(path: str | Path) -> bool:
     try:
         return bool(classify_protected_path(path))
     except PathPolicyError as exc:
         raise SecretQuarantineError("invalid-path: rejected by path policy") from exc
+
+
+def _path_quarantine(code: str, source_id: str, path_ref: str, critical: bool) -> SecretQuarantine:
+    finding = _metadata_finding(code, source_id, path_ref)
+    if critical is True:
+        raise SecretQuarantineError(f"critical-secret: {source_id}")
+    return _quarantine((finding,), source_id=source_id, input_hash=finding.sha256)
 
 
 def _metadata_finding(code: str, source_id: str, raw_path: str) -> SecretFinding:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import asdict
 from pathlib import Path
 
@@ -44,6 +45,21 @@ def _serialized_result(value: object) -> str:
     if hasattr(value, "receipts"):
         payload["receipt_dicts"] = [item.to_dict() for item in value.receipts]
     return "\n".join((repr(value), repr(payload), json.dumps(payload, sort_keys=True)))
+
+
+def _assert_path_quarantined_without_read(
+    result: object,
+    *,
+    code: str,
+    raw_path: str,
+    read_attempts: list[Path],
+) -> None:
+    assert read_attempts == []
+    assert result.safe_text is None
+    assert [finding.code for finding in result.findings] == [code]
+    serialized = _serialized_result(result)
+    assert raw_path not in serialized
+    assert _openai_key() not in serialized
 
 
 def test_secret_canary_is_not_serialized_in_quarantine_result() -> None:
@@ -251,6 +267,112 @@ def test_relative_read_uses_checked_resolved_target_when_cwd_changes(
     assert result.findings == ()
     assert read_paths == [safe_dir / "note.txt"]
     assert alternate_secret not in _serialized_result(result)
+
+
+def test_raw_ads_path_is_quarantined_without_reading(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    source = tmp_path / "note.txt"
+    source.write_text("clear text", encoding="utf-8")
+    raw_path = str(source) + ":stream"
+    read_attempts: list[Path] = []
+
+    def fail_read(self: Path, *args: object, **kwargs: object) -> bytes:
+        read_attempts.append(self)
+        raise AssertionError("content read")
+
+    monkeypatch.setattr(Path, "read_bytes", fail_read)
+    monkeypatch.setattr(Path, "read_text", fail_read)
+
+    result = quarantine_path(raw_path, source_id="ads-raw")
+
+    _assert_path_quarantined_without_read(
+        result,
+        code="ads-path",
+        raw_path=raw_path,
+        read_attempts=read_attempts,
+    )
+
+
+def test_unresolved_ads_path_is_quarantined_without_reading(monkeypatch: pytest.MonkeyPatch) -> None:
+    raw_cwd = "C:/safe/work:stream"
+    read_attempts: list[Path] = []
+
+    def fail_read(self: Path, *args: object, **kwargs: object) -> bytes:
+        read_attempts.append(self)
+        raise AssertionError("content read")
+
+    monkeypatch.setattr(Path, "cwd", classmethod(lambda cls: Path(raw_cwd)))
+    monkeypatch.setattr(Path, "read_bytes", fail_read)
+    monkeypatch.setattr(Path, "read_text", fail_read)
+
+    result = quarantine_path("note.txt", source_id="ads-unresolved")
+
+    _assert_path_quarantined_without_read(
+        result,
+        code="ads-path",
+        raw_path=raw_cwd,
+        read_attempts=read_attempts,
+    )
+
+
+def test_resolved_ads_path_is_quarantined_without_reading(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "note.txt"
+    source.write_text("clear text", encoding="utf-8")
+    resolved_ads = str(source) + ":stream"
+    read_attempts: list[Path] = []
+
+    def ads_resolve(self: Path, *args: object, **kwargs: object) -> Path:
+        return Path(resolved_ads)
+
+    def fail_read(self: Path, *args: object, **kwargs: object) -> bytes:
+        read_attempts.append(self)
+        raise AssertionError("content read")
+
+    monkeypatch.setattr(Path, "resolve", ads_resolve)
+    monkeypatch.setattr(Path, "read_bytes", fail_read)
+    monkeypatch.setattr(Path, "read_text", fail_read)
+
+    result = quarantine_path(source, source_id="ads-resolved")
+
+    _assert_path_quarantined_without_read(
+        result,
+        code="ads-path",
+        raw_path=resolved_ads,
+        read_attempts=read_attempts,
+    )
+
+
+def test_real_windows_ads_path_is_quarantined_without_reading(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    if os.name != "nt":
+        pytest.skip("Windows ADS requires NT path semantics")
+    source = tmp_path / "real-ads.txt"
+    source.write_text("base", encoding="utf-8")
+    raw_path = str(source) + ":stream"
+    ads_path = Path(raw_path)
+    try:
+        ads_path.write_text(f"token={_openai_key()}", encoding="utf-8")
+    except OSError as exc:
+        pytest.skip(f"Windows ADS unavailable: {exc}")
+    read_attempts: list[Path] = []
+
+    def fail_read(self: Path, *args: object, **kwargs: object) -> bytes:
+        read_attempts.append(self)
+        raise AssertionError("content read")
+
+    monkeypatch.setattr(Path, "read_bytes", fail_read)
+    monkeypatch.setattr(Path, "read_text", fail_read)
+
+    result = quarantine_path(ads_path, source_id="ads-real")
+
+    _assert_path_quarantined_without_read(
+        result,
+        code="ads-path",
+        raw_path=raw_path,
+        read_attempts=read_attempts,
+    )
 
 
 def test_quarantine_path_scans_unprotected_utf8_file(tmp_path: Path) -> None:
