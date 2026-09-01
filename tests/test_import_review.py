@@ -174,17 +174,90 @@ def test_failed_aggregate_review_does_not_mutate_seen_replay_keys() -> None:
     assert review.accepted_atoms == ()
 
 
-def test_replay_duplicates_within_batch_are_reported_deterministically() -> None:
-    first = _item("capsule-a", atom=_atom("fact-a"), nonce="same")
-    second = _item("capsule-a", atom=_atom("fact-b"), nonce="same")
+def test_embedded_blocked_atom_trust_prevents_end_to_end_acceptance() -> None:
+    item = _item("capsule-embedded", atom=_atom("fact-embedded", trust_label="stale"))
 
-    review = _review((first, second))
+    review = _review((item,))
 
     assert not review.ok
-    assert [(f.subject_id, f.code) for f in review.findings] == [
+    assert [finding.code for finding in review.findings] == ["stale"]
+    assert review.accepted_atoms == ()
+
+
+def test_malformed_import_item_fields_fail_first_without_leak_or_downstream_work() -> None:
+    class BadStr(str):
+        pass
+
+    canary = "sk-live-abcdefghijklmnopqrstuvwxyz012345"
+    item = ImportItem(
+        source_id=BadStr(canary),  # type: ignore[arg-type]
+        atom=_atom("fact-malformed", trust_label="stale"),
+        text=BadStr(canary),  # type: ignore[arg-type]
+        signature_status=BadStr("none"),  # type: ignore[arg-type]
+        key_id=BadStr("key"),
+        local=1,  # type: ignore[arg-type]
+        model_synthesized=0,  # type: ignore[arg-type]
+        replay_nonce=BadStr("nonce"),  # type: ignore[arg-type]
+        replay_expires_ord=True,  # type: ignore[arg-type]
+    )
+
+    review = _review((item,))
+
+    assert [finding.code for finding in review.findings] == [
+        "invalid-source-id",
+        "invalid-text",
+        "invalid-signature-status",
+        "invalid-key-id",
+        "invalid-local-flag",
+        "invalid-model-synthesized-flag",
+        "invalid-replay-nonce",
+        "invalid-replay-expires-ord",
+    ]
+    assert all(finding.subject_id == "item:0" for finding in review.findings)
+    assert canary not in repr(review)
+    assert review.accepted_atoms == ()
+    assert review.omissions == ()
+    assert review.receipts == ()
+
+
+def test_mutated_atom_id_is_revalidated_before_duplicate_checks() -> None:
+    atom = _atom("fact-mutated-id")
+    object.__setattr__(atom, "id", ["unhashable"])
+
+    review = _review((_item("capsule-mutated-atom", atom=atom),))
+
+    assert review.findings == (
+        ImportFinding("invalid-atom", "critical", "capsule-mutated-atom", "item atom failed validation"),
+    )
+    assert review.accepted_atoms == ()
+
+
+def test_same_import_snapshot_replay_is_rejected_deterministically() -> None:
+    item = _item("capsule-a", atom=_atom("fact-a"), text="same text", nonce="same")
+    seen: set[str] = set()
+
+    first = _review((item,), seen=seen)
+    second = _review((item,), seen=seen)
+
+    assert first.ok
+    assert not second.ok
+    assert [(f.subject_id, f.code) for f in second.findings] == [
         ("capsule-a", "replay"),
     ]
-    assert review.accepted_atoms == ()
+    assert second.accepted_atoms == ()
+
+
+def test_replay_key_binds_sanitized_import_content_not_only_source_id() -> None:
+    seen: set[str] = set()
+    first = _item("capsule-content", atom=_atom("fact-content"), text="first text", nonce="same")
+    second = _item("capsule-content", atom=_atom("fact-content"), text="second text", nonce="same")
+
+    first_review = _review((first,), seen=seen)
+    second_review = _review((second,), seen=seen)
+
+    assert first_review.ok
+    assert second_review.ok
+    assert len(seen) == 2
 
 
 def test_import_review_aggregates_policy_secret_and_replay_artifacts() -> None:

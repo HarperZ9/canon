@@ -1,31 +1,23 @@
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 
 from .atom import CanonAtom
-from .canonical_json import sha256_text
 from .import_policy import ImportDecision, ImportSubject, review_import_subject
+from .import_review_safety import (
+    error_code,
+    import_content_sha256,
+    quarantine_code,
+    safe_subject_id,
+    severity,
+    snapshot_atom,
+    validate_import_item_fields,
+)
 from .omission import Omission
 from .replay import ReplayClaim, ReplayError, check_replay_claim
 from .secret_quarantine import SecretQuarantineError, SecretQuarantine, quarantine_text
 from .source_state import SourceStateError, SourceStateItem, assert_source_state
 from .transform import TransformReceipt
-
-_SECRET_MARKERS = (
-    re.compile(r"sk-[A-Za-z0-9_-]{20,}"),
-    re.compile(r"AKIA[0-9A-Z]{16}"),
-    re.compile(r"\d{3}-\d{2}-\d{4}"),
-    re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"),
-    re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
-)
-_CRITICAL_CODES = frozenset((
-    "critical-disclosure-omission", "critical-secret", "duplicate-atom-id",
-    "invalid-atom", "invalid-current-ord", "invalid-import-item", "invalid-items",
-    "invalid-pinned-key-ids", "invalid-replay-claim", "invalid-seen",
-    "invalid-source-state", "invalid-source-state-item", "invalid-text", "replay",
-    "source_changed", "stale",
-))
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,8 +127,14 @@ def _snapshot_items(items: tuple[ImportItem, ...]) -> tuple[tuple[ImportItem, ..
         if type(item) is not ImportItem:
             findings.append(_finding("invalid-import-item", f"item:{index}", f"items[{index}] must be an exact ImportItem"))
             continue
-        atom = _snapshot_atom(item.atom, _safe_subject_id(item.source_id, fallback=f"item:{index}"), findings)
+        item_issues = validate_import_item_fields(item, index)
+        if item_issues:
+            findings.extend(_finding(issue.code, issue.subject_id, issue.message) for issue in item_issues)
+            continue
+        subject_id = safe_subject_id(item.source_id, fallback=f"item:{index}")
+        atom, message = snapshot_atom(item.atom)
         if atom is None:
+            findings.append(_finding("invalid-atom", subject_id, message))
             continue
         snapshots.append(ImportItem(
             item.source_id, atom, item.text, item.signature_status, item.key_id,
@@ -145,28 +143,13 @@ def _snapshot_items(items: tuple[ImportItem, ...]) -> tuple[tuple[ImportItem, ..
     return tuple(snapshots), tuple(findings)
 
 
-def _snapshot_atom(
-    atom: object,
-    subject_id: str,
-    findings: list[ImportFinding],
-) -> CanonAtom | None:
-    if type(atom) is not CanonAtom:
-        findings.append(_finding("invalid-atom", subject_id, "item atom must be an exact CanonAtom"))
-        return None
-    try:
-        return CanonAtom.from_dict(atom.to_dict())
-    except (KeyError, TypeError, ValueError) as exc:
-        findings.append(_finding("invalid-atom", subject_id, f"atom snapshot failed: {type(exc).__name__}"))
-        return None
-
-
 def _duplicate_atom_findings(items: tuple[ImportItem, ...]) -> tuple[ImportFinding, ...]:
     seen: set[str] = set()
     findings: list[ImportFinding] = []
     for item in items:
         atom_id = item.atom.id
         if atom_id in seen:
-            findings.append(_finding("duplicate-atom-id", _safe_subject_id(item.source_id), "duplicate atom id in import batch"))
+            findings.append(_finding("duplicate-atom-id", safe_subject_id(item.source_id), "duplicate atom id in import batch"))
         seen.add(atom_id)
     return tuple(findings)
 
@@ -205,16 +188,16 @@ def _policy_decision(
 
 
 def _decision_findings(item: ImportItem, decision: ImportDecision) -> tuple[ImportFinding, ...]:
-    subject_id = _safe_subject_id(item.source_id)
+    subject_id = safe_subject_id(item.source_id)
     return tuple(_finding(code, subject_id, f"{code} blocked import activation") for code in decision.reason_codes)
 
 
 def _secret_findings(item: ImportItem) -> tuple[tuple[ImportFinding, ...], tuple[Omission, ...], tuple[TransformReceipt, ...]]:
-    subject_id = _safe_subject_id(item.source_id)
+    subject_id = safe_subject_id(item.source_id)
     try:
         quarantine = quarantine_text(item.text, source_id=item.source_id, critical=item.atom.critical)
     except SecretQuarantineError as exc:
-        code = _error_code(exc)
+        code = error_code(exc)
         return ((_finding(code, subject_id, f"{code} blocked import activation"),), (), ())
     return _quarantine_artifacts(quarantine, subject_id)
 
@@ -223,7 +206,7 @@ def _quarantine_artifacts(
     quarantine: SecretQuarantine,
     subject_id: str,
 ) -> tuple[tuple[ImportFinding, ...], tuple[Omission, ...], tuple[TransformReceipt, ...]]:
-    findings = tuple(_finding(_quarantine_code(code), subject_id, "secret quarantine blocked import activation") for code in quarantine.reason_codes)
+    findings = tuple(_finding(quarantine_code(code), subject_id, "secret quarantine blocked import activation") for code in quarantine.reason_codes)
     return findings, tuple(quarantine.omissions), tuple(quarantine.receipts)
 
 
@@ -233,54 +216,29 @@ def _replay_findings(
     seen: set[str],
     current_ord: int,
 ) -> tuple[ImportFinding, ...]:
-    subject_id = _safe_subject_id(item.source_id)
+    subject_id = safe_subject_id(item.source_id)
     try:
         claim = ReplayClaim(
             principal=item.source_id,
             source_state_sha256=expected_source_state,
-            capsule_sha256=sha256_text(item.source_id),
+            capsule_sha256=import_content_sha256(item),
             nonce=item.replay_nonce,
             expires_ord=item.replay_expires_ord,
         )
         check_replay_claim(claim, seen=seen, current_ord=current_ord)
     except ReplayError as exc:
         return (_finding(exc.code, subject_id, f"{exc.code} blocked import activation"),)
+    except (TypeError, ValueError, UnicodeEncodeError):
+        return (_finding("invalid-replay-claim", subject_id, "invalid-replay-claim blocked import activation"),)
     return ()
 
 
 def _finding(code: str, subject_id: str, message: str) -> ImportFinding:
-    return ImportFinding(code, _severity(code), subject_id, message)
-
-
-def _severity(code: str) -> str:
-    return "critical" if code in _CRITICAL_CODES or code.startswith("invalid-") else "warning"
+    return ImportFinding(code, severity(code), subject_id, message)
 
 
 def _has_blocking_findings(findings: list[ImportFinding]) -> bool:
     return any(finding.severity in ("critical", "warning") for finding in findings)
-
-
-def _quarantine_code(code: str) -> str:
-    return "secret-quarantined" if code == "secret" else code
-
-
-def _error_code(exc: Exception) -> str:
-    text = str(exc)
-    return text.split(":", 1)[0] if ":" in text else type(exc).__name__
-
-
-def _safe_subject_id(value: object, *, fallback: str = "source") -> str:
-    if type(value) is not str or value == "" or _unsafe_text(value):
-        return f"{fallback}:{sha256_text(value) if type(value) is str else 'invalid'}"
-    return value
-
-
-def _unsafe_text(value: str) -> bool:
-    return "\0" in value or any(ord(char) < 32 or ord(char) == 127 for char in value) or _looks_secret(value)
-
-
-def _looks_secret(value: str) -> bool:
-    return any(pattern.search(value) for pattern in _SECRET_MARKERS)
 
 
 def _tuple_or_original(value: object) -> object:

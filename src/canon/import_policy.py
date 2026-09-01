@@ -201,8 +201,13 @@ def _atom_dict(atom: object) -> dict | None:
 
 
 def _add_atom_policy_reasons(atom_dict: dict, reasons: list[str]) -> None:
-    if _trust_label(atom_dict) not in TRUST_LABELS:
+    trust_label = _trust_label(atom_dict)
+    if trust_label not in TRUST_LABELS:
         _add(reasons, "invalid-atom-trust-label")
+    elif trust_label in _BLOCKED_TRUST:
+        _add(reasons, _BLOCKED_TRUST[trust_label])
+    elif trust_label == "model-synthesized-unreviewed" and _normative_like(atom_dict):
+        _add(reasons, "unreviewed-model-normative")
     if _disclosure_profile(atom_dict) not in _ATOM_DISCLOSURE_PROFILES:
         _add(reasons, "invalid-atom-disclosure-profile")
     if _freshness_state(atom_dict) == "stale" or atom_dict.get("status") == "stale":

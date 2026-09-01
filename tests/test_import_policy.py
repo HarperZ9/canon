@@ -130,6 +130,48 @@ def test_model_synthesized_unreviewed_normative_atom_cannot_activate() -> None:
 
 
 @pytest.mark.parametrize(
+    ("embedded_trust", "expected"),
+    (
+        ("signed-unknown-key", "untrusted-import"),
+        ("imported-untrusted", "untrusted-import"),
+        ("secret-quarantined", "secret-quarantined"),
+        ("stale", "stale"),
+    ),
+)
+def test_embedded_blocked_trust_labels_prevent_activation(
+    embedded_trust: str,
+    expected: str,
+) -> None:
+    atom = _atom("fact-embedded-trust", trust_label=embedded_trust)
+    subject = _subject("capsule-embedded-trust", (atom,))
+
+    reasons = validate_atom_activation(atom, trust_label="trusted-local")
+    decision = review_import_subject(subject, profile="project-only", pinned_key_ids=frozenset())
+
+    assert expected in reasons
+    assert not decision.ok
+    assert expected in decision.reason_codes
+    assert decision.accepted_atom_ids == ()
+
+
+def test_embedded_model_synthesized_normative_atom_cannot_activate() -> None:
+    atom = _atom(
+        "embedded-model-permission",
+        atom_type="permission",
+        critical=True,
+        classification="normative",
+        trust_label="model-synthesized-unreviewed",
+    )
+    subject = _subject("capsule-embedded-model", (atom,))
+
+    decision = review_import_subject(subject, profile="project-only", pinned_key_ids=frozenset())
+
+    assert not decision.ok
+    assert "unreviewed-model-normative" in decision.reason_codes
+    assert decision.accepted_atom_ids == ()
+
+
+@pytest.mark.parametrize(
     "atom_type",
     ("active-goal", "permission", "prohibition", "constraint", "frontier-state", "conflict", "unknown"),
 )
