@@ -21,6 +21,7 @@ from canon.registry import (
     allowed_paths,
     assert_writable,
     is_write_allowed,
+    pool_for,
     resolve_surface_path,
     write_surface,
 )
@@ -123,6 +124,24 @@ def test_write_surface_refuses_a_non_catalog_surface():
         write_surface(evil, [], home=HOME, workspace=WS,
                       read_text=fs.read_text, write_text=fs.write_text)
     assert fs.writes == []
+
+
+def test_pool_for_is_the_public_authored_split():
+    # The authored-split rule (which blocks render into a surface) is a public
+    # seam: the R1 writer and the V2 verifier must resolve the same subset, so
+    # neither reaches into a private. A workspace surface whose harness owns a
+    # global sibling renders only the workspace-authored blocks (the globals
+    # live in the sibling file).
+    ws = Surface("claude-code", "workspace", ROOT_WORKSPACE, "CLAUDE.md")
+    pool = [_block("voice", "global", "G", 10),
+            _block("tone", "workspace", "W", 20)]
+    assert [r.id for r in pool_for(ws, pool)] == ["tone"]
+    # A lone workspace surface (no global sibling) renders the full merged set.
+    soul = Surface("hermes", "workspace", ROOT_WORKSPACE, "SOUL.md")
+    assert {r.id for r in pool_for(soul, pool)} == {"voice", "tone"}
+    # A global surface renders the whole pool; layering resolves it.
+    g = Surface("claude-code", "global", ROOT_HOME, ".claude/CLAUDE.md")
+    assert {r.id for r in pool_for(g, pool)} == {"voice", "tone"}
 
 
 def test_write_surface_does_not_write_when_the_region_is_unchanged():

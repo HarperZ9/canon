@@ -121,7 +121,7 @@ def _has_global_surface(harness: str) -> bool:
                for s in SURFACE_CATALOG)
 
 
-def _pool_for(surface: Surface, pool: list[Record]) -> list[Record]:
+def pool_for(surface: Surface, pool: list[Record]) -> list[Record]:
     """The block subset a surface renders under the authored-split rule.
 
     A global surface renders the pool (layering resolves it to the globals). A
@@ -130,6 +130,9 @@ def _pool_for(surface: Surface, pool: list[Record]) -> list[Record]:
     so folding them in here would duplicate them where a harness reads both. A
     workspace surface with no global sibling renders the full merged set, so its
     lone file stays self-sufficient.
+
+    Public so the R1 writer and the V2 verifier resolve one authored-split: the
+    drift check and the writing gate render exactly what write_surfaces writes.
     """
     if surface.scope == "global":
         return pool
@@ -169,7 +172,7 @@ def write_surfaces(pool: list[Record], *, home: str, workspace: str,
         if not extract_region(host).present:
             results.append(SurfaceResult(surface, path, "off-limits", None))
             continue
-        new = apply_surface(host, _pool_for(surface, pool), surface.scope)
+        new = apply_surface(host, pool_for(surface, pool), surface.scope)
         if new != host:
             planned.append((path, new))
             results.append(SurfaceResult(surface, path, "written", new))
