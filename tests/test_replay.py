@@ -19,6 +19,20 @@ def _claim(nonce: str = "n1", expires_ord: int = 10) -> ReplayClaim:
     )
 
 
+class _HostileReplayClaim(ReplayClaim):
+    pass
+
+
+def _claim_subclass() -> ReplayClaim:
+    return _HostileReplayClaim(
+        principal="operator",
+        source_state_sha256=_sha("1"),
+        capsule_sha256=_sha("2"),
+        nonce="n1",
+        expires_ord=10,
+    )
+
+
 def test_replay_key_is_stable_and_content_bound() -> None:
     claim = _claim()
 
@@ -147,6 +161,11 @@ def test_replay_key_rejects_non_claim() -> None:
         replay_key(object())  # type: ignore[arg-type]
 
 
+def test_replay_key_rejects_replay_claim_subclass() -> None:
+    with pytest.raises(ReplayError, match="invalid-replay-claim"):
+        replay_key(_claim_subclass())
+
+
 def test_replay_key_revalidates_mutated_claim_hash() -> None:
     claim = _claim()
     object.__setattr__(claim, "capsule_sha256", "sha256:" + "A" * 64)
@@ -162,5 +181,14 @@ def test_check_replay_claim_revalidates_mutated_claim_before_seen_mutation() -> 
 
     with pytest.raises(ReplayError, match="invalid-replay-claim"):
         check_replay_claim(claim, seen=seen, current_ord=1)
+
+    assert seen == set()
+
+
+def test_check_replay_claim_rejects_claim_subclass_before_seen_mutation() -> None:
+    seen: set[str] = set()
+
+    with pytest.raises(ReplayError, match="invalid-replay-claim"):
+        check_replay_claim(_claim_subclass(), seen=seen, current_ord=1)
 
     assert seen == set()

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+
 import pytest
 
 from canon.source_state import (
@@ -13,6 +15,46 @@ from canon.source_state import (
 
 def _sha(hex_char: str) -> str:
     return "sha256:" + hex_char * 64
+
+
+class _HostileSourceStateItem(SourceStateItem):
+    _malicious = {
+        "path": "../escape.md",
+        "sha256": "sha256:" + "B" * 64,
+        "size": True,
+    }
+
+    def __getattribute__(self, name: str) -> object:
+        if name in ("path", "sha256", "size") and _hostile_armed(self):
+            reads = object.__getattribute__(self, "_reads")
+            reads[name] = reads.get(name, 0) + 1
+            threshold = {"path": 2, "sha256": 1, "size": 1}[name]
+            if reads[name] > threshold:
+                return self._malicious[name]
+        return super().__getattribute__(name)
+
+
+def _hostile_armed(item: object) -> bool:
+    try:
+        return object.__getattribute__(item, "_armed")
+    except AttributeError:
+        return False
+
+
+def _hostile_source_item() -> SourceStateItem:
+    item = _HostileSourceStateItem(path="a.md", sha256=_sha("a"), size=1)
+    object.__setattr__(item, "_reads", {})
+    object.__setattr__(item, "_armed", True)
+    return item
+
+
+def _hostile_source_digest() -> str:
+    raw = (
+        b'[{"path":"../escape.md","sha256":"sha256:'
+        + b"B" * 64
+        + b'","size":true}]\n'
+    )
+    return "sha256:" + hashlib.sha256(raw).hexdigest()
 
 
 def test_source_state_digest_is_order_independent() -> None:
@@ -126,3 +168,13 @@ def test_source_state_digest_revalidates_before_serializing_mutated_item() -> No
 
     with pytest.raises(SourceStateError, match="invalid-source-state-item"):
         source_state_sha256((item,))
+
+
+def test_source_state_rejects_hostile_item_subclass_before_live_reread() -> None:
+    with pytest.raises(SourceStateError, match="invalid-source-state"):
+        canonical_source_state((_hostile_source_item(),))
+
+
+def test_assert_source_state_rejects_hostile_item_subclass_matching_digest() -> None:
+    with pytest.raises(SourceStateError, match="invalid-source-state"):
+        assert_source_state(_hostile_source_digest(), (_hostile_source_item(),))

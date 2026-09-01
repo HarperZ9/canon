@@ -62,8 +62,8 @@ def _require_items(items: object) -> tuple[SourceStateItem, ...]:
         raise SourceStateError("invalid-source-state", "items must be a tuple")
     seen: set[str] = set()
     for item in items:
-        if not isinstance(item, SourceStateItem):
-            raise SourceStateError("invalid-source-state", "items must contain SourceStateItem")
+        if type(item) is not SourceStateItem:
+            raise SourceStateError("invalid-source-state", "items must contain exact SourceStateItem")
         _require_source_path(item.path)
         _require_sha256("sha256", item.sha256)
         _require_non_negative_int("size", item.size)

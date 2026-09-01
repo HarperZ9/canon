@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import errno
+import hashlib
 import os
 import socket
 from pathlib import Path
@@ -19,6 +20,46 @@ from canon.source_state import SourceStateError, SourceStateItem, source_state_s
 
 def _sha(hex_char: str) -> str:
     return "sha256:" + hex_char * 64
+
+
+class _HostileSourceStateItem(SourceStateItem):
+    _malicious = {
+        "path": "../escape.md",
+        "sha256": "sha256:" + "B" * 64,
+        "size": True,
+    }
+
+    def __getattribute__(self, name: str) -> object:
+        if name in ("path", "sha256", "size") and _hostile_armed(self):
+            reads = object.__getattribute__(self, "_reads")
+            reads[name] = reads.get(name, 0) + 1
+            threshold = {"path": 2, "sha256": 1, "size": 1}[name]
+            if reads[name] > threshold:
+                return self._malicious[name]
+        return super().__getattribute__(name)
+
+
+def _hostile_armed(item: object) -> bool:
+    try:
+        return object.__getattribute__(item, "_armed")
+    except AttributeError:
+        return False
+
+
+def _hostile_source_item() -> SourceStateItem:
+    item = _HostileSourceStateItem(path="a.md", sha256=_sha("a"), size=1)
+    object.__setattr__(item, "_reads", {})
+    object.__setattr__(item, "_armed", True)
+    return item
+
+
+def _hostile_source_digest() -> str:
+    raw = (
+        b'[{"path":"../escape.md","sha256":"sha256:'
+        + b"B" * 64
+        + b'","size":true}]\n'
+    )
+    return "sha256:" + hashlib.sha256(raw).hexdigest()
 
 
 def test_run_lock_conflicts_until_released(tmp_path: Path) -> None:
@@ -273,6 +314,20 @@ def test_guarded_commit_aborts_without_calling_commit_on_mutated_source_item() -
 
     with pytest.raises(SourceStateError, match="invalid-source-state-item"):
         guarded_commit(expected, (item,), commit)
+
+    assert not called
+
+
+def test_guarded_commit_rejects_hostile_item_subclass_without_calling_commit() -> None:
+    called = False
+
+    def commit() -> str:
+        nonlocal called
+        called = True
+        return "written"
+
+    with pytest.raises(SourceStateError, match="invalid-source-state"):
+        guarded_commit(_hostile_source_digest(), (_hostile_source_item(),), commit)
 
     assert not called
 

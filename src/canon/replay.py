@@ -62,8 +62,8 @@ def check_replay_claim(
 
 
 def _require_claim(claim: object) -> ReplayClaim:
-    if not isinstance(claim, ReplayClaim):
-        raise ReplayError("invalid-replay-claim", "claim must be ReplayClaim")
+    if type(claim) is not ReplayClaim:
+        raise ReplayError("invalid-replay-claim", "claim must be exact ReplayClaim")
     _require_text("principal", claim.principal)
     _require_sha256("source_state_sha256", claim.source_state_sha256)
     _require_sha256("capsule_sha256", claim.capsule_sha256)
