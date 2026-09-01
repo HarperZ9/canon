@@ -27,6 +27,17 @@ def _item(path: str, hex_char: str, size: int) -> SourceStateItem:
     return SourceStateItem(path=path, sha256=_sha(hex_char), size=size)
 
 
+def _entry_path(root: Path, key: str) -> Path:
+    return root / "bundles" / f"{_digest(key)}.json"
+
+
+def _write_entry(root: Path, key: str, body: dict[str, object]) -> Path:
+    path = _entry_path(root, key)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(canonical_json_text(body), encoding="utf-8")
+    return path
+
+
 def _key_kwargs(**overrides: object) -> dict[str, object]:
     data: dict[str, object] = {
         "adapter_id": "codex-cli",
@@ -63,6 +74,19 @@ class _OnePassItems:
         if self.reads == 1:
             return iter((self._item,))
         return iter((object(),))  # type: ignore[arg-type]
+
+
+def _swap_dir_to_symlink(directory: Path, outside: Path, displaced: Path) -> bool:
+    try:
+        directory.rename(displaced)
+        try:
+            directory.symlink_to(outside, target_is_directory=True)
+        except OSError:
+            displaced.rename(directory)
+            pytest.skip("current platform or privileges do not allow directory symlinks")
+        return True
+    except OSError:
+        return False
 
 
 def test_key_for_is_portable_deterministic_and_uses_security_digest(
@@ -270,6 +294,74 @@ def test_get_rejects_symlink_cache_entry_before_read(tmp_path: Path) -> None:
         SourceStateCache(root).get(key)
 
 
+def test_get_rejects_entry_swapped_to_symlink_after_validation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "cache"
+    key = _cache_key("6")
+    target = _write_entry(root, key, {"inside": True})
+    outside = tmp_path / "outside-entry.json"
+    outside.write_text(canonical_json_text({"outside": True}), encoding="utf-8")
+    real_regular = source_state_cache._regular_file_or_missing
+    swapped = False
+
+    def swap_after_lstat(path: Path, *, role: str) -> bool:
+        nonlocal swapped
+        exists = real_regular(path, role=role)
+        if path == target.resolve() and role == "cache-entry" and not swapped:
+            swapped = True
+            path.unlink()
+            path.symlink_to(outside)
+        return exists
+
+    monkeypatch.setattr(
+        source_state_cache,
+        "_regular_file_or_missing",
+        swap_after_lstat,
+    )
+
+    with pytest.raises(SourceStateCacheError, match="unsafe-cache-path"):
+        SourceStateCache(root).get(key)
+    assert swapped
+
+
+def test_current_rejects_pointer_swapped_to_symlink_after_validation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "cache"
+    first = _cache_key("7")
+    second = _cache_key("8")
+    _write_entry(root, first, {"version": 1})
+    _write_entry(root, second, {"version": 2})
+    current = root / "current.json"
+    current.write_text(canonical_json_text({"cache_key": first}), encoding="utf-8")
+    outside = tmp_path / "outside-current.json"
+    outside.write_text(canonical_json_text({"cache_key": second}), encoding="utf-8")
+    real_regular = source_state_cache._regular_file_or_missing
+    swapped = False
+
+    def swap_after_lstat(path: Path, *, role: str) -> bool:
+        nonlocal swapped
+        exists = real_regular(path, role=role)
+        if path == current.resolve() and role == "current-pointer" and not swapped:
+            swapped = True
+            path.unlink()
+            path.symlink_to(outside)
+        return exists
+
+    monkeypatch.setattr(
+        source_state_cache,
+        "_regular_file_or_missing",
+        swap_after_lstat,
+    )
+
+    with pytest.raises(SourceStateCacheError, match="unsafe-cache-path"):
+        SourceStateCache(root).current()
+    assert swapped
+
+
 def test_put_rejects_symlink_bundle_directory_escape(tmp_path: Path) -> None:
     root = tmp_path / "cache"
     root.mkdir()
@@ -283,6 +375,90 @@ def test_put_rejects_symlink_bundle_directory_escape(tmp_path: Path) -> None:
     with pytest.raises(SourceStateCacheError, match="unsafe-cache-path"):
         SourceStateCache(root).put(_cache_key("d"), {"ok": True})
     assert list(outside.iterdir()) == []
+
+
+def test_put_does_not_follow_bundle_parent_swapped_before_temp_create(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "cache"
+    outside = tmp_path / "outside-bundles"
+    displaced = tmp_path / "displaced-bundles"
+    outside.mkdir()
+    key = _cache_key("9")
+    real_named_temp = source_state_cache.tempfile.NamedTemporaryFile
+    attempted = False
+
+    def swap_before_temp(*args: object, **kwargs: object) -> object:
+        nonlocal attempted
+        directory = Path(kwargs["dir"])  # type: ignore[index]
+        if directory.name == "bundles" and not attempted:
+            attempted = True
+            _swap_dir_to_symlink(directory, outside, displaced)
+        return real_named_temp(*args, **kwargs)
+
+    monkeypatch.setattr(source_state_cache.tempfile, "NamedTemporaryFile", swap_before_temp)
+
+    SourceStateCache(root).put(key, {"version": 1})
+    assert attempted
+    assert not (outside / f"{_digest(key)}.json").exists()
+    assert SourceStateCache(root).current() == {"version": 1}
+
+
+def test_put_does_not_follow_cache_root_swapped_before_current_temp_create(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "cache"
+    outside = tmp_path / "outside-root"
+    displaced = tmp_path / "displaced-root"
+    outside.mkdir()
+    key = _cache_key("a")
+    real_named_temp = source_state_cache.tempfile.NamedTemporaryFile
+    attempted = False
+
+    def swap_before_current_temp(*args: object, **kwargs: object) -> object:
+        nonlocal attempted
+        directory = Path(kwargs["dir"])  # type: ignore[index]
+        if directory == root.resolve() and not attempted:
+            attempted = True
+            _swap_dir_to_symlink(directory, outside, displaced)
+        return real_named_temp(*args, **kwargs)
+
+    monkeypatch.setattr(
+        source_state_cache.tempfile,
+        "NamedTemporaryFile",
+        swap_before_current_temp,
+    )
+
+    SourceStateCache(root).put(key, {"version": 1})
+    assert attempted
+    assert not (outside / "current.json").exists()
+    assert SourceStateCache(root).current() == {"version": 1}
+
+
+def test_put_retries_temp_name_collision(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    if source_state_cache.os.name != "nt":
+        pytest.skip("tempfile retry probe covers the Windows path backend")
+    cache = SourceStateCache(tmp_path / "cache")
+    real_named_temp = source_state_cache.tempfile.NamedTemporaryFile
+    calls = 0
+
+    def collide_once(*args: object, **kwargs: object) -> object:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise FileExistsError("synthetic temp collision")
+        return real_named_temp(*args, **kwargs)
+
+    monkeypatch.setattr(source_state_cache.tempfile, "NamedTemporaryFile", collide_once)
+
+    cache.put(_cache_key("b"), {"version": 1})
+    assert calls >= 2
+    assert cache.current() == {"version": 1}
 
 
 def test_put_rejects_nonregular_existing_bundle_target(tmp_path: Path) -> None:
