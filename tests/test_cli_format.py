@@ -31,6 +31,29 @@ def test_write_result_json_emits_canonical_envelope_with_one_stdout_lf() -> None
     assert stderr.getvalue() == ""
 
 
+def test_json_write_to_text_wrapper_uses_utf8_bytes_without_newline_translation() -> None:
+    from canon.cli_format import make_result, write_result
+
+    result = make_result(
+        ok=True,
+        command="doctor",
+        failure_code="ok",
+        message="ready",
+        data={"word": "café"},
+    )
+    buffer = io.BytesIO()
+    stdout = io.TextIOWrapper(buffer, encoding="utf-16", newline="\r\n")
+
+    exit_code = write_result(result, stdout=stdout, stderr=io.StringIO(), json_output=True, color=False)
+    stdout.flush()
+
+    assert exit_code == EX_OK
+    assert buffer.getvalue() == (
+        '{"command":"doctor","data":{"word":"café"},"exit_code":0,'
+        '"failure_code":"ok","message":"ready","ok":true}\n'
+    ).encode("utf-8")
+
+
 def test_make_result_snapshots_nested_data_before_caller_mutation() -> None:
     from canon.cli_format import make_result, write_result
 
@@ -49,15 +72,74 @@ def test_make_result_snapshots_nested_data_before_caller_mutation() -> None:
     )
 
 
-def test_success_forces_zero_exit_and_unknown_failure_codes_fail_closed() -> None:
+def test_result_data_is_recursively_immutable_and_serializes_from_frozen_snapshot() -> None:
+    from canon.cli_format import make_result, write_result
+
+    result = make_result(
+        ok=True,
+        command="doctor",
+        failure_code="ok",
+        message="ready",
+        data={"items": [{"count": 1}]},
+    )
+
+    assert result.data is not None
+    with pytest.raises(TypeError):
+        result.data["items"] = []  # type: ignore[index]
+    items = result.data["items"]
+    assert isinstance(items, tuple)
+    with pytest.raises(TypeError):
+        items[0]["count"] = 2  # type: ignore[index]
+
+    stdout = io.StringIO()
+    write_result(result, stdout=stdout, stderr=io.StringIO(), json_output=True, color=False)
+
+    assert stdout.getvalue() == (
+        '{"command":"doctor","data":{"items":[{"count":1}]},"exit_code":0,'
+        '"failure_code":"ok","message":"ready","ok":true}\n'
+    )
+
+
+def test_unknown_failure_codes_fail_closed_but_success_requires_ok_code() -> None:
     from canon.cli_format import make_result
 
-    success = make_result(ok=True, command="doctor", failure_code="future-code", message="ready")
     failure = make_result(ok=False, command="doctor", failure_code="future-code", message="blocked")
 
-    assert success.exit_code == EX_OK
+    with pytest.raises(TypeError, match="invalid CLI result"):
+        make_result(ok=True, command="doctor", failure_code="future-code", message="ready")
     assert failure.exit_code == EX_INTERNAL
     assert failure.failure_code == "future-code"
+
+
+def test_factory_rejects_failure_with_ok_code() -> None:
+    from canon.cli_format import make_result
+
+    with pytest.raises(TypeError) as excinfo:
+        make_result(ok=False, command="doctor", failure_code="ok", message="blocked")
+
+    assert str(excinfo.value) == "invalid CLI result"
+
+
+def test_direct_result_construction_and_write_validation_reject_inconsistent_invariants() -> None:
+    from canon.cli_format import CliResult, make_result, write_result
+
+    with pytest.raises(TypeError) as direct_exc:
+        CliResult(
+            ok=True,
+            command="doctor",
+            failure_code="conflict",
+            message="ready",
+            data=None,
+            exit_code=5,
+        )
+
+    tampered = make_result(ok=True, command="doctor", failure_code="ok", message="ready")
+    object.__setattr__(tampered, "exit_code", 2)
+    with pytest.raises(TypeError) as write_exc:
+        write_result(tampered, stdout=io.StringIO(), stderr=io.StringIO(), json_output=True, color=False)
+
+    assert str(direct_exc.value) == "invalid CLI result"
+    assert str(write_exc.value) == "invalid CLI result"
 
 
 class _HostileMapping(Mapping[object, object]):

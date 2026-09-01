@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import io
 import os
 import sys
 from collections.abc import Mapping
@@ -81,10 +82,20 @@ def run_cli(
     if tokens is None:
         return EX_USAGE
 
-    parser = _build_parser(stdout=stdout, stderr=stderr)
+    json_requested = _json_requested(tokens)
+    parser_stderr = io.StringIO() if json_requested else stderr
+    parser = _build_parser(stdout=stdout, stderr=parser_stderr)
     try:
         parsed = parser.parse_args(tokens)
     except _ParserExit as error:
+        if error.status != EX_OK and json_requested:
+            result = make_result(
+                ok=False,
+                command="canon",
+                failure_code="invalid_args",
+                message="invalid arguments",
+            )
+            return write_result(result, stdout=stdout, stderr=stderr, json_output=True, color=False)
         return error.status
 
     result = make_result(ok=True, command=parsed.command, failure_code="ok", message="ready")
@@ -138,6 +149,10 @@ def _is_tty(stream: TextIO) -> bool:
         return bool(isatty())
     except OSError:
         return False
+
+
+def _json_requested(tokens: list[str]) -> bool:
+    return "--json" in tokens
 
 
 __all__ = ["COMMANDS", "build_parser", "run_cli", "main"]

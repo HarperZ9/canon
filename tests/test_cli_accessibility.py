@@ -105,6 +105,38 @@ def test_cli_json_routes_placeholder_to_canonical_envelope() -> None:
     assert stderr.getvalue() == ""
 
 
+def test_cli_json_parse_error_suppresses_human_error_and_uses_generic_invalid_args() -> None:
+    from canon.cli import run_cli
+    from canon.exit_codes import EX_USAGE
+
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+
+    exit_code = run_cli(["--json", "not-a-command"], stdout=stdout, stderr=stderr, environ={})
+
+    assert exit_code == EX_USAGE
+    assert stdout.getvalue() == (
+        '{"command":"canon","data":null,"exit_code":2,'
+        '"failure_code":"invalid_args","message":"invalid arguments","ok":false}\n'
+    )
+    assert stderr.getvalue() == ""
+    assert "not-a-command" not in stdout.getvalue()
+
+
+def test_cli_json_help_still_returns_useful_help_text() -> None:
+    from canon.cli import run_cli
+
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+
+    exit_code = run_cli(["--json", "--help"], stdout=stdout, stderr=stderr, environ={})
+
+    assert exit_code == EX_OK
+    assert "usage: canon" in stdout.getvalue()
+    assert "--json" in stdout.getvalue()
+    assert stderr.getvalue() == ""
+
+
 def test_cli_no_color_no_color_env_and_non_tty_output_keep_visible_labels_only() -> None:
     from canon.cli import run_cli
 

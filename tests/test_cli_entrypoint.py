@@ -143,3 +143,49 @@ def test_python_module_help_exits_zero_and_lists_commands() -> None:
     for command in COMMANDS:
         assert command in result.stdout
     assert result.stderr == ""
+
+
+def test_python_module_json_stdout_is_utf8_bytes_with_lf_only() -> None:
+    env = dict(os.environ)
+    src_path = str(Path.cwd() / "src")
+    env["PYTHONPATH"] = src_path + os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else src_path
+
+    result = subprocess.run(
+        [sys.executable, "-m", "canon", "--json", "doctor"],
+        cwd=Path.cwd(),
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert result.stdout == (
+        b'{"command":"doctor","data":null,"exit_code":0,'
+        b'"failure_code":"ok","message":"ready","ok":true}\n'
+    )
+    assert b"\r" not in result.stdout
+    assert result.stderr == b""
+
+
+def test_python_module_json_parse_error_suppresses_parser_stderr() -> None:
+    env = dict(os.environ)
+    src_path = str(Path.cwd() / "src")
+    env["PYTHONPATH"] = src_path + os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else src_path
+
+    result = subprocess.run(
+        [sys.executable, "-m", "canon", "--json", "not-a-command"],
+        cwd=Path.cwd(),
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+
+    assert result.returncode == 2
+    assert result.stdout == (
+        b'{"command":"canon","data":null,"exit_code":2,'
+        b'"failure_code":"invalid_args","message":"invalid arguments","ok":false}\n'
+    )
+    assert b"not-a-command" not in result.stdout
+    assert result.stderr == b""
