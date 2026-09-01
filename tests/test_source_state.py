@@ -96,3 +96,33 @@ def test_source_state_functions_reject_invalid_argument_shapes() -> None:
         source_state_sha256((object(),))  # type: ignore[arg-type]
     with pytest.raises(SourceStateError, match="invalid-source-state"):
         assert_source_state(123, (item,))  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("path", "../escape.md"),
+        ("path", "cafe\u0301.md"),
+        ("sha256", "sha256:" + "A" * 64),
+        ("sha256", 123),
+        ("size", True),
+        ("size", -1),
+    ],
+)
+def test_canonical_source_state_revalidates_mutated_items(
+    field: str,
+    value: object,
+) -> None:
+    item = SourceStateItem(path="a.md", sha256=_sha("a"), size=1)
+    object.__setattr__(item, field, value)
+
+    with pytest.raises(SourceStateError, match="invalid-source-state-item"):
+        canonical_source_state((item,))
+
+
+def test_source_state_digest_revalidates_before_serializing_mutated_item() -> None:
+    item = SourceStateItem(path="a.md", sha256=_sha("a"), size=1)
+    object.__setattr__(item, "sha256", "sha256:deadbeef")
+
+    with pytest.raises(SourceStateError, match="invalid-source-state-item"):
+        source_state_sha256((item,))

@@ -65,6 +65,7 @@ def release_run_lock(lock: RunLock) -> None:
         return
     if _is_reparse_point(lock_path):
         raise LockError("lock-reparse", str(lock_path))
+    _assert_regular_lock_file(lock_path)
     token = _read_lock_token(lock_path)
     if token != lock.token:
         raise LockError("lock-token-mismatch", str(lock_path))
@@ -179,6 +180,17 @@ def _read_lock_token(path: Path) -> str:
         return path.read_text(encoding="utf-8")
     except OSError as exc:
         raise LockError("lock-release", str(exc)) from exc
+
+
+def _assert_regular_lock_file(path: Path) -> None:
+    try:
+        mode = path.lstat().st_mode
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        raise LockError("lock-release", str(exc)) from exc
+    if not stat.S_ISREG(mode):
+        raise LockError("lock-nonregular", str(path))
 
 
 def _unlink_lock(path: Path) -> None:

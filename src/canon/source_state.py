@@ -64,6 +64,9 @@ def _require_items(items: object) -> tuple[SourceStateItem, ...]:
     for item in items:
         if not isinstance(item, SourceStateItem):
             raise SourceStateError("invalid-source-state", "items must contain SourceStateItem")
+        _require_source_path(item.path)
+        _require_sha256("sha256", item.sha256)
+        _require_non_negative_int("size", item.size)
         key = _normalized_source_key(item.path)
         if key in seen:
             raise SourceStateError("duplicate-source-path", item.path)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import errno
 import os
+import socket
 from pathlib import Path
 
 import pytest
@@ -140,6 +141,56 @@ def test_release_rejects_reparse_lock_file(tmp_path: Path) -> None:
     assert target.exists()
 
 
+def test_release_rejects_directory_lock_path_before_reading(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "root"
+    lock_dir = root / ".canon-locks"
+    lock_path = lock_dir / "workspace.lock"
+    lock_path.mkdir(parents=True)
+    lock = RunLock(root=root, name="workspace", token="token", path=lock_path)
+
+    def fail_read_text(self: Path, *args: object, **kwargs: object) -> str:
+        raise AssertionError("non-regular lock path must be rejected before read")
+
+    monkeypatch.setattr(Path, "read_text", fail_read_text)
+
+    with pytest.raises(LockError, match="lock-nonregular"):
+        release_run_lock(lock)
+
+    assert lock_path.is_dir()
+
+
+def test_release_rejects_special_lock_path_before_reading(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    if not hasattr(socket, "AF_UNIX"):
+        pytest.skip("platform has no safe non-blocking socket path support")
+    root = tmp_path / "root"
+    lock_dir = root / ".canon-locks"
+    lock_dir.mkdir(parents=True)
+    lock_path = lock_dir / "workspace.lock"
+    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        try:
+            server.bind(str(lock_path))
+        except OSError:
+            pytest.skip("platform cannot create a safe socket lock path")
+        lock = RunLock(root=root, name="workspace", token="token", path=lock_path)
+
+        def fail_read_text(self: Path, *args: object, **kwargs: object) -> str:
+            raise AssertionError("non-regular lock path must be rejected before read")
+
+        monkeypatch.setattr(Path, "read_text", fail_read_text)
+
+        with pytest.raises(LockError, match="lock-nonregular"):
+            release_run_lock(lock)
+    finally:
+        server.close()
+
+
 def test_acquire_cleans_up_partial_lock_write(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -205,6 +256,23 @@ def test_guarded_commit_aborts_without_calling_commit_on_invalid_state() -> None
 
     with pytest.raises(SourceStateError, match="invalid-source-state"):
         guarded_commit("not-a-digest", (), commit)
+
+    assert not called
+
+
+def test_guarded_commit_aborts_without_calling_commit_on_mutated_source_item() -> None:
+    item = SourceStateItem(path="a.md", sha256=_sha("a"), size=1)
+    expected = source_state_sha256((item,))
+    object.__setattr__(item, "size", True)
+    called = False
+
+    def commit() -> str:
+        nonlocal called
+        called = True
+        return "written"
+
+    with pytest.raises(SourceStateError, match="invalid-source-state-item"):
+        guarded_commit(expected, (item,), commit)
 
     assert not called
 

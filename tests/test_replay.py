@@ -117,6 +117,22 @@ def test_check_replay_claim_validates_inputs_before_mutating_seen(
         assert seen == original
 
 
+def test_check_replay_claim_rejects_hostile_set_subclass() -> None:
+    class HostileSeen(set[str]):
+        def __contains__(self, value: object) -> bool:
+            return False
+
+        def add(self, value: str) -> None:
+            return None
+
+    seen = HostileSeen()
+
+    with pytest.raises(ReplayError, match="invalid-seen"):
+        check_replay_claim(_claim(), seen=seen, current_ord=1)  # type: ignore[arg-type]
+
+    assert seen == set()
+
+
 def test_stale_replay_claim_does_not_mark_claim_seen() -> None:
     seen: set[str] = set()
 
@@ -129,3 +145,22 @@ def test_stale_replay_claim_does_not_mark_claim_seen() -> None:
 def test_replay_key_rejects_non_claim() -> None:
     with pytest.raises(ReplayError, match="invalid-replay-claim"):
         replay_key(object())  # type: ignore[arg-type]
+
+
+def test_replay_key_revalidates_mutated_claim_hash() -> None:
+    claim = _claim()
+    object.__setattr__(claim, "capsule_sha256", "sha256:" + "A" * 64)
+
+    with pytest.raises(ReplayError, match="invalid-replay-claim"):
+        replay_key(claim)
+
+
+def test_check_replay_claim_revalidates_mutated_claim_before_seen_mutation() -> None:
+    claim = _claim()
+    seen: set[str] = set()
+    object.__setattr__(claim, "expires_ord", True)
+
+    with pytest.raises(ReplayError, match="invalid-replay-claim"):
+        check_replay_claim(claim, seen=seen, current_ord=1)
+
+    assert seen == set()

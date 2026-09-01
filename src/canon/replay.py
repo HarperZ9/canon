@@ -64,11 +64,16 @@ def check_replay_claim(
 def _require_claim(claim: object) -> ReplayClaim:
     if not isinstance(claim, ReplayClaim):
         raise ReplayError("invalid-replay-claim", "claim must be ReplayClaim")
+    _require_text("principal", claim.principal)
+    _require_sha256("source_state_sha256", claim.source_state_sha256)
+    _require_sha256("capsule_sha256", claim.capsule_sha256)
+    _require_text("nonce", claim.nonce)
+    _require_positive_ord("expires_ord", claim.expires_ord)
     return claim
 
 
 def _require_seen(seen: object) -> set[str]:
-    if not isinstance(seen, set):
+    if type(seen) is not set:
         raise ReplayError("invalid-seen", "seen must be a set")
     if not all(isinstance(item, str) and _SHA256_RE.fullmatch(item) for item in seen):
         raise ReplayError("invalid-seen", "seen contains invalid replay keys")
