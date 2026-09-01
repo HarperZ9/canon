@@ -3,6 +3,7 @@ import errno
 import os
 import stat
 import tempfile
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 from . import concurrency_windows_api as _win
@@ -11,6 +12,11 @@ from .path_policy import PathPolicyError, assert_not_protected, is_reparse_point
 CONFIG_SCHEMA = "canon.init-state/v1"
 STATE_DIRS = ("cache", "witnesses", "undo")
 CONFIG_NAME = "config.json"
+_RESERVED_STATE_PARTS = frozenset({
+    "agents.md", "claude.md", "soul.md", "gemini.md", "codex.md",
+    ".chatgpt", ".claude", ".codex", ".vscode", ".idea", ".cursor",
+    ".windsurf", ".opencode", ".github", ".git",
+})
 _TEMP_ATTEMPTS = 8
 _WIN_FILE_DIRECTORY_FILE = 0x1
 _WIN_SHARE = _win.FILE_SHARE_READ | _win.FILE_SHARE_WRITE
@@ -47,6 +53,7 @@ def _build_plan(workspace: object, state_dir: object) -> _Plan:
         raise _InitFailure("unsafe_path") from exc
     rel = _relative_text(state_path, workspace_path); parts = tuple(Path(rel).parts)
     if not parts or any(part in ("", ".", "..") for part in parts): raise _InitFailure("unsafe_path")
+    _reject_reserved_parts(parts)
     config = canonical_json_text(_config_payload(parts)).encode("utf-8")
     return _Plan(workspace_path, state_path, rel, parts, _entries(rel), config)
 def _apply_plan(plan: _Plan) -> None:
@@ -93,6 +100,10 @@ def _workspace_path(raw: str) -> Path:
 def _text(value: object) -> str:
     if type(value) is not str or value == "" or "\0" in value: raise _InitFailure("unsafe_path")
     return value
+def _reject_reserved_parts(parts: tuple[str, ...]) -> None:
+    if any(_normalized_part(part) in _RESERVED_STATE_PARTS for part in parts): raise _InitFailure("unsafe_path")
+def _normalized_part(part: str) -> str:
+    return unicodedata.normalize("NFC", part).rstrip(" .").casefold()
 def _config_payload(parts: tuple[str, ...]) -> dict[str, object]:
     return {"canon_schema": CONFIG_SCHEMA, "workspace": {"relative_from_state_dir": "/".join(".." for _ in parts)}}
 def _entries(state_rel: str) -> tuple[str, ...]:
@@ -112,8 +123,8 @@ def _require_safe_backend() -> None:
     ok = _win.supported() if os.name == "nt" else _posix_supported()
     if not ok: raise _InitFailure("unsafe_path")
 def _posix_supported() -> bool:
-    required = (os.open, os.mkdir, os.unlink, os.link)
-    return os.name != "nt" and all(fn in os.supports_dir_fd for fn in required) and hasattr(os, "pread") and all(hasattr(os, name) for name in ("O_DIRECTORY", "O_NOFOLLOW"))
+    required = (os.open, os.mkdir, os.unlink, os.link, os.stat)
+    return os.name != "nt" and all(fn in os.supports_dir_fd for fn in required) and hasattr(os, "pread") and all(hasattr(os, name) for name in ("O_DIRECTORY", "O_NOFOLLOW", "O_NONBLOCK"))
 def _open_dir(path: Path) -> _DirCap:
     try: info = path.lstat()
     except OSError as exc: raise _InitFailure("unsafe_path") from exc
@@ -156,11 +167,16 @@ def _posix_open_dir(path: str | Path, dir_fd: int | None = None) -> int:
     flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
     return os.open(path, flags) if dir_fd is None else os.open(path, flags, dir_fd=dir_fd)
 def _posix_read_config(dir_fd: int) -> bytes | None:
-    try: fd = os.open(CONFIG_NAME, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=dir_fd)
+    try: before = os.stat(CONFIG_NAME, dir_fd=dir_fd, follow_symlinks=False)
     except FileNotFoundError: return None
+    if not stat.S_ISREG(before.st_mode):
+        raise _InitFailure("unsafe_path" if stat.S_ISLNK(before.st_mode) else "conflict")
+    try: fd = os.open(CONFIG_NAME, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dir_fd)
+    except OSError as exc:
+        raise _InitFailure("unsafe_path") from exc
     try:
         info = os.fstat(fd)
-        if not stat.S_ISREG(info.st_mode): raise _InitFailure("conflict")
+        if not stat.S_ISREG(info.st_mode) or _stat_key(info) != _stat_key(before): raise _InitFailure("conflict")
         return os.pread(fd, info.st_size, 0)
     finally:
         os.close(fd)
@@ -179,9 +195,12 @@ def _create_posix_temp(dir_fd: int, data: bytes) -> str:
         try: fd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=dir_fd)
         except FileExistsError: continue
         try:
-            _write_all(fd, data); os.fsync(fd)
-        finally:
-            os.close(fd)
+            try:
+                _write_all(fd, data); os.fsync(fd)
+            finally:
+                os.close(fd)
+        except OSError:
+            _posix_unlink(dir_fd, name); raise
         return name
     raise OSError(errno.EEXIST, "temp name collision")
 def _write_all(fd: int, data: bytes) -> None:

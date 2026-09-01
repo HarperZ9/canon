@@ -3,7 +3,9 @@ from __future__ import annotations
 import io
 import json
 import os
+import stat
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -35,6 +37,12 @@ def _payload(stdout: str) -> dict[str, object]:
 
 def _rel_tree(root: Path) -> list[str]:
     return sorted(path.relative_to(root).as_posix() for path in root.rglob("*"))
+
+
+def _force_posix(monkeypatch: pytest.MonkeyPatch, cli_init: Any) -> None:
+    monkeypatch.setattr(cli_init.os, "name", "posix")
+    monkeypatch.setattr(cli_init.os, "O_NOFOLLOW", 0x200, raising=False)
+    monkeypatch.setattr(cli_init.os, "O_NONBLOCK", 0x800, raising=False)
 
 
 def _swap_dir_to_symlink(directory: Path, outside: Path, displaced: Path) -> bool:
@@ -145,6 +153,54 @@ def test_unsafe_state_paths_return_sanitized_security_code_before_mutation(
     assert not (workspace / ".canon").exists()
 
 
+@pytest.mark.parametrize(
+    ("state_dir", "category"),
+    [
+        ("State/../AgEnTs.Md", "instruction"),
+        ("claude.md/state", "instruction"),
+        ("SOUL.md", "instruction"),
+        ("gemini.MD", "instruction"),
+        ("Codex.md", "instruction"),
+        (".ChatGPT/state", "app"),
+        (".CLAUDE", "app"),
+        (".CoDeX/state", "app"),
+        (".OpenCode", "app"),
+        (".VsCode/state", "ide"),
+        (".idea", "ide"),
+        (".Cursor/state", "ide"),
+        (".WindSurf", "ide"),
+        (".GitHub/state", "vcs"),
+        (".GIT", "vcs"),
+    ],
+)
+def test_reserved_host_surface_state_components_are_rejected_before_mutation(
+    tmp_path: Path,
+    state_dir: str,
+    category: str,
+) -> None:
+    del category
+    workspace = tmp_path / "work"
+    workspace.mkdir()
+
+    code, stdout, stderr = _run(["--json", "init", "--workspace", str(workspace), "--state-dir", state_dir, "--apply"])
+
+    assert code == EX_SECURITY
+    assert stderr == ""
+    assert _payload(stdout)["failure_code"] == "unsafe_path"
+    assert _rel_tree(workspace) == []
+
+
+def test_default_canon_state_dir_is_not_a_reserved_host_surface(tmp_path: Path) -> None:
+    workspace = tmp_path / "work"
+    workspace.mkdir()
+
+    code, _stdout, stderr = _run(["init", "--workspace", str(workspace), "--apply"])
+
+    assert code == EX_OK
+    assert stderr == ""
+    assert (workspace / ".canon" / "config.json").exists()
+
+
 def test_reparse_workspace_or_state_dir_is_rejected_before_mutation(tmp_path: Path) -> None:
     workspace = tmp_path / "work"
     workspace.mkdir()
@@ -241,6 +297,140 @@ def test_workspace_swap_before_pinning_fails_without_outside_artifacts(
     assert _payload(stdout)["failure_code"] == "unsafe_path"
     assert attempted
     assert not (outside_workspace / ".canon").exists()
+
+
+def test_posix_config_preflight_rejects_fifo_before_open_without_blocking(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import canon.cli_init as cli_init
+
+    calls: list[str] = []
+    real_stat = cli_init.os.stat
+    real_open = cli_init.os.open
+    _force_posix(monkeypatch, cli_init)
+
+    def fake_stat(path: object, *args: object, **kwargs: object) -> os.stat_result:
+        if path == "config.json" and kwargs.get("dir_fd") == 99:
+            assert kwargs.get("follow_symlinks") is False
+            return os.stat_result((stat.S_IFIFO | 0o600, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+        return real_stat(path, *args, **kwargs)
+
+    def forbidden_open(*args: object, **kwargs: object) -> int:
+        if args and args[0] == "config.json":
+            calls.append("open")
+            raise AssertionError("FIFO config preflight must not open")
+        return real_open(*args, **kwargs)  # type: ignore[call-overload]
+
+    monkeypatch.setattr(cli_init.os, "stat", fake_stat)
+    monkeypatch.setattr(cli_init.os, "open", forbidden_open)
+
+    with pytest.raises(cli_init._InitFailure) as excinfo:
+        cli_init._posix_read_config(99)
+    assert excinfo.value.code == "conflict"
+    assert calls == []
+
+
+def test_posix_config_open_uses_nonblock_and_rechecks_regular_file_race(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import canon.cli_init as cli_init
+
+    flags_seen: list[int] = []
+    closed: list[int] = []
+    real_stat = cli_init.os.stat
+    real_close = cli_init.os.close
+    real_fstat = cli_init.os.fstat
+    _force_posix(monkeypatch, cli_init)
+    regular = os.stat_result((stat.S_IFREG | 0o600, 0, 0, 0, 0, 0, 3, 0, 0, 0))
+    fifo = os.stat_result((stat.S_IFIFO | 0o600, 0, 0, 0, 0, 0, 0, 0, 0, 0))
+
+    def fake_stat(path: object, *args: object, **kwargs: object) -> os.stat_result:
+        if path == "config.json" and kwargs.get("dir_fd") == 99:
+            assert kwargs.get("follow_symlinks") is False
+            return regular
+        return real_stat(path, *args, **kwargs)
+
+    monkeypatch.setattr(cli_init.os, "stat", fake_stat)
+
+    def fake_open(path: object, flags: int, *, dir_fd: int) -> int:
+        if path == "config.json" and dir_fd == 99:
+            flags_seen.append(flags)
+            return 123
+        raise AssertionError("unexpected open")
+
+    monkeypatch.setattr(cli_init.os, "open", fake_open)
+    monkeypatch.setattr(cli_init.os, "fstat", lambda fd: fifo if fd == 123 else real_fstat(fd))
+
+    def fake_close(fd: int) -> None:
+        if fd == 123:
+            closed.append(fd)
+            return
+        real_close(fd)
+
+    monkeypatch.setattr(cli_init.os, "close", fake_close)
+    monkeypatch.setattr(
+        cli_init.os,
+        "pread",
+        lambda fd, *a: (_ for _ in ()).throw(AssertionError("must not read FIFO")),
+        raising=False,
+    )
+
+    with pytest.raises(cli_init._InitFailure) as excinfo:
+        cli_init._posix_read_config(99)
+    assert excinfo.value.code == "conflict"
+    assert flags_seen and flags_seen[0] & cli_init.os.O_NONBLOCK
+    assert closed == [123]
+
+
+@pytest.mark.parametrize("failure", ["write", "fsync", "close"])
+def test_posix_temp_create_unlinks_relative_temp_on_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+) -> None:
+    import canon.cli_init as cli_init
+
+    closed: list[int] = []
+    unlinked: list[tuple[str, int]] = []
+    monkeypatch.setattr(cli_init.os, "urandom", lambda size: b"\x01" * size)
+    _force_posix(monkeypatch, cli_init)
+
+    def fake_open(path: object, flags: int, mode: int, *, dir_fd: int) -> int:
+        assert path == ".config.json.0101010101010101.tmp"
+        assert dir_fd == 99
+        return 123
+
+    monkeypatch.setattr(cli_init.os, "open", fake_open)
+
+    def fake_write_all(fd: int, data: bytes) -> None:
+        assert fd == 123
+        assert data == b"body\n"
+        if failure == "write":
+            raise OSError("synthetic write failure")
+
+    def fake_fsync(fd: int) -> None:
+        assert fd == 123
+        if failure == "fsync":
+            raise OSError("synthetic fsync failure")
+
+    def fake_close(fd: int) -> None:
+        assert fd == 123
+        closed.append(fd)
+        if failure == "close":
+            raise OSError("synthetic close failure")
+
+    def fake_unlink(name: str, *, dir_fd: int) -> None:
+        unlinked.append((name, dir_fd))
+
+    monkeypatch.setattr(cli_init, "_write_all", fake_write_all)
+    monkeypatch.setattr(cli_init.os, "fsync", fake_fsync)
+    monkeypatch.setattr(cli_init.os, "close", fake_close)
+    monkeypatch.setattr(cli_init.os, "unlink", fake_unlink)
+
+    with pytest.raises(OSError):
+        cli_init._create_posix_temp(99, b"body\n")
+
+    assert closed == [123]
+    assert unlinked == [(".config.json.0101010101010101.tmp", 99)]
 
 
 def test_io_failure_reports_sanitized_io_error_and_cleans_temp(
