@@ -63,14 +63,13 @@ def _publish_under_parent(root: _DirCap, parent: _DirCap, target_name: str, expe
 def _write_stage(root: _DirCap, parent: _DirCap, stage: _DirCap, expected: tuple[tuple[str, bytes], ...]) -> None:
     for name, data in expected:
         _verify_publish_caps(root, parent, stage); _write_file(stage, name, data)
-    _sync_dir(stage); _sync_dir(parent)
 
 def _verify_publish_caps(root: _DirCap, parent: _DirCap, stage: _DirCap) -> None:
     _verify_cap_path(root); _verify_cap_path(parent); _verify_cap_path(stage)
 
 def _open_root(path: Path, expected_key: tuple[int, int]) -> _DirCap:
     if not _is_safe_dir_path(path): raise PublishError("unsafe_path")
-    ref = _win_open_dir(path) if os.name == "nt" else _posix_open_dir(path)
+    ref = _win_open_dir(path)
     cap = _DirCap(path, ref, _handle_key(ref))
     try:
         if cap.key != expected_key: raise PublishError("unsafe_path")
@@ -91,7 +90,7 @@ def _open_parent(root: _DirCap, parent: Path) -> _DirCap:
 
 def _open_child_dir(parent: _DirCap, name: str, path: Path) -> _DirCap:
     try:
-        ref = _win_open_child(parent.ref, name) if os.name == "nt" else _posix_open_dir(name, parent.ref)
+        ref = _win_open_child(parent.ref, name)
         cap = _DirCap(path, ref, _handle_key(ref)); _verify_cap_path(cap); return cap
     except FileNotFoundError as exc:
         raise PublishError("unsafe_path") from exc
@@ -105,7 +104,7 @@ def _create_stage(parent: _DirCap) -> _DirCap:
     for _attempt in range(_TEMP_ATTEMPTS):
         name = f"{_STAGE_PREFIX}{os.urandom(8).hex()}.tmp"
         try:
-            ref = _win_create_stage(parent.ref, name) if os.name == "nt" else _posix_create_stage(parent.ref, name)
+            ref = _win_create_stage(parent.ref, name)
             stage = _DirCap(parent.path / name, ref, _handle_key(ref)); _verify_cap_path(stage); return stage
         except FileExistsError:
             continue
@@ -119,24 +118,9 @@ def _cleanup_bad_stage(parent: _DirCap, stage: _DirCap) -> None:
     try: _cleanup_stage_files(stage, ()); _close_dir(stage); _cleanup_stage_entry(parent, stage.path.name)
     except OSError: pass
 
-def _posix_create_stage(parent_fd: int, name: str) -> int:
-    os.mkdir(name, 0o700, dir_fd=parent_fd)
-    try: return _posix_open_dir(name, parent_fd)
-    except Exception:
-        _posix_unlink_or_rmdir(parent_fd, name); raise
-
 def _write_file(stage: _DirCap, name: str, data: bytes) -> None:
     _check_child_name(name)
-    if os.name == "nt": _win_write_file(stage, name, data)
-    else: _posix_write_file(stage, name, data)
-
-def _posix_write_file(stage: _DirCap, name: str, data: bytes) -> None:
-    fd = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=stage.ref)
-    try:
-        if not stat.S_ISREG(os.fstat(fd).st_mode): raise PublishError("unsafe_path")
-        _verify_cap_path(stage); _write_all(fd, data); os.fsync(fd)
-    finally:
-        os.close(fd)
+    _win_write_file(stage, name, data)
 
 def _win_write_file(stage: _DirCap, name: str, data: bytes) -> None:
     access = _win.GENERIC_READ | _win.GENERIC_WRITE | _win.SYNCHRONIZE
@@ -150,19 +134,12 @@ def _win_write_file(stage: _DirCap, name: str, data: bytes) -> None:
 
 def _rename_stage(parent: _DirCap, stage: _DirCap, target_name: str) -> None:
     _check_child_name(target_name)
-    if os.name == "nt": _win_rename_by_handle(stage.ref, parent.path / target_name)
-    else:
-        os.rename(stage.path.name, target_name, src_dir_fd=parent.ref, dst_dir_fd=parent.ref); _sync_dir(parent)
+    _win_rename_by_handle(stage.ref, parent.path / target_name)
 
 def _ensure_target_absent(parent: _DirCap, name: str) -> None:
     _check_child_name(name)
-    if os.name == "nt":
-        if not _exists_or_link(parent.path / name): return
-        if is_reparse_point(parent.path / name): raise PublishError("unsafe_path")
-    else:
-        try: info = os.stat(name, dir_fd=parent.ref, follow_symlinks=False)
-        except FileNotFoundError: return
-        if stat.S_ISLNK(info.st_mode): raise PublishError("unsafe_path")
+    if not _exists_or_link(parent.path / name): return
+    if is_reparse_point(parent.path / name): raise PublishError("unsafe_path")
     raise PublishError("conflict")
 
 def _verify_cap_path(cap: _DirCap) -> None:
@@ -179,10 +156,8 @@ def _path_key(path: Path) -> tuple[int, int]:
     except OSError as exc: raise PublishError("unsafe_path") from exc
 
 def _handle_key(ref: int) -> tuple[int, int]:
-    if os.name == "nt":
-        info = _win.handle_info(ref)
-        return (int(info.dwVolumeSerialNumber), (int(info.nFileIndexHigh) << 32) | int(info.nFileIndexLow))
-    return _stat_key(os.fstat(ref))
+    info = _win.handle_info(ref)
+    return (int(info.dwVolumeSerialNumber), (int(info.nFileIndexHigh) << 32) | int(info.nFileIndexLow))
 
 def _win_create_stage(parent_ref: int, name: str) -> int:
     access = _win.GENERIC_READ | _win.DELETE | _win.SYNCHRONIZE
@@ -222,46 +197,18 @@ def _load_win_rename_api() -> None:
     _FlushFileBuffers.argtypes = [wintypes.HANDLE]; _FlushFileBuffers.restype = wintypes.BOOL
 
 def _require_safe_backend() -> None:
-    if os.name == "nt":
-        if not _win.supported(): raise PublishError("unsafe_path")
-    elif not _posix_supported():
-        raise PublishError("unsafe_path")
-
-def _posix_supported() -> bool:
-    required = (os.open, os.mkdir, os.rename, os.unlink, os.rmdir, os.stat)
-    return os.name != "nt" and all(fn in os.supports_dir_fd for fn in required) and all(hasattr(os, n) for n in ("O_DIRECTORY", "O_NOFOLLOW"))
-
-def _posix_open_dir(path: str | Path, dir_fd: int | None = None) -> int:
-    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
-    return os.open(path, flags) if dir_fd is None else os.open(path, flags, dir_fd=dir_fd)
-
-def _write_all(fd: int, data: bytes) -> None:
-    offset = 0
-    while offset < len(data):
-        written = os.write(fd, data[offset:])
-        if written <= 0: raise OSError(errno.EIO, "compile write made no progress")
-        offset += written
-
-def _sync_dir(cap: _DirCap) -> None:
-    if os.name != "nt": os.fsync(cap.ref)
+    if os.name != "nt" or not _win.supported(): raise PublishError("unsafe_path")
 
 def _cleanup_stage_files(stage: _DirCap, names: tuple[str, ...]) -> None:
     for name in names:
         try:
-            if os.name == "nt": (stage.path / name).unlink(missing_ok=True)
-            else: os.unlink(name, dir_fd=stage.ref)
+            (stage.path / name).unlink(missing_ok=True)
         except OSError: pass
 
 def _cleanup_stage_entry(parent: _DirCap, stage_name: str) -> None:
     try:
-        if os.name == "nt": (parent.path / stage_name).rmdir()
-        else: _posix_unlink_or_rmdir(parent.ref, stage_name)
+        (parent.path / stage_name).rmdir()
     except OSError: pass
-
-def _posix_unlink_or_rmdir(parent_fd: int, name: str) -> None:
-    try: os.rmdir(name, dir_fd=parent_fd)
-    except NotADirectoryError: os.unlink(name, dir_fd=parent_fd)
-    except FileNotFoundError: return
 
 def _check_child_name(name: str) -> None:
     if type(name) is not str or name in ("", ".", "..") or "/" in name or "\\" in name or "\0" in name: raise PublishError("unsafe_path")
@@ -274,9 +221,9 @@ def _close_dir(cap: _DirCap) -> None:
     _close_ref(cap.ref)
 
 def _close_ref(ref: int) -> None:
-    _win.close_handle(ref) if os.name == "nt" else os.close(ref)
+    _win.close_handle(ref)
 
 def _stat_key(info: os.stat_result) -> tuple[int, int]:
-    return (info.st_dev & 0xFFFFFFFF, info.st_ino) if os.name == "nt" else (info.st_dev, info.st_ino)
+    return (info.st_dev & 0xFFFFFFFF, info.st_ino)
 
 __all__ = ["PublishError", "publish_new_bundle"]
