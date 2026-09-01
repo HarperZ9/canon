@@ -85,20 +85,15 @@ def run_cli(
     tokens = _normalize_global_options(tokens)
 
     json_requested = _json_requested(tokens)
-    parser_stderr = io.StringIO() if json_requested else stderr
+    parse_color = color_enabled(environ=environ, no_color="--no-color" in tokens, is_tty=_is_tty(stdout))
+    parser_stderr = io.StringIO()
     parser = _build_parser(stdout=stdout, stderr=parser_stderr)
     try:
         parsed = parser.parse_args(tokens)
     except _ParserExit as error:
-        if error.status != EX_OK and json_requested:
-            result = make_result(
-                ok=False,
-                command="canon",
-                failure_code="invalid_args",
-                message="invalid arguments",
-            )
-            return write_result(result, stdout=stdout, stderr=stderr, json_output=True, color=False)
-        return error.status
+        if error.status == EX_OK:
+            return error.status
+        return _parse_error(stdout, stderr, json_requested=json_requested, color=parse_color)
 
     return _run_parsed(parsed, stdin=stdin, stdout=stdout, stderr=stderr, environ=environ)
 
@@ -264,6 +259,11 @@ def _is_tty(stream: TextIO) -> bool:
 
 def _json_requested(tokens: list[str]) -> bool:
     return "--json" in tokens
+
+
+def _parse_error(stdout: TextIO, stderr: TextIO, *, json_requested: bool, color: bool) -> int:
+    result = make_result(ok=False, command="canon", failure_code="invalid_args", message="invalid arguments")
+    return write_result(result, stdout=stdout, stderr=stderr, json_output=json_requested, color=color)
 
 
 __all__ = ["COMMANDS", "build_parser", "run_cli", "main"]

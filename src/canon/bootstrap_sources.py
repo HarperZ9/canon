@@ -180,11 +180,15 @@ def _stdin_snapshot(value: object) -> SourceBytes | None:
 def _path_text(value: object) -> str:
     if type(value) is not str or value == "" or _has_control(value):
         raise DoctorConfigError("invalid doctor config")
+    _scan_config_text(value)
     return value
 
 
 def _adapter_id(value: object) -> str:
-    if type(value) is not str or _ADAPTER_ID_RE.fullmatch(value) is None:
+    if type(value) is not str or _has_control(value):
+        raise DoctorConfigError("invalid doctor config")
+    _scan_config_text(value)
+    if _ADAPTER_ID_RE.fullmatch(value) is None:
         raise DoctorConfigError("invalid doctor config")
     return value
 
@@ -192,7 +196,10 @@ def _adapter_id(value: object) -> str:
 def _sha_or_none(value: object) -> str | None:
     if value is None:
         return None
-    if type(value) is not str or not is_sha256_ref(value):
+    if type(value) is not str or _has_control(value):
+        raise DoctorConfigError("invalid doctor config")
+    _scan_config_text(value)
+    if not is_sha256_ref(value):
         raise DoctorConfigError("invalid doctor config")
     return value
 
@@ -201,7 +208,6 @@ def _bool(value: object) -> bool:
     if type(value) is not bool:
         raise DoctorConfigError("invalid doctor config")
     return value
-
 
 def _check_finding_fields(finding: DoctorFinding) -> None:
     _safe_public_text(finding.code, "doctor finding code", "invalid doctor finding")
@@ -266,31 +272,27 @@ def _scan_public_value(value: object, message: str) -> None:
 def _safe_public_text(value: object, name: str, message: str) -> str:
     try:
         text = safe_text(value, name)
-    except TypeError:
+        findings = scan_text(text, source_id="doctor-public")
+    except Exception:
         raise TypeError(message) from None
-    if scan_text(text, source_id="doctor-public"):
+    if findings:
         raise TypeError(message)
     return text
 
 
 def _scan_config_text(value: str) -> None:
-    if scan_text(value, source_id="doctor-config"):
+    try:
+        findings = scan_text(value, source_id="doctor-config")
+    except Exception:
+        raise DoctorConfigError("invalid doctor config") from None
+    if findings:
         raise DoctorConfigError("invalid doctor config")
 
-
-def _finding_priority(finding: DoctorFinding) -> int:
-    return 100 if finding.severity != "blocker" else DOCTOR_FAILURE_PRIORITY[finding.failure_code]
-
-
 def _check_finding_order(findings: tuple[DoctorFinding, ...]) -> None:
-    priorities = [_finding_priority(finding) for finding in findings]
+    priorities = [100 if finding.severity != "blocker" else DOCTOR_FAILURE_PRIORITY[finding.failure_code] for finding in findings]
     if priorities != sorted(priorities):
         raise TypeError("invalid doctor report")
 
-
-__all__ = (
-    "DoctorConfig", "DoctorConfigError", "DoctorFinding", "DoctorReport",
-    "DOCTOR_FAILURE_PRIORITY", "JsonLine", "SourceParseError",
-    "check_doctor_finding", "check_doctor_report", "snapshot_doctor_config",
-    "strict_jsonl_objects", "utf8_text",
-)
+__all__ = ("DoctorConfig", "DoctorConfigError", "DoctorFinding", "DoctorReport", "DOCTOR_FAILURE_PRIORITY",
+           "JsonLine", "SourceParseError", "check_doctor_finding", "check_doctor_report",
+           "snapshot_doctor_config", "strict_jsonl_objects", "utf8_text")

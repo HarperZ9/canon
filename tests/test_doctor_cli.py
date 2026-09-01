@@ -251,7 +251,7 @@ def test_source_path_failures_are_sanitized_and_classified(tmp_path: Path) -> No
     workspace = tmp_path / "work"
     workspace.mkdir()
     _copy_inputs(workspace)
-    outside = tmp_path / _canary()
+    outside = tmp_path / "outside-records.jsonl"
     outside.write_text("[]\n", encoding="utf-8")
 
     missing = _run(["--json", *_doctor_args(workspace), "--records", "missing.jsonl"])
@@ -357,6 +357,40 @@ def test_doctor_config_repr_hides_paths_and_rejects_stdin_secret_metadata() -> N
             stdin_source=SourceBytes(f"stdin-{_canary()}", b""),
         )
     assert _canary() not in str(excinfo.value)
+
+
+@pytest.mark.parametrize("field", ("workspace", "records", "atoms"))
+def test_doctor_config_secret_text_is_rejected_before_snapshot_or_json(field: str) -> None:
+    import canon.doctor as doctor
+
+    canary = _canary()
+    clean = {"workspace": ".", "target": "codex-cli", "records": "records.jsonl", "atoms": "atoms.jsonl"}
+    config = doctor.DoctorConfig(**clean)
+    assert doctor.snapshot_doctor_config(config)[field] == clean[field]
+
+    dirty = dict(clean)
+    dirty[field] = f"safe-prefix-{canary}"
+    with pytest.raises(doctor.DoctorConfigError) as constructed:
+        doctor.DoctorConfig(**dirty)
+    assert str(constructed.value) == "invalid doctor config"
+    assert canary not in str(constructed.value) + repr(constructed.value)
+
+    object.__setattr__(config, field, f"tampered-{canary}")
+    with pytest.raises(doctor.DoctorConfigError) as snapshotted:
+        doctor.snapshot_doctor_config(config)
+    assert str(snapshotted.value) == "invalid doctor config"
+    assert canary not in str(snapshotted.value) + repr(snapshotted.value)
+
+    argv = ["--json", "doctor", "--target", "codex-cli", "--workspace", "."]
+    if field == "workspace":
+        argv[5] = f"cli-{canary}"
+    else:
+        argv.extend([f"--{field}", f"cli-{canary}"])
+    code, stdout, stderr = _run(argv)
+
+    assert code == EX_USAGE
+    assert _json(stdout)["message"] == "invalid doctor config"
+    assert canary not in stdout + stderr
 
 
 def test_doctor_public_types_reject_secret_leaves_without_json_or_exception_leak() -> None:

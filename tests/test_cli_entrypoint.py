@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 import os
 import subprocess
 import sys
@@ -35,6 +36,16 @@ BOOTSTRAP_ARGS = (
     "--run-id",
     "run-cli",
 )
+SECRET_FIXTURE = Path(__file__).parent / "fixtures" / "bootstrap" / "secret_atoms.jsonl"
+
+
+class _TtyStringIO(io.StringIO):
+    def isatty(self) -> bool:
+        return True
+
+
+def _canary() -> str:
+    return json.loads(SECRET_FIXTURE.read_text(encoding="utf-8"))["value"]["summary"]
 
 
 def test_run_cli_help_uses_injected_stdout_and_lists_parser_surface(capsys: pytest.CaptureFixture[str]) -> None:
@@ -68,8 +79,8 @@ def test_unknown_command_returns_usage_without_raising_or_using_global_streams(
 
     assert stdout.getvalue() == ""
     diagnostic = stderr.getvalue()
-    assert "usage:" in diagnostic
-    assert "invalid choice: 'not-a-command'" in diagnostic
+    assert diagnostic == "FAIL canon: invalid arguments\n"
+    assert "not-a-command" not in diagnostic
     assert capsys.readouterr() == ("", "")
 
 
@@ -97,8 +108,53 @@ def test_subcommand_parse_errors_use_injected_stderr(capsys: pytest.CaptureFixtu
     assert run_cli(["doctor", "--target", "codex-cli", "--bad"], stdout=stdout, stderr=stderr, environ={}) == EX_USAGE
 
     assert stdout.getvalue() == ""
-    assert "unrecognized arguments: --bad" in stderr.getvalue()
+    assert stderr.getvalue() == "FAIL canon: invalid arguments\n"
+    assert "--bad" not in stderr.getvalue()
     assert capsys.readouterr() == ("", "")
+
+
+def test_human_parse_errors_suppress_secret_tokens_for_top_level_subcommand_and_color() -> None:
+    from canon.cli import run_cli
+    from canon.exit_codes import EX_USAGE
+
+    canary = _canary()
+    cases = (
+        ([canary], io.StringIO(), "FAIL canon: invalid arguments\n"),
+        (["doctor", "--target", "codex-cli", f"--{canary}"], io.StringIO(), "FAIL canon: invalid arguments\n"),
+        (["doctor", "--target", "codex-cli", f"--{canary}"], _TtyStringIO(), "\x1b[31mFAIL\x1b[0m canon: invalid arguments\n"),
+    )
+
+    for argv, stdout, expected_stderr in cases:
+        stderr = io.StringIO()
+        assert run_cli(argv, stdout=stdout, stderr=stderr, environ={}) == EX_USAGE
+        assert stdout.getvalue() == ""
+        assert stderr.getvalue() == expected_stderr
+        assert canary not in stdout.getvalue() + stderr.getvalue()
+
+
+def test_json_requested_after_subcommand_keeps_canonical_sanitized_parse_error() -> None:
+    from canon.canonical_json import canonical_json_text
+    from canon.cli import run_cli
+    from canon.exit_codes import EX_USAGE
+
+    canary = _canary()
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+
+    exit_code = run_cli(
+        ["doctor", "--target", "codex-cli", f"--{canary}", "--json"],
+        stdout=stdout,
+        stderr=stderr,
+        environ={},
+    )
+
+    payload = json.loads(stdout.getvalue())
+    assert exit_code == EX_USAGE
+    assert stdout.getvalue() == canonical_json_text(payload)
+    assert payload == {"command": "canon", "data": None, "exit_code": 2,
+                       "failure_code": "invalid_args", "message": "invalid arguments", "ok": False}
+    assert stderr.getvalue() == ""
+    assert canary not in stdout.getvalue() + stderr.getvalue()
 
 
 def test_placeholder_commands_emit_accessible_result_to_injected_stdout() -> None:
@@ -255,3 +311,25 @@ def test_python_module_json_parse_error_suppresses_parser_stderr() -> None:
     )
     assert b"not-a-command" not in result.stdout
     assert result.stderr == b""
+
+
+def test_python_module_human_parse_error_suppresses_secret_parser_stderr() -> None:
+    env = dict(os.environ)
+    src_path = str(Path.cwd() / "src")
+    env["PYTHONPATH"] = src_path + os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else src_path
+    canary = _canary()
+
+    result = subprocess.run(
+        [sys.executable, "-m", "canon", "doctor", "--target", "codex-cli", f"--{canary}"],
+        cwd=Path.cwd(),
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert result.stderr == "FAIL canon: invalid arguments\n"
+    assert canary not in result.stdout + result.stderr
