@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import builtins
 import socket
+from collections.abc import Mapping
 from pathlib import Path
+from types import MappingProxyType
 
 import pytest
 
@@ -35,6 +37,70 @@ def _success_report():
 
 def _report_serializers(report: object):
     return (report.to_dict, report.to_result_data)  # type: ignore[attr-defined]
+
+
+class _Canary:
+    token = "leaked-secret-token"
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def fail(self, name: str) -> object:
+        self.calls.append(name)
+        raise RuntimeError(self.token)
+
+    def repr_text(self, name: str) -> str:
+        self.calls.append(name)
+        return self.token
+
+
+class _HostileMapping(Mapping[str, object]):
+    def __init__(self, canary: _Canary) -> None:
+        self._canary = canary
+
+    def __getitem__(self, key: str) -> object:
+        return self._canary.fail("__getitem__")
+
+    def __iter__(self):
+        return self._canary.fail("__iter__")
+
+    def __len__(self) -> int:
+        self._canary.fail("__len__")
+        return 0
+
+    def items(self):
+        return self._canary.fail("items")
+
+    def __repr__(self) -> str:
+        return self._canary.repr_text("__repr__")
+
+
+class _HostileList(list):
+    def __init__(self, canary: _Canary) -> None:
+        super().__init__(["bad"])
+        self._canary = canary
+
+    def __getitem__(self, index: int) -> object:
+        return self._canary.fail("__getitem__")
+
+    def __iter__(self):
+        return self._canary.fail("__iter__")
+
+    def __len__(self) -> int:
+        self._canary.fail("__len__")
+        return 1
+
+    def __repr__(self) -> str:
+        return self._canary.repr_text("__repr__")
+
+
+def _assert_sanitized_type_error(callable_object: object, canary: _Canary, text: str) -> None:
+    with pytest.raises(TypeError) as excinfo:
+        callable_object()  # type: ignore[operator]
+    message = str(excinfo.value)
+    assert text in message
+    assert _Canary.token not in message
+    assert canary.calls == []
 
 
 def test_bootstrap_states_are_exact_and_ordered() -> None:
@@ -338,6 +404,87 @@ def test_report_serialization_revalidates_data_tamper_without_repr_leak() -> Non
         message = str(excinfo.value)
         assert "invalid bootstrap report" in message
         assert "leaked-secret-token" not in message
+
+
+def test_event_serialization_rejects_hostile_top_mapping_without_dispatch() -> None:
+    from canon.bootstrap import BootstrapEvent
+
+    for hostile in (_HostileMapping, lambda canary: MappingProxyType(_HostileMapping(canary))):
+        canary = _Canary()
+        event = BootstrapEvent("detect_entry", True, "ok", "detected")
+        object.__setattr__(event, "data", hostile(canary))
+
+        _assert_sanitized_type_error(event.to_dict, canary, "invalid bootstrap event")
+
+
+def test_event_serialization_rejects_hostile_nested_mapping_without_dispatch() -> None:
+    from canon.bootstrap import BootstrapEvent
+
+    for hostile in (_HostileMapping, lambda canary: MappingProxyType(_HostileMapping(canary))):
+        canary = _Canary()
+        event = BootstrapEvent("detect_entry", True, "ok", "detected")
+        object.__setattr__(event, "data", {"bad": hostile(canary)})
+
+        _assert_sanitized_type_error(event.to_dict, canary, "invalid bootstrap event")
+
+
+def test_report_serialization_rejects_hostile_top_mapping_without_dispatch() -> None:
+    for serialize_name in ("to_dict", "to_result_data"):
+        for hostile in (_HostileMapping, lambda canary: MappingProxyType(_HostileMapping(canary))):
+            canary = _Canary()
+            report = _success_report()
+            object.__setattr__(report, "data", hostile(canary))
+
+            _assert_sanitized_type_error(getattr(report, serialize_name), canary, "invalid bootstrap report")
+
+
+def test_report_serialization_rejects_hostile_nested_mapping_without_dispatch() -> None:
+    for serialize_name in ("to_dict", "to_result_data"):
+        for hostile in (_HostileMapping, lambda canary: MappingProxyType(_HostileMapping(canary))):
+            canary = _Canary()
+            report = _success_report()
+            object.__setattr__(report, "data", {"bad": hostile(canary)})
+
+            _assert_sanitized_type_error(getattr(report, serialize_name), canary, "invalid bootstrap report")
+
+
+def test_report_serialization_rejects_hostile_nested_event_data_without_dispatch() -> None:
+    for serialize_name in ("to_dict", "to_result_data"):
+        for hostile in (_HostileMapping, lambda canary: MappingProxyType(_HostileMapping(canary))):
+            canary = _Canary()
+            report = _success_report()
+            object.__setattr__(report.events[0], "data", {"bad": hostile(canary)})
+
+            _assert_sanitized_type_error(getattr(report, serialize_name), canary, "invalid bootstrap events")
+
+
+def test_serialization_rejects_hostile_sequence_subclasses_without_dispatch() -> None:
+    from canon.bootstrap import BootstrapEvent
+
+    canary = _Canary()
+    event = BootstrapEvent("detect_entry", True, "ok", "detected")
+    object.__setattr__(event, "data", {"bad": _HostileList(canary)})
+    _assert_sanitized_type_error(event.to_dict, canary, "invalid bootstrap event")
+
+    canary = _Canary()
+    report = _success_report()
+    object.__setattr__(report, "data", {"bad": _HostileList(canary)})
+    _assert_sanitized_type_error(report.to_dict, canary, "invalid bootstrap report")
+
+
+def test_serialization_preserves_stored_mappingproxy_and_direct_valid_shapes() -> None:
+    from canon.bootstrap import BootstrapEvent
+
+    event = BootstrapEvent("detect_entry", True, "ok", "detected", {"nested": {"ids": ["a", 1, 1.5, None, True]}})
+    assert type(event.data) is MappingProxyType
+    assert event.to_dict()["data"] == {"nested": {"ids": ["a", 1, 1.5, None, True]}}
+
+    object.__setattr__(event, "data", {"nested": ("a", {"ok": True})})
+    assert event.to_dict()["data"] == {"nested": ["a", {"ok": True}]}
+
+    report = _success_report()
+    object.__setattr__(report, "data", {"nested": ("a", {"ok": True})})
+    assert report.to_result_data()["nested"] == ["a", {"ok": True}]
 
 
 def test_event_order_is_always_terminal_prefix() -> None:

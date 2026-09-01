@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from .adapter import assert_requested_tier_allowed, descriptor_for
 from .bootstrap_validation import (
     BootstrapConfigError,
+    require_serializable_data,
     require_bool,
     safe_text,
     snapshot_config_values,
@@ -229,7 +230,7 @@ def _require_event_serializable(event: BootstrapEvent) -> None:
         safe_text(event.failure_code, "event failure_code")
         safe_text(event.message, "event message")
         _require_event_invariant(event)
-        _require_serializable_data(event.data, "invalid bootstrap event")
+        require_serializable_data(event.data, "invalid bootstrap event")
     except TypeError:
         raise TypeError("invalid bootstrap event") from None
 
@@ -250,7 +251,7 @@ def _require_report_serializable(report: BootstrapReport) -> None:
     try:
         _require_report_invariant(report)
         _require_report_exit_code(report)
-        _require_serializable_data(report.data, "invalid bootstrap report")
+        require_serializable_data(report.data, "invalid bootstrap report")
     except TypeError:
         raise TypeError("invalid bootstrap report") from None
 
@@ -283,13 +284,6 @@ def _require_report_exit_code(report: BootstrapReport) -> None:
     expected = exit_code_for(report.failure_code)
     if type(report.exit_code) is not int or isinstance(report.exit_code, bool) or report.exit_code != expected:
         raise TypeError("invalid bootstrap report")
-
-
-def _require_serializable_data(data: Mapping[str, object] | None, message: str) -> None:
-    try:
-        snapshot_data(thaw_mapping_or_none(data))
-    except TypeError:
-        raise TypeError(message) from None
 
 
 def _event_states(events: tuple[BootstrapEvent, ...]) -> tuple[str, ...]:

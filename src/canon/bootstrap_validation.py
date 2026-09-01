@@ -9,6 +9,7 @@ from .adapter import INTEGRATION_TIERS
 
 _ADAPTER_ID_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 _TOKEN_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+_SNAPSHOT_PROXIES: list[Mapping[str, object]] = []
 
 
 class BootstrapConfigError(ValueError):
@@ -58,9 +59,17 @@ def snapshot_response(value: object) -> object:
 
 
 def thaw_mapping_or_none(data: Mapping[str, object] | None) -> dict[str, object] | None:
+    require_serializable_data(data, "invalid bootstrap data")
     if data is None:
         return None
-    return {key: _thaw_value(value) for key, value in data.items()}
+    return _thaw_mapping(data)
+
+
+def require_serializable_data(data: object, message: str) -> None:
+    try:
+        _require_serializable_data_shape(data)
+    except TypeError:
+        raise TypeError(message) from None
 
 
 def require_bool(value: object, name: str) -> None:
@@ -76,9 +85,11 @@ def safe_text(value: object, name: str) -> str:
 
 def _snapshot_mapping(data: Mapping[object, object], error: type[Exception]) -> Mapping[str, object]:
     items: dict[str, object] = {}
-    for key, value in tuple(data.items()):
+    for key, value in data.items():
         items[_safe_key(key, error)] = _snapshot_value(value, error)
-    return MappingProxyType(items)
+    proxy = MappingProxyType(items)
+    _SNAPSHOT_PROXIES.append(proxy)
+    return proxy
 
 
 def _snapshot_value(value: object, error: type[Exception]) -> object:
@@ -96,11 +107,48 @@ def _snapshot_value(value: object, error: type[Exception]) -> object:
 
 
 def _thaw_value(value: object) -> object:
-    if isinstance(value, Mapping):
-        return {key: _thaw_value(item) for key, item in value.items()}
+    if type(value) is dict or _is_snapshot_proxy(value):
+        return _thaw_mapping(value)
     if type(value) in (list, tuple):
         return [_thaw_value(item) for item in value]
     return value
+
+
+def _thaw_mapping(data: object) -> dict[str, object]:
+    return {key: _thaw_value(item) for key, item in data.items()}  # type: ignore[attr-defined]
+
+
+def _require_serializable_data_shape(data: object) -> None:
+    if data is None:
+        return
+    _require_serializable_mapping(data)
+
+
+def _require_serializable_mapping(data: object) -> None:
+    if type(data) is not dict and not _is_snapshot_proxy(data):
+        raise TypeError("invalid bootstrap data")
+    for key, value in data.items():  # type: ignore[attr-defined]
+        _safe_key(key, TypeError)
+        _require_serializable_value(value)
+
+
+def _require_serializable_value(value: object) -> None:
+    if value is None or type(value) in (str, bool, int):
+        return
+    if type(value) is float and math.isfinite(value):
+        return
+    if type(value) is dict or _is_snapshot_proxy(value):
+        _require_serializable_mapping(value)
+        return
+    if type(value) in (list, tuple):
+        for item in value:
+            _require_serializable_value(item)
+        return
+    raise TypeError("invalid bootstrap data")
+
+
+def _is_snapshot_proxy(value: object) -> bool:
+    return type(value) is MappingProxyType and any(value is proxy for proxy in _SNAPSHOT_PROXIES)
 
 
 def _path_text(value: object) -> str:
