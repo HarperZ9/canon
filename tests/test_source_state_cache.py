@@ -34,8 +34,15 @@ def _entry_path(root: Path, key: str) -> Path:
 def _write_entry(root: Path, key: str, body: dict[str, object]) -> Path:
     path = _entry_path(root, key)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(canonical_json_text(body), encoding="utf-8")
+    path.write_bytes(canonical_json_text(body).encode("utf-8"))
     return path
+
+
+def _write_current(root: Path, key: str) -> None:
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "current.json").write_bytes(
+        canonical_json_text({"cache_key": key}).encode("utf-8"),
+    )
 
 
 def _key_kwargs(**overrides: object) -> dict[str, object]:
@@ -292,6 +299,178 @@ def test_get_rejects_symlink_cache_entry_before_read(tmp_path: Path) -> None:
 
     with pytest.raises(SourceStateCacheError, match="unsafe-cache-path"):
         SourceStateCache(root).get(key)
+
+
+def test_get_uses_pinned_root_when_ancestor_swapped_after_validation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parent = tmp_path / "anchor"
+    root = parent / "cache"
+    outside_parent = tmp_path / "outside-anchor"
+    outside_root = outside_parent / "cache"
+    displaced = tmp_path / "displaced-anchor"
+    key = _cache_key("5")
+    target = _write_entry(root, key, {"inside": True}).resolve()
+    _write_entry(outside_root, key, {"outside": True})
+    real_regular = source_state_cache._regular_file_or_missing
+    attempted = False
+
+    def swap_after_validation(path: Path, *, role: str) -> bool:
+        nonlocal attempted
+        exists = real_regular(path, role=role)
+        if path == target and role == "cache-entry" and not attempted:
+            attempted = True
+            _swap_dir_to_symlink(parent, outside_parent, displaced)
+        return exists
+
+    monkeypatch.setattr(
+        source_state_cache,
+        "_regular_file_or_missing",
+        swap_after_validation,
+    )
+
+    assert SourceStateCache(root).get(key) == {"inside": True}
+    assert attempted
+
+
+def test_current_uses_pinned_root_when_ancestor_swapped_after_validation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parent = tmp_path / "anchor"
+    root = parent / "cache"
+    outside_parent = tmp_path / "outside-anchor"
+    outside_root = outside_parent / "cache"
+    displaced = tmp_path / "displaced-anchor"
+    first = _cache_key("6")
+    second = _cache_key("7")
+    current = root / "current.json"
+    _write_entry(root, first, {"version": 1})
+    _write_current(root, first)
+    _write_entry(outside_root, second, {"version": 2})
+    _write_current(outside_root, second)
+    real_regular = source_state_cache._regular_file_or_missing
+    attempted = False
+
+    def swap_after_validation(path: Path, *, role: str) -> bool:
+        nonlocal attempted
+        exists = real_regular(path, role=role)
+        if path == current.resolve() and role == "current-pointer" and not attempted:
+            attempted = True
+            _swap_dir_to_symlink(parent, outside_parent, displaced)
+        return exists
+
+    monkeypatch.setattr(
+        source_state_cache,
+        "_regular_file_or_missing",
+        swap_after_validation,
+    )
+
+    assert SourceStateCache(root).current() == {"version": 1}
+    assert attempted
+
+
+def test_put_uses_pinned_root_when_ancestor_swapped_after_path_validation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parent = tmp_path / "anchor"
+    root = parent / "cache"
+    outside_parent = tmp_path / "outside-anchor"
+    outside_root = outside_parent / "cache"
+    displaced = tmp_path / "displaced-anchor"
+    outside_root.mkdir(parents=True)
+    key = _cache_key("8")
+    real_entry_path = SourceStateCache._entry_path
+    attempted = False
+
+    def swap_after_path(self: SourceStateCache, digest: str) -> Path:
+        nonlocal attempted
+        path = real_entry_path(self, digest)
+        if not attempted:
+            attempted = True
+            _swap_dir_to_symlink(parent, outside_parent, displaced)
+        return path
+
+    monkeypatch.setattr(SourceStateCache, "_entry_path", swap_after_path)
+
+    SourceStateCache(root).put(key, {"version": 1})
+    assert attempted
+    assert not _entry_path(outside_root, key).exists()
+    assert not (outside_root / "current.json").exists()
+    local_roots = (root, displaced / "cache")
+    assert any(_entry_path(candidate, key).exists() for candidate in local_roots)
+
+
+def test_root_identity_mismatch_fails_closed_before_authoritative_read(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    parent = tmp_path / "anchor"
+    root = parent / "cache"
+    outside_parent = tmp_path / "outside-anchor"
+    outside_root = outside_parent / "cache"
+    displaced = tmp_path / "displaced-anchor"
+    key = _cache_key("9")
+    _write_entry(root, key, {"inside": True})
+    _write_entry(outside_root, key, {"outside": True})
+    real_lstat = Path.lstat
+    attempted = False
+
+    def swap_after_root_snapshot(path: Path) -> object:
+        nonlocal attempted
+        info = real_lstat(path)
+        if path == root and not attempted:
+            attempted = True
+            _swap_dir_to_symlink(parent, outside_parent, displaced)
+        return info
+
+    monkeypatch.setattr(Path, "lstat", swap_after_root_snapshot)
+
+    with pytest.raises(SourceStateCacheError, match="unsafe-cache-path"):
+        SourceStateCache(root).get(key)
+    assert attempted
+
+
+def test_windows_root_identity_mismatch_closes_open_handle(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    if source_state_cache.os.name != "nt":
+        pytest.skip("Windows handle cleanup probe")
+    parent = tmp_path / "anchor"
+    root = parent / "cache"
+    outside_parent = tmp_path / "outside-anchor"
+    outside_root = outside_parent / "cache"
+    displaced = tmp_path / "displaced-anchor"
+    key = _cache_key("a")
+    _write_entry(root, key, {"inside": True})
+    _write_entry(outside_root, key, {"outside": True})
+    real_lstat = Path.lstat
+    real_close = source_state_cache._win.close_handle
+    attempted = False
+    closed: list[int] = []
+
+    def swap_after_root_snapshot(path: Path) -> object:
+        nonlocal attempted
+        info = real_lstat(path)
+        if path == root and not attempted:
+            attempted = True
+            _swap_dir_to_symlink(parent, outside_parent, displaced)
+        return info
+
+    def record_close(handle: int) -> None:
+        closed.append(handle)
+        real_close(handle)
+
+    monkeypatch.setattr(Path, "lstat", swap_after_root_snapshot)
+    monkeypatch.setattr(source_state_cache._win, "close_handle", record_close)
+
+    with pytest.raises(SourceStateCacheError, match="unsafe-cache-path"):
+        SourceStateCache(root).get(key)
+    assert attempted
+    assert closed
 
 
 def test_get_rejects_entry_swapped_to_symlink_after_validation(
