@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import stat
 import zipfile
 from pathlib import Path
@@ -220,6 +221,45 @@ def test_zip_preflight_validates_limits_before_opening_archive(
 
     with pytest.raises(CanonpackError, match="invalid-limit"):
         preflight_zip(tmp_path / "unused.canonpack", limits=True)  # type: ignore[arg-type]
+
+
+def test_zip_preflight_rejects_ads_archive_path_before_stat_or_open(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail_init(*args: object, **kwargs: object) -> None:
+        raise AssertionError("ADS guard must run before ZipFile opens")
+
+    def fail_lstat(*args: object, **kwargs: object) -> None:
+        raise AssertionError("ADS guard must run before archive stat")
+
+    monkeypatch.setattr(zipfile.ZipFile, "__init__", fail_init)
+    monkeypatch.setattr(Path, "lstat", fail_lstat)
+
+    with pytest.raises(CanonpackError, match="archive-ads") as exc:
+        preflight_zip("carrier.txt:pack")
+    assert "carrier.txt:pack" not in str(exc.value)
+
+
+def test_zip_preflight_rejects_real_windows_ads_archive_before_open(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    if os.name != "nt":
+        pytest.skip("Windows ADS requires NTFS-style alternate streams")
+    carrier = tmp_path / "carrier.txt"
+    carrier.write_text("carrier", encoding="utf-8")
+    ads_path = Path(f"{carrier}:pack")
+    try:
+        _write_pack(ads_path, _manifest([]), {})
+    except OSError:
+        pytest.skip("current filesystem does not support ADS")
+
+    def fail_init(*args: object, **kwargs: object) -> None:
+        raise AssertionError("ADS guard must run before ZipFile opens")
+
+    monkeypatch.setattr(zipfile.ZipFile, "__init__", fail_init)
+
+    with pytest.raises(CanonpackError, match="archive-ads") as exc:
+        preflight_zip(ads_path)
+    assert ":pack" not in str(exc.value)
 
 
 def test_zip_preflight_checks_digest_without_extracting(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

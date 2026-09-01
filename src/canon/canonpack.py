@@ -188,7 +188,9 @@ def _coerce_archive_path(path: str | Path) -> Path:
     except TypeError as exc:
         raise CanonpackError("invalid-archive-path", type(path).__name__) from exc
     if not isinstance(raw, str) or "\0" in raw:
-        raise CanonpackError("invalid-archive-path", str(raw))
+        raise CanonpackError("invalid-archive-path")
+    if is_windows_ads_path(raw):
+        raise CanonpackError("archive-ads")
     return Path(raw)
 
 def _scan_central_directory(zf: zipfile.ZipFile, limits: CanonpackLimits) -> dict[str, zipfile.ZipInfo]:
