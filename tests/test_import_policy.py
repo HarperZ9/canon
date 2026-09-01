@@ -283,6 +283,75 @@ def test_invalid_profile_trust_and_key_inputs_fail_closed_without_exceptions() -
     assert decision.accepted_atom_ids == ()
 
 
+def test_atom_subclass_cannot_launder_trust_through_to_dict_dispatch() -> None:
+    dispatched = False
+    trusted_payload = _atom("fact-laundered-view").to_dict()
+
+    class LaunderingAtom(CanonAtom):
+        def to_dict(self) -> dict:
+            nonlocal dispatched
+            dispatched = True
+            return trusted_payload
+
+    hostile = LaunderingAtom(
+        "episodic-fact",
+        "fact-hostile-object",
+        "workspace",
+        "repo:canon",
+        50,
+        "active",
+        "descriptive",
+        False,
+        {"text": "object trust is untrusted"},
+        source_refs=({"ref": "record:workspace/source-1"},),
+        freshness={"state": "current"},
+        trust={"label": "imported-untrusted"},
+        disclosure={"profile": "project-only"},
+        hashes={"value_sha256": HASH_A},
+    )
+    subject = _subject("capsule-hostile-atom", (hostile,))
+
+    assert validate_atom_activation(hostile, trust_label="trusted-local") == ("invalid-atom",)
+    decision = review_import_subject(subject, profile="project-only", pinned_key_ids=frozenset())
+
+    assert not decision.ok
+    assert decision.reason_codes == ("invalid-atom",)
+    assert decision.accepted_atom_ids == ()
+    assert not dispatched
+
+
+def test_subject_and_atom_containers_must_be_exact_public_types() -> None:
+    class ImportSubjectSubclass(ImportSubject):
+        pass
+
+    class HostileTuple(tuple):
+        def __iter__(self):  # type: ignore[no-untyped-def]
+            raise AssertionError("hostile atom container iterated")
+
+    subclass = ImportSubjectSubclass("capsule-subclass", (_atom("fact-subclass"),), "none", None, True, HASH_B)
+    hostile_container = _subject("capsule-hostile-container", (_atom("fact-container"),))
+    object.__setattr__(hostile_container, "atoms", HostileTuple((_atom("fact-hidden"),)))
+
+    subclass_decision = review_import_subject(subclass, profile="project-only", pinned_key_ids=frozenset())
+    container_decision = review_import_subject(hostile_container, profile="project-only", pinned_key_ids=frozenset())
+
+    assert subclass_decision.reason_codes == ("invalid-subject",)
+    assert subclass_decision.accepted_atom_ids == ()
+    assert container_decision.reason_codes == ("invalid-atoms",)
+    assert container_decision.accepted_atom_ids == ()
+    assert disclosure_omissions(HostileTuple((_atom("fact-private", disclosure_profile="private-local-only"),)), profile="team-safe") == ()
+
+
+def test_exact_public_subject_tuple_and_atom_remain_accepted() -> None:
+    subject = _subject("capsule-exact", (_atom("fact-exact"),))
+
+    decision = review_import_subject(subject, profile="project-only", pinned_key_ids=frozenset())
+
+    assert decision.ok
+    assert decision.reason_codes == ()
+    assert decision.accepted_atom_ids == ("fact-exact",)
+
+
 def test_malformed_and_duplicate_atoms_fail_closed_without_exceptions() -> None:
     malformed = CanonAtom(
         "permission",

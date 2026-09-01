@@ -52,9 +52,9 @@ def classify_trust(
 ) -> str:
     if model_synthesized is True:
         return "model-synthesized-unreviewed"
-    if signature_status not in ("valid", "none"):
+    if type(signature_status) is not str or signature_status not in ("valid", "none"):
         return "imported-untrusted"
-    if signature_status == "valid":
+    if type(signature_status) is str and signature_status == "valid":
         if _non_empty_string(key_id) and _valid_pin_set(pinned_key_ids) and key_id in pinned_key_ids:
             return "signed-pinned"
         return "signed-unknown-key"
@@ -65,7 +65,7 @@ def classify_trust(
 
 def validate_atom_activation(atom: CanonAtom, *, trust_label: str) -> tuple[str, ...]:
     reasons: list[str] = []
-    if trust_label not in TRUST_LABELS:
+    if type(trust_label) is not str or trust_label not in TRUST_LABELS:
         _add(reasons, "invalid-trust-label")
     elif trust_label not in _ACTIVATING_TRUST:
         _add(reasons, _BLOCKED_TRUST.get(trust_label, "untrusted-import"))
@@ -79,7 +79,7 @@ def validate_atom_activation(atom: CanonAtom, *, trust_label: str) -> tuple[str,
 
 
 def disclosure_omissions(atoms: tuple[CanonAtom, ...], *, profile: str) -> tuple[Omission, ...]:
-    if profile not in _OMITTING_PROFILES or not isinstance(atoms, (tuple, list)):
+    if type(profile) is not str or profile not in _OMITTING_PROFILES or type(atoms) is not tuple:
         return ()
     omissions: list[Omission] = []
     for atom in atoms:
@@ -108,7 +108,7 @@ def review_import_subject(
     profile: str,
     pinned_key_ids: frozenset[str],
 ) -> ImportDecision:
-    if not isinstance(subject, ImportSubject):
+    if type(subject) is not ImportSubject:
         return _decision(False, "imported-untrusted", profile, (), (), ("invalid-subject",))
     reasons: list[str] = []
     _validate_subject_inputs(subject, profile, pinned_key_ids, reasons)
@@ -119,8 +119,9 @@ def review_import_subject(
         local=subject.local,
         model_synthesized=subject.model_synthesized,
     )
-    atoms = subject.atoms if isinstance(subject.atoms, tuple) else ()
-    if not isinstance(subject.atoms, tuple):
+    raw_atoms = subject.atoms
+    atoms = raw_atoms if type(raw_atoms) is tuple else ()
+    if type(raw_atoms) is not tuple:
         _add(reasons, "invalid-atoms")
     _check_duplicate_ids(atoms, reasons)
     for atom in atoms:
@@ -151,7 +152,7 @@ def _decision(
     omissions: tuple[Omission, ...],
     reason_codes: tuple[str, ...],
 ) -> ImportDecision:
-    return ImportDecision(ok, trust_label, profile if isinstance(profile, str) else "", accepted_atom_ids, omissions, (), reason_codes)
+    return ImportDecision(ok, trust_label, profile if type(profile) is str else "", accepted_atom_ids, omissions, (), reason_codes)
 
 
 def _validate_subject_inputs(
@@ -160,27 +161,31 @@ def _validate_subject_inputs(
     pinned_key_ids: object,
     reasons: list[str],
 ) -> None:
+    signature_status = subject.signature_status
     if not _non_empty_string(subject.source_id):
         _add(reasons, "invalid-source-id")
-    if profile not in DISCLOSURE_PROFILES:
+    if type(profile) is not str or profile not in DISCLOSURE_PROFILES:
         _add(reasons, "invalid-profile")
     if not _valid_pin_set(pinned_key_ids):
         _add(reasons, "invalid-pinned-key-ids")
-    if subject.signature_status not in _SIGNATURE_STATUSES:
+    if type(signature_status) is not str or signature_status not in _SIGNATURE_STATUSES:
         _add(reasons, "invalid-signature-status")
-    if subject.signature_status == "valid" and not _non_empty_string(subject.key_id):
+    if type(signature_status) is str and signature_status == "valid" and not _non_empty_string(subject.key_id):
         _add(reasons, "invalid-key-id")
-    if subject.signature_status == "none" and subject.local is False:
+    if type(signature_status) is str and signature_status == "none" and subject.local is False:
         _add(reasons, "unsigned-remote")
-    if not isinstance(subject.local, bool):
+    if type(subject.local) is not bool:
         _add(reasons, "invalid-local-flag")
-    if not isinstance(subject.model_synthesized, bool):
+    if type(subject.model_synthesized) is not bool:
         _add(reasons, "invalid-model-synthesized-flag")
     if not is_sha256_ref(subject.source_state_sha256):
         _add(reasons, "invalid-source-state-sha256")
 
 
 def _validated_atom_dict(atom: object, reasons: list[str]) -> dict | None:
+    if type(atom) is not CanonAtom:
+        _add(reasons, "invalid-atom")
+        return None
     try:
         problems = validate_atom(atom)
     except Exception:
@@ -192,25 +197,28 @@ def _validated_atom_dict(atom: object, reasons: list[str]) -> dict | None:
 
 
 def _atom_dict(atom: object) -> dict | None:
-    if not isinstance(atom, CanonAtom):
+    if type(atom) is not CanonAtom:
         return None
     try:
-        return atom.to_dict()
+        return CanonAtom.to_dict(atom)
     except Exception:
         return None
 
 
 def _add_atom_policy_reasons(atom_dict: dict, reasons: list[str]) -> None:
     trust_label = _trust_label(atom_dict)
-    if trust_label not in TRUST_LABELS:
+    disclosure_profile = _disclosure_profile(atom_dict)
+    freshness_state = _freshness_state(atom_dict)
+    status = atom_dict.get("status")
+    if type(trust_label) is not str or trust_label not in TRUST_LABELS:
         _add(reasons, "invalid-atom-trust-label")
     elif trust_label not in _ACTIVATING_TRUST:
         _add(reasons, _BLOCKED_TRUST.get(trust_label, "untrusted-import"))
         if trust_label == "model-synthesized-unreviewed" and _normative_like(atom_dict):
             _add(reasons, "unreviewed-model-normative")
-    if _disclosure_profile(atom_dict) not in _ATOM_DISCLOSURE_PROFILES:
+    if type(disclosure_profile) is not str or disclosure_profile not in _ATOM_DISCLOSURE_PROFILES:
         _add(reasons, "invalid-atom-disclosure-profile")
-    if _freshness_state(atom_dict) == "stale" or atom_dict.get("status") == "stale":
+    if (type(freshness_state) is str and freshness_state == "stale") or (type(status) is str and status == "stale"):
         _add(reasons, "stale")
     if _invalid_hashes(atom_dict):
         _add(reasons, "invalid-atom-hash")
@@ -228,7 +236,7 @@ def _add_omission_reasons(omissions: tuple[Omission, ...], reasons: list[str]) -
 def _check_duplicate_ids(atoms: tuple[object, ...], reasons: list[str]) -> None:
     seen: set[str] = set()
     for atom in atoms:
-        atom_id = atom.id if isinstance(atom, CanonAtom) and isinstance(atom.id, str) else None
+        atom_id = atom.id if type(atom) is CanonAtom and type(atom.id) is str else None
         if atom_id is None:
             continue
         if atom_id in seen:
@@ -237,7 +245,7 @@ def _check_duplicate_ids(atoms: tuple[object, ...], reasons: list[str]) -> None:
 
 
 def _accepted_ids(atoms: tuple[object, ...]) -> tuple[str, ...]:
-    return tuple(atom.id for atom in atoms if isinstance(atom, CanonAtom) and isinstance(atom.id, str))
+    return tuple(atom.id for atom in atoms if type(atom) is CanonAtom and type(atom.id) is str)
 
 
 def _source_ref_strings(atom_dict: dict) -> tuple[str, ...]:
@@ -249,9 +257,9 @@ def _source_ref_strings(atom_dict: dict) -> tuple[str, ...]:
 
 def _invalid_hashes(atom_dict: dict) -> bool:
     hashes = atom_dict.get("hashes")
-    if not isinstance(hashes, dict):
+    if type(hashes) is not dict:
         return True
-    return any(name.endswith("sha256") and not is_sha256_ref(value) for name, value in hashes.items())
+    return any(type(name) is str and name.endswith("sha256") and not is_sha256_ref(value) for name, value in hashes.items())
 
 
 def _normative_like(atom_dict: dict) -> bool:
@@ -274,17 +282,15 @@ def _freshness_state(atom_dict: dict) -> object:
 
 
 def _valid_pin_set(value: object) -> bool:
-    return isinstance(value, frozenset) and all(_non_empty_string(item) for item in value)
+    return type(value) is frozenset and all(_non_empty_string(item) for item in value)
 
 
 def _non_empty_string(value: object) -> bool:
-    return isinstance(value, str) and value != ""
+    return type(value) is str and value != ""
 
 
 def _tuple_or_original(value: object) -> object:
-    if isinstance(value, (list, tuple)):
-        return tuple(value)
-    return value
+    return tuple(value) if type(value) in (list, tuple) else value
 
 
 def _add(reasons: list[str], code: str) -> None:
