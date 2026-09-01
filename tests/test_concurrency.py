@@ -9,6 +9,8 @@ from pathlib import Path
 
 import pytest
 
+import canon.concurrency_capability as concurrency_capability
+import canon.concurrency_lock_backend as concurrency_lock_backend
 import canon.concurrency_lock as concurrency_lock
 import canon.concurrency_windows as concurrency_windows
 from canon.concurrency import (
@@ -308,15 +310,12 @@ def test_acquire_handle_cleanup_survives_lock_directory_swap(
     outside.mkdir()
 
     def swap_then_fail(
-        lock_dir: Path,
-        snapshot: tuple[Path, int, int],
-        lock_path: Path,
-        token: str,
+        capability: object,
     ) -> None:
-        _swap_lock_dir_to_symlink(lock_dir, displaced, outside)
-        raise LockError("lock-reparse", str(lock_path))
+        _swap_lock_dir_to_symlink(capability.path.parent, displaced, outside)
+        raise LockError("lock-reparse", str(capability.path))
 
-    monkeypatch.setattr(concurrency_lock, "_verify_created_lock", swap_then_fail)
+    monkeypatch.setattr(concurrency_lock_backend, "verify_capability", swap_then_fail)
 
     try:
         with pytest.raises(LockError, match="lock-reparse"):
@@ -326,6 +325,90 @@ def test_acquire_handle_cleanup_survives_lock_directory_swap(
 
     assert not (root / ".canon-locks" / "workspace.lock").exists()
     assert not (outside / "workspace.lock").exists()
+
+
+def test_acquire_uses_real_lock_capability_after_dir_verify_swap(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "root"
+    outside = tmp_path / "outside"
+    displaced = tmp_path / "displaced-locks"
+    root.mkdir()
+    outside.mkdir()
+    token = "capability-token"
+    real_verify = concurrency_lock._verify_lock_dir
+    calls = 0
+
+    def verify_then_swap(lock_dir: Path, snapshot: tuple[Path, int, int]) -> None:
+        nonlocal calls
+        real_verify(lock_dir, snapshot)
+        calls += 1
+        if calls == 2:
+            _swap_lock_dir_to_symlink(lock_dir, displaced, outside)
+            (outside / "workspace.lock").write_text("outside-token", encoding="utf-8")
+
+    monkeypatch.setattr(concurrency_lock, "new_lock_token", lambda: token)
+    monkeypatch.setattr(concurrency_lock, "_verify_lock_dir", verify_then_swap)
+
+    lock = acquire_run_lock(root, "workspace")
+    try:
+        assert calls == 2
+        assert (outside / "workspace.lock").read_text(encoding="utf-8") == "outside-token"
+        release_run_lock(lock)
+        assert (outside / "workspace.lock").read_text(encoding="utf-8") == "outside-token"
+        assert not (displaced / "workspace.lock").exists()
+    finally:
+        _restore_displaced_lock_dir(root / ".canon-locks", displaced)
+
+
+def test_acquire_registers_capability_after_fake_backend_namespace_swap(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "root"
+    outside = tmp_path / "outside"
+    displaced = tmp_path / "displaced-locks"
+    root.mkdir()
+    outside.mkdir()
+    token = "capability-token"
+    real_verify = concurrency_lock._verify_lock_dir
+    calls = 0
+    deleted = False
+
+    def verify_then_swap(lock_dir: Path, snapshot: tuple[Path, int, int]) -> None:
+        nonlocal calls
+        real_verify(lock_dir, snapshot)
+        calls += 1
+        if calls == 2:
+            _swap_lock_dir_to_symlink(lock_dir, displaced, outside)
+            (outside / "workspace.lock").write_text("outside-token", encoding="utf-8")
+
+    def fake_write(lock_dir: Path, lock_name: str, token_arg: str, snapshot: tuple[Path, int, int], verify: object):
+        verify(lock_dir, snapshot)
+        (lock_dir / lock_name).write_text(token_arg, encoding="utf-8")
+        verify(lock_dir, snapshot)
+        return concurrency_capability.LockCapability(root, "workspace", lock_name, token_arg, lock_dir / lock_name, "fake", -1, -1, (7,))
+
+    def fake_delete(capability: concurrency_capability.LockCapability) -> None:
+        nonlocal deleted
+        deleted = True
+        (displaced / capability.lock_name).unlink()
+
+    monkeypatch.setattr(concurrency_lock, "new_lock_token", lambda: token)
+    monkeypatch.setattr(concurrency_lock, "_can_use_windows_lock", lambda: True)
+    monkeypatch.setattr(concurrency_lock, "_verify_lock_dir", verify_then_swap)
+    monkeypatch.setattr(concurrency_lock_backend, "write_windows", fake_write)
+    monkeypatch.setattr(concurrency_lock_backend, "verify_capability", lambda capability: None)
+    monkeypatch.setattr(concurrency_lock_backend, "delete_capability", fake_delete)
+
+    lock = acquire_run_lock(root, "workspace")
+    try:
+        release_run_lock(lock)
+        assert deleted
+        assert (outside / "workspace.lock").read_text(encoding="utf-8") == "outside-token"
+    finally:
+        _restore_displaced_lock_dir(root / ".canon-locks", displaced)
 
 
 def test_release_refuses_lock_path_outside_lock_root(tmp_path: Path) -> None:
@@ -338,7 +421,7 @@ def test_release_refuses_lock_path_outside_lock_root(tmp_path: Path) -> None:
     assert outside.exists()
 
 
-def test_release_checks_token_ownership_and_is_idempotent(tmp_path: Path) -> None:
+def test_release_checks_token_ownership_without_deleting(tmp_path: Path) -> None:
     lock = acquire_run_lock(tmp_path, "workspace")
     lock.path.write_text("other-token", encoding="utf-8")
 
@@ -346,10 +429,168 @@ def test_release_checks_token_ownership_and_is_idempotent(tmp_path: Path) -> Non
         release_run_lock(lock)
     assert lock.path.exists()
 
+
+def test_failed_release_makes_lock_capability_stale(tmp_path: Path) -> None:
+    lock = acquire_run_lock(tmp_path, "workspace")
+    lock.path.write_text("other-token", encoding="utf-8")
+
+    with pytest.raises(LockError, match="lock-token-mismatch"):
+        release_run_lock(lock)
+
     lock.path.write_text(lock.token, encoding="utf-8")
+    with pytest.raises(LockError, match="lock-stale"):
+        release_run_lock(lock)
+
+
+def test_release_is_idempotent_after_success(tmp_path: Path) -> None:
+    lock = acquire_run_lock(tmp_path, "workspace")
+
     release_run_lock(lock)
     release_run_lock(lock)
     assert not lock.path.exists()
+
+
+def test_release_uses_capability_when_lock_dir_swapped_before_release(tmp_path: Path) -> None:
+    root = tmp_path / "root"
+    outside = tmp_path / "outside"
+    displaced = tmp_path / "displaced-locks"
+    root.mkdir()
+    outside.mkdir()
+    lock = acquire_run_lock(root, "workspace")
+    _swap_lock_dir_to_symlink(root / ".canon-locks", displaced, outside)
+    (outside / "workspace.lock").write_text(lock.token, encoding="utf-8")
+
+    try:
+        release_run_lock(lock)
+        assert (outside / "workspace.lock").read_text(encoding="utf-8") == lock.token
+        assert not (displaced / "workspace.lock").exists()
+    finally:
+        _restore_displaced_lock_dir(root / ".canon-locks", displaced)
+
+
+def test_release_does_not_delete_outside_after_validation_race(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "root"
+    outside = tmp_path / "outside"
+    displaced = tmp_path / "displaced-locks"
+    root.mkdir()
+    outside.mkdir()
+    lock = acquire_run_lock(root, "workspace")
+    (outside / "workspace.lock").write_text(lock.token, encoding="utf-8")
+    real_assert = concurrency_lock._assert_release_target
+
+    def assert_then_swap(root_path: Path, name: str, lock_path: Path) -> None:
+        real_assert(root_path, name, lock_path)
+        _swap_lock_dir_to_symlink(root_path / ".canon-locks", displaced, outside)
+
+    monkeypatch.setattr(concurrency_lock, "_assert_release_target", assert_then_swap)
+
+    try:
+        release_run_lock(lock)
+        assert (outside / "workspace.lock").read_text(encoding="utf-8") == lock.token
+        assert not (displaced / "workspace.lock").exists()
+    finally:
+        _restore_displaced_lock_dir(root / ".canon-locks", displaced)
+
+
+def test_release_registered_capability_survives_fake_validation_swap(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "root"
+    outside = tmp_path / "outside"
+    displaced = tmp_path / "displaced-locks"
+    lock_dir = root / ".canon-locks"
+    lock_path = lock_dir / "workspace.lock"
+    token = "registered-token"
+    lock_dir.mkdir(parents=True)
+    outside.mkdir()
+    lock_path.write_text(token, encoding="utf-8")
+    lock = RunLock(root=root, name="workspace", token=token, path=lock_path)
+    cap = concurrency_capability.LockCapability(root, "workspace", "workspace.lock", token, lock_path, "fake", -1, -1, (3,))
+    concurrency_lock.register_lock(lock, cap)
+    real_assert = concurrency_lock._assert_release_target
+
+    def assert_then_swap(root_path: Path, name: str, path: Path) -> None:
+        real_assert(root_path, name, path)
+        _swap_lock_dir_to_symlink(root_path / ".canon-locks", displaced, outside)
+        (outside / "workspace.lock").write_text(token, encoding="utf-8")
+
+    def fake_delete(capability: concurrency_capability.LockCapability) -> None:
+        (displaced / capability.lock_name).unlink()
+
+    monkeypatch.setattr(concurrency_lock, "_assert_release_target", assert_then_swap)
+    monkeypatch.setattr(concurrency_lock_backend, "verify_capability", lambda capability: None)
+    monkeypatch.setattr(concurrency_lock_backend, "delete_capability", fake_delete)
+
+    try:
+        release_run_lock(lock)
+        assert (outside / "workspace.lock").read_text(encoding="utf-8") == token
+        assert not (displaced / "workspace.lock").exists()
+    finally:
+        _restore_displaced_lock_dir(root / ".canon-locks", displaced)
+
+
+def test_release_swap_back_cannot_authorize_with_outside_token(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "root"
+    outside = tmp_path / "outside"
+    displaced = tmp_path / "displaced-locks"
+    root.mkdir()
+    outside.mkdir()
+    lock = acquire_run_lock(root, "workspace")
+    lock.path.write_text("tampered-token", encoding="utf-8")
+    (outside / "workspace.lock").write_text(lock.token, encoding="utf-8")
+    real_read = concurrency_lock._read_lock_token
+    swapped = False
+
+    def read_through_swap_back(path: Path) -> str:
+        nonlocal swapped
+        if not swapped and path == lock.path:
+            swapped = True
+            _swap_lock_dir_to_symlink(root / ".canon-locks", displaced, outside)
+            try:
+                return real_read(path)
+            finally:
+                _restore_displaced_lock_dir(root / ".canon-locks", displaced)
+        return real_read(path)
+
+    monkeypatch.setattr(concurrency_lock, "_read_lock_token", read_through_swap_back)
+
+    with pytest.raises(LockError, match="lock-token-mismatch"):
+        release_run_lock(lock)
+
+    assert lock.path.exists()
+    assert (outside / "workspace.lock").exists()
+
+
+def test_release_rejects_forged_run_lock_without_deleting_matching_file(tmp_path: Path) -> None:
+    lock_dir = tmp_path / ".canon-locks"
+    lock_path = lock_dir / "workspace.lock"
+    lock_dir.mkdir()
+    lock_path.write_text("forged-token", encoding="utf-8")
+    forged = RunLock(root=tmp_path, name="workspace", token="forged-token", path=lock_path)
+
+    with pytest.raises(LockError, match="lock-stale"):
+        release_run_lock(forged)
+
+    assert lock_path.read_text(encoding="utf-8") == "forged-token"
+
+
+def test_release_rejects_copied_run_lock_without_releasing_real_lock(tmp_path: Path) -> None:
+    real = acquire_run_lock(tmp_path, "workspace")
+    copied = RunLock(root=real.root, name=real.name, token=real.token, path=real.path)
+
+    with pytest.raises(LockError, match="lock-stale"):
+        release_run_lock(copied)
+
+    assert real.path.exists()
+    release_run_lock(real)
+    assert not real.path.exists()
 
 
 def test_release_rejects_reparse_lock_file(tmp_path: Path) -> None:
@@ -366,7 +607,7 @@ def test_release_rejects_reparse_lock_file(tmp_path: Path) -> None:
         pytest.skip("current platform or privileges do not allow file symlinks")
     lock = RunLock(root=root, name="workspace", token="token", path=link)
 
-    with pytest.raises(LockError, match="lock-reparse"):
+    with pytest.raises(LockError, match="lock-stale"):
         release_run_lock(lock)
     assert link.exists() or link.is_symlink()
     assert target.exists()
@@ -387,7 +628,7 @@ def test_release_rejects_directory_lock_path_before_reading(
 
     monkeypatch.setattr(Path, "read_text", fail_read_text)
 
-    with pytest.raises(LockError, match="lock-nonregular"):
+    with pytest.raises(LockError, match="lock-stale"):
         release_run_lock(lock)
 
     assert lock_path.is_dir()
@@ -416,7 +657,7 @@ def test_release_rejects_special_lock_path_before_reading(
 
         monkeypatch.setattr(Path, "read_text", fail_read_text)
 
-        with pytest.raises(LockError, match="lock-nonregular"):
+        with pytest.raises(LockError, match="lock-stale"):
             release_run_lock(lock)
     finally:
         server.close()

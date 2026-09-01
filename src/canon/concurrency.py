@@ -31,14 +31,20 @@ def acquire_run_lock(root: str | Path, name: str) -> RunLock:
     root_path = _locks.resolve_lock_root(root)
     lock_dir = _locks.prepare_lock_dir(root_path)
     token = _locks.new_lock_token()
-    lock_path = _locks.write_new_lock(lock_dir, f"{checked_name}.lock", token)
-    return RunLock(root=root_path, name=checked_name, token=token, path=lock_path)
+    lock_path, capability = _locks.write_new_lock(lock_dir, f"{checked_name}.lock", token)
+    try:
+        lock = RunLock(root=root_path, name=checked_name, token=token, path=lock_path)
+    except Exception:
+        _locks.discard_lock(capability)
+        raise
+    _locks.register_lock(lock, capability)
+    return lock
 
 
 def release_run_lock(lock: RunLock) -> None:
-    if not isinstance(lock, RunLock):
+    if type(lock) is not RunLock:
         raise LockError("invalid-lock", "lock must be RunLock")
-    _locks.release_lock(lock.root, lock.name, lock.token, lock.path)
+    _locks.release_lock(lock, lock.root, lock.name, lock.token, lock.path)
 
 
 def guarded_commit(
