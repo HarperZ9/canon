@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+import canon.concurrency_lock as concurrency_lock
 from canon.concurrency import (
     LockError,
     RunLock,
@@ -160,6 +161,80 @@ def test_lock_directory_symlink_is_rejected_before_writing_outside(
     with pytest.raises(LockError, match="lock-reparse"):
         acquire_run_lock(root, "workspace")
     assert not (outside / "workspace.lock").exists()
+
+
+def test_acquire_rejects_lock_directory_swap_after_prepare(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "root"
+    outside = tmp_path / "outside"
+    root.mkdir()
+    outside.mkdir()
+    real_prepare = concurrency_lock.prepare_lock_dir
+
+    def prepare_then_swap(resolved_root: Path) -> Path:
+        lock_dir = real_prepare(resolved_root)
+        try:
+            lock_dir.rmdir()
+            lock_dir.symlink_to(outside, target_is_directory=True)
+        except OSError:
+            pytest.skip("current platform or privileges do not allow directory symlinks")
+        return lock_dir
+
+    monkeypatch.setattr(concurrency_lock, "prepare_lock_dir", prepare_then_swap)
+
+    with pytest.raises(LockError, match="lock-reparse"):
+        acquire_run_lock(root, "workspace")
+
+    assert not (outside / "workspace.lock").exists()
+
+
+def test_acquire_rejects_fallback_lock_directory_swap_back_before_return(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "root"
+    outside = tmp_path / "outside"
+    displaced = tmp_path / "displaced-locks"
+    root.mkdir()
+    outside.mkdir()
+    real_open = os.open
+    swapped = False
+
+    def open_with_swap(
+        path: object,
+        flags: int,
+        mode: int = 0o777,
+        *args: object,
+        **kwargs: object,
+    ) -> int:
+        nonlocal swapped
+        if not swapped and Path(os.fspath(path)).name == "workspace.lock":
+            swapped = True
+            lock_dir = root / ".canon-locks"
+            try:
+                lock_dir.rename(displaced)
+                lock_dir.symlink_to(outside, target_is_directory=True)
+            except OSError:
+                pytest.skip("current platform or privileges do not allow directory symlinks")
+            try:
+                return real_open(path, flags, mode, *args, **kwargs)
+            finally:
+                lock_dir.unlink(missing_ok=True)
+                displaced.rename(lock_dir)
+        return real_open(path, flags, mode, *args, **kwargs)
+
+    monkeypatch.setattr(concurrency_lock, "_can_use_dir_fd_lock", lambda: False)
+    monkeypatch.setattr(os, "open", open_with_swap)
+
+    try:
+        with pytest.raises(LockError, match="lock-open"):
+            acquire_run_lock(root, "workspace")
+    finally:
+        (outside / "workspace.lock").unlink(missing_ok=True)
+
+    assert not (root / ".canon-locks" / "workspace.lock").exists()
 
 
 def test_release_refuses_lock_path_outside_lock_root(tmp_path: Path) -> None:
