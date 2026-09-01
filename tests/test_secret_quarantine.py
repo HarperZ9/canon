@@ -216,6 +216,43 @@ def test_path_resolution_errors_fail_closed_without_reading(
     assert read_attempts == []
 
 
+def test_relative_read_uses_checked_resolved_target_when_cwd_changes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    safe_dir = tmp_path / "safe"
+    protected_dir = tmp_path / ".ssh"
+    safe_dir.mkdir()
+    protected_dir.mkdir()
+    safe_text = "clear original file"
+    alternate_secret = _openai_key()
+    (safe_dir / "note.txt").write_text(safe_text, encoding="utf-8")
+    (protected_dir / "note.txt").write_text(f"token={alternate_secret}", encoding="utf-8")
+    original_resolve = Path.resolve
+    original_read_bytes = Path.read_bytes
+    read_paths: list[Path] = []
+
+    def changing_resolve(self: Path, *args: object, **kwargs: object) -> Path:
+        resolved = original_resolve(self, *args, **kwargs)
+        if resolved == safe_dir / "note.txt":
+            monkeypatch.chdir(protected_dir)
+        return resolved
+
+    def recording_read_bytes(self: Path) -> bytes:
+        read_paths.append(self)
+        return original_read_bytes(self)
+
+    monkeypatch.chdir(safe_dir)
+    monkeypatch.setattr(Path, "resolve", changing_resolve)
+    monkeypatch.setattr(Path, "read_bytes", recording_read_bytes)
+
+    result = quarantine_path("note.txt", source_id="cwd-race")
+
+    assert result.safe_text == safe_text
+    assert result.findings == ()
+    assert read_paths == [safe_dir / "note.txt"]
+    assert alternate_secret not in _serialized_result(result)
+
+
 def test_quarantine_path_scans_unprotected_utf8_file(tmp_path: Path) -> None:
     canary = _openai_key()
     source = tmp_path / "note.txt"

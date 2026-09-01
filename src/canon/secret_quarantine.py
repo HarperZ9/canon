@@ -81,7 +81,7 @@ def quarantine_path(path: str | Path, *, source_id: str, critical: bool = False)
         if critical is True:
             raise SecretQuarantineError(f"critical-secret: {checked_source}")
         return _quarantine((finding,), source_id=checked_source, input_hash=finding.sha256)
-    text = _read_utf8_text(checked_path, checked_source)
+    text = _read_utf8_text(resolved, checked_source)
     return quarantine_text(text, source_id=checked_source, critical=critical)
 
 
