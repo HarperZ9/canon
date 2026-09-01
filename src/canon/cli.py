@@ -100,30 +100,39 @@ def run_cli(
             return write_result(result, stdout=stdout, stderr=stderr, json_output=True, color=False)
         return error.status
 
-    if parsed.command in ("compile", "preview"):
-        from .cli_compile import run_compile_command
-
-        return run_compile_command(
-            parsed,
-            stdin=stdin,
-            stdout=stdout,
-            stderr=stderr,
-            color=color_enabled(environ=environ, no_color=parsed.no_color, is_tty=_is_tty(stdout)),
-        )
-
-    return write_result(
-        _command_result(parsed),
-        stdout=stdout,
-        stderr=stderr,
-        json_output=parsed.json_output,
-        color=color_enabled(environ=environ, no_color=parsed.no_color, is_tty=_is_tty(stdout)),
-    )
+    return _run_parsed(parsed, stdin=stdin, stdout=stdout, stderr=stderr, environ=environ)
 
 
 def main(argv: list[str] | None = None) -> int:
     """Run canon from process-global streams."""
     tokens = list(sys.argv[1:] if argv is None else argv)
     return run_cli(tokens, stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr, environ=os.environ)
+
+
+def _run_parsed(
+    parsed: argparse.Namespace,
+    *,
+    stdin: TextIO | None,
+    stdout: TextIO,
+    stderr: TextIO,
+    environ: Mapping[str, str],
+) -> int:
+    color = color_enabled(environ=environ, no_color=parsed.no_color, is_tty=_is_tty(stdout))
+    if parsed.command in ("compile", "preview"):
+        from .cli_compile import run_compile_command
+
+        return run_compile_command(parsed, stdin=stdin, stdout=stdout, stderr=stderr, color=color)
+    if parsed.command == "doctor":
+        from .doctor import run_doctor_command
+
+        return run_doctor_command(parsed, stdin=stdin, stdout=stdout, stderr=stderr, color=color)
+    return write_result(
+        _command_result(parsed),
+        stdout=stdout,
+        stderr=stderr,
+        json_output=parsed.json_output,
+        color=color,
+    )
 
 
 def _command_result(parsed: argparse.Namespace):
@@ -186,6 +195,8 @@ def _build_parser(stdout: TextIO | None = None, stderr: TextIO | None = None) ->
             _add_bootstrap_args(subparser)
         elif command in ("compile", "preview"):
             _add_compile_args(subparser, include_out=command == "compile")
+        elif command == "doctor":
+            _add_doctor_args(subparser)
     return parser
 
 
@@ -214,6 +225,15 @@ def _add_compile_args(parser: argparse.ArgumentParser, *, include_out: bool) -> 
     parser.add_argument("--offline", action="store_true", help="avoid later online work")
     if include_out:
         parser.add_argument("--out", default=None, help="output directory below workspace")
+
+
+def _add_doctor_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--workspace", default=".", help="workspace path")
+    parser.add_argument("--target", required=True, help="adapter target id")
+    parser.add_argument("--records", default=None, help="Record JSONL input path or '-'")
+    parser.add_argument("--atoms", default=None, help="CanonAtom JSONL input path or '-'")
+    parser.add_argument("--offline", action="store_true", help="record reachability as unknown")
+    parser.add_argument("--expected-source-state", default=None, help="expected source state sha256")
 
 
 def _argv_copy(argv: list[str], stderr: TextIO) -> list[str] | None:

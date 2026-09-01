@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from typing import TextIO
 
 from .adapter import descriptor_for, validate_adapter_descriptor
 from .atom import CanonAtom, validate_atom
+from .bootstrap_sources import SourceParseError, strict_jsonl_objects
 from .canonical_json import canonical_json_text, sha256_bytes, sha256_text
 from .capsule import Budget, CapsuleBuildError, CapsuleCompileRequest, CapsuleTarget, SourceState, compile_capsule
 from .cli_artifacts import ARTIFACT_NAMES, MAX_SOURCE_BYTES, ArtifactError, SourceBytes, checked_workspace, output_relative, publish_artifacts, read_source_file
@@ -14,7 +14,6 @@ from .schema import Record
 from .source_state import source_state_sha256
 from .validator import validate_record
 
-_BOMS = (b"\xef\xbb\xbf", b"\xff\xfe", b"\xfe\xff", b"\x00\x00\xfe\xff", b"\xff\xfe\x00\x00")
 _BUDGETS = {"needle": 2048, "handoff": 8192, "archive": 32768, "custom": 8192}
 _STDIN_CHUNK_CHARS = 65536
 
@@ -147,37 +146,10 @@ def _atoms_from_source(source: SourceBytes) -> tuple[CanonAtom, ...]:
 
 
 def _jsonl_objects(data: bytes) -> tuple[dict, ...]:
-    text = _utf8_text(data)
-    objects: list[dict] = []
-    for line in text.splitlines():
-        if not line.strip():
-            continue
-        try:
-            value = json.loads(line, object_pairs_hook=_object_no_duplicates)
-        except (json.JSONDecodeError, ValueError) as exc:
-            raise CompileCliError("invalid_args") from exc
-        if type(value) is not dict:
-            raise CompileCliError("invalid_args")
-        objects.append(value)
-    return tuple(objects)
-
-
-def _utf8_text(data: bytes) -> str:
-    if data.startswith(_BOMS) or b"\0" in data:
-        raise CompileCliError("invalid_args")
     try:
-        return data.decode("utf-8")
-    except UnicodeDecodeError as exc:
-        raise CompileCliError("invalid_args") from exc
-
-
-def _object_no_duplicates(pairs: list[tuple[str, object]]) -> dict:
-    result: dict[str, object] = {}
-    for key, value in pairs:
-        if key in result:
-            raise ValueError("duplicate object key")
-        result[key] = value
-    return result
+        return tuple(item.value for item in strict_jsonl_objects(data))
+    except SourceParseError as exc:
+        raise CompileCliError("invalid_args")
 
 
 def _descriptor(target_id: object):

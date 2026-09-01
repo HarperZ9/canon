@@ -94,7 +94,7 @@ def test_subcommand_parse_errors_use_injected_stderr(capsys: pytest.CaptureFixtu
     stdout = io.StringIO()
     stderr = io.StringIO()
 
-    assert run_cli(["doctor", "--bad"], stdout=stdout, stderr=stderr, environ={}) == EX_USAGE
+    assert run_cli(["doctor", "--target", "codex-cli", "--bad"], stdout=stdout, stderr=stderr, environ={}) == EX_USAGE
 
     assert stdout.getvalue() == ""
     assert "unrecognized arguments: --bad" in stderr.getvalue()
@@ -105,7 +105,7 @@ def test_placeholder_commands_emit_accessible_result_to_injected_stdout() -> Non
     from canon.cli import run_cli
     from canon.exit_codes import EX_OK
 
-    active = {"bootstrap", "compile", "preview"}
+    active = {"bootstrap", "compile", "preview", "doctor"}
     for command in tuple(command for command in COMMANDS if command not in active):
         stdout = io.StringIO()
         stderr = io.StringIO()
@@ -131,7 +131,7 @@ def test_bootstrap_command_emits_accessible_result_to_injected_stdout() -> None:
 def test_run_cli_does_not_mutate_caller_argv() -> None:
     from canon.cli import run_cli
 
-    argv = ["--json", "--no-color", "doctor"]
+    argv = ["--json", "--no-color", "doctor", "--target", "codex-cli"]
     before = list(argv)
 
     run_cli(argv, stdout=io.StringIO(), stderr=io.StringIO(), environ={})
@@ -181,7 +181,7 @@ def test_python_module_json_stdout_is_utf8_bytes_with_lf_only() -> None:
     env["PYTHONPATH"] = src_path + os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else src_path
 
     result = subprocess.run(
-        [sys.executable, "-m", "canon", "--json", "doctor"],
+        [sys.executable, "-m", "canon", "--json", "doctor", "--target", "codex-cli"],
         cwd=Path.cwd(),
         env=env,
         stdout=subprocess.PIPE,
@@ -191,8 +191,18 @@ def test_python_module_json_stdout_is_utf8_bytes_with_lf_only() -> None:
 
     assert result.returncode == 0
     assert result.stdout == (
-        b'{"command":"doctor","data":null,"exit_code":0,'
-        b'"failure_code":"ok","message":"ready","ok":true}\n'
+        b'{"command":"doctor","data":{"findings":[{"code":"adapter_descriptor_valid",'
+        b'"evidence":{"adapter_id":"codex-cli","integration_tier":"native-advisory"},'
+        b'"failure_code":"ok","message":"adapter descriptor valid","severity":"info"},'
+        b'{"code":"source_state_bound","evidence":{"source_count":0},'
+        b'"failure_code":"ok","message":"source state bound","severity":"info"}],'
+        b'"offline":false,"source_inputs":[],"source_state_sha256":"sha256:37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",'
+        b'"target":{"adapter_id":"codex-cli","bootstrap":{"can_block_before_work":false,'
+        b'"mode":"native-context-file"},"display_name":"Codex CLI",'
+        b'"integration_tier":"native-advisory","known_unknowns":["Native context can advise the run; '
+        b'this foundation descriptor does not assert a universal hard block before work."],'
+        b'"target_surfaces":["CANON.md","AGENTS.md"]}},"exit_code":0,'
+        b'"failure_code":"ok","message":"doctor diagnostics complete","ok":true}\n'
     )
     assert b"\r" not in result.stdout
     assert result.stderr == b""

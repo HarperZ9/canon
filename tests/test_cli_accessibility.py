@@ -89,19 +89,22 @@ def test_color_enabled_uses_tty_flag_no_color_option_and_no_color_presence(
     assert color_enabled(environ=environ, no_color=no_color, is_tty=is_tty) is expected
 
 
-def test_cli_json_routes_placeholder_to_canonical_envelope() -> None:
+def test_cli_json_routes_doctor_to_canonical_envelope() -> None:
+    import json
+
+    from canon.canonical_json import canonical_json_text
     from canon.cli import run_cli
 
     stdout = io.StringIO()
     stderr = io.StringIO()
 
-    exit_code = run_cli(["--json", "doctor"], stdout=stdout, stderr=stderr, environ={})
+    exit_code = run_cli(["--json", "doctor", "--target", "codex-cli"], stdout=stdout, stderr=stderr, environ={})
+    payload = json.loads(stdout.getvalue())
 
     assert exit_code == EX_OK
-    assert stdout.getvalue() == (
-        '{"command":"doctor","data":null,"exit_code":0,'
-        '"failure_code":"ok","message":"ready","ok":true}\n'
-    )
+    assert stdout.getvalue() == canonical_json_text(payload)
+    assert payload["message"] == "doctor diagnostics complete"
+    assert payload["data"]["target"]["adapter_id"] == "codex-cli"
     assert stderr.getvalue() == ""
 
 
@@ -144,13 +147,13 @@ def test_cli_no_color_no_color_env_and_non_tty_output_keep_visible_labels_only()
     no_color_env_stdout = TtyStringIO()
     non_tty_stdout = io.StringIO()
 
-    assert run_cli(["--no-color", "doctor"], stdout=no_color_stdout, stderr=io.StringIO(), environ={}) == EX_OK
-    assert run_cli(["doctor"], stdout=no_color_env_stdout, stderr=io.StringIO(), environ={"NO_COLOR": ""}) == EX_OK
-    assert run_cli(["doctor"], stdout=non_tty_stdout, stderr=io.StringIO(), environ={}) == EX_OK
+    assert run_cli(["--no-color", "doctor", "--target", "codex-cli"], stdout=no_color_stdout, stderr=io.StringIO(), environ={}) == EX_OK
+    assert run_cli(["doctor", "--target", "codex-cli"], stdout=no_color_env_stdout, stderr=io.StringIO(), environ={"NO_COLOR": ""}) == EX_OK
+    assert run_cli(["doctor", "--target", "codex-cli"], stdout=non_tty_stdout, stderr=io.StringIO(), environ={}) == EX_OK
 
-    assert no_color_stdout.getvalue() == "PASS doctor: ready\n"
-    assert no_color_env_stdout.getvalue() == "PASS doctor: ready\n"
-    assert non_tty_stdout.getvalue() == "PASS doctor: ready\n"
+    assert no_color_stdout.getvalue() == "PASS doctor: doctor diagnostics complete\n"
+    assert no_color_env_stdout.getvalue() == "PASS doctor: doctor diagnostics complete\n"
+    assert non_tty_stdout.getvalue() == "PASS doctor: doctor diagnostics complete\n"
     assert ANSI_RE.search(no_color_stdout.getvalue()) is None
     assert ANSI_RE.search(no_color_env_stdout.getvalue()) is None
     assert ANSI_RE.search(non_tty_stdout.getvalue()) is None
