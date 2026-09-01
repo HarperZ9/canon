@@ -129,3 +129,72 @@ class FakeFlywheelStore:
 
     def query_all_entities(self, *, kind=None, project=None, chunk=500):
         return self.query_entities(kind=kind, project=project, limit=10 ** 9)
+
+
+# --- M4.1 transport handle fake ---------------------------------------------
+from canon.schema import SCHEMA  # noqa: E402
+
+
+class FakeRelayHandle:
+    """Wire-side mock. Each knob wires to one refusal branch a real relay could
+    trip. Not a Transport; a low-level handle a Transport wraps."""
+
+    def __init__(self, *, unreachable=False, corrupt_on_fetch=False,
+                 wrong_pin_on_fetch=None, oversize_on_fetch=False,
+                 auth_refused=False, rate_limited_every=None,
+                 spoof_wrong_key=False, duplicate_push_tampered=False):
+        self.unreachable = unreachable
+        self.corrupt_on_fetch = corrupt_on_fetch
+        self.wrong_pin_on_fetch = wrong_pin_on_fetch
+        self.oversize_on_fetch = oversize_on_fetch
+        self.auth_refused = auth_refused
+        self.rate_limited_every = rate_limited_every
+        self.spoof_wrong_key = spoof_wrong_key
+        self.duplicate_push_tampered = duplicate_push_tampered
+        self._store: dict[str, tuple[str, str]] = {}
+        self._push_count = 0
+
+    def put(self, key: str, envelope: str, idem: str) -> str:
+        if self.unreachable:
+            raise ConnectionError("unreachable")
+        if self.auth_refused:
+            raise PermissionError("401 auth refused")
+        self._push_count += 1
+        if (self.rate_limited_every
+                and self._push_count % self.rate_limited_every == 0):
+            err = RuntimeError("429 rate limited")
+            err.retry_after = 0.5  # type: ignore[attr-defined]
+            raise err
+        prior = self._store.get(key)
+        if (prior is not None and prior[1] == idem
+                and self.duplicate_push_tampered):
+            raise ValueError(
+                f"duplicate push with idem={idem!r}, tampered payload")
+        self._store[key] = (envelope, idem)
+        return idem
+
+    def get(self, key: str) -> str | None:
+        if self.unreachable:
+            raise ConnectionError("unreachable")
+        row = self._store.get(key)
+        if row is None:
+            return None
+        payload = row[0]
+        if self.corrupt_on_fetch:
+            return "{not valid json"
+        if self.wrong_pin_on_fetch is not None:
+            return payload.replace(SCHEMA, self.wrong_pin_on_fetch)
+        if self.oversize_on_fetch:
+            return payload[:-1] + ',"pad":"' + ("X" * 4096) + '"}'
+        if self.spoof_wrong_key:
+            tail = key.split("/", 1)[-1]
+            # The inner record json is JSON-escaped inside the envelope, so we
+            # match the escaped form of "id": "<tail>".
+            token = f'\\"id\\": \\"{tail}\\"'
+            return payload.replace(token, f'\\"id\\": \\"{tail}-forged\\"')
+        return payload
+
+    def list_keys(self, scope: str) -> list[str]:
+        if self.unreachable:
+            raise ConnectionError("unreachable")
+        return sorted(k for k in self._store if k.startswith(scope + "/"))
