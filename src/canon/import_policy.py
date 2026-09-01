@@ -139,7 +139,7 @@ _ATOM_DISCLOSURE_PROFILES = frozenset(DISCLOSURE_PROFILES + ("private-local-only
 _OMITTING_PROFILES = frozenset({"team-safe", "public-safe", "no-secrets", "need-to-know"})
 _ACTIVATING_TRUST = frozenset({"trusted-local", "signed-pinned", "unsigned-local"})
 _BLOCKED_TRUST = {"signed-unknown-key": "untrusted-import", "imported-untrusted": "untrusted-import", "secret-quarantined": "secret-quarantined", "stale": "stale"}
-_MODEL_NORMATIVE_TYPES = frozenset({"active-goal", "permission", "prohibition", "constraint", "conflict", "unknown"})
+_MODEL_NORMATIVE_TYPES = frozenset({"active-goal", "permission", "prohibition", "constraint", "frontier-state", "conflict", "unknown"})
 _PRIVATE_LOCAL_ONLY_LIMITATION = "This private-local-only omission does not prove the omitted content is safe to disclose elsewhere."
 
 
@@ -250,7 +250,7 @@ def _invalid_hashes(atom_dict: dict) -> bool:
 
 
 def _normative_like(atom_dict: dict) -> bool:
-    return atom_dict.get("classification") == "normative" or atom_dict.get("type") in _MODEL_NORMATIVE_TYPES
+    return atom_dict.get("critical") is True or atom_dict.get("classification") == "normative" or atom_dict.get("type") in _MODEL_NORMATIVE_TYPES
 
 
 def _trust_label(atom_dict: dict) -> object:

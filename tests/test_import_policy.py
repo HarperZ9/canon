@@ -129,6 +129,17 @@ def test_model_synthesized_unreviewed_normative_atom_cannot_activate() -> None:
     assert "unreviewed-model-normative" in reasons
 
 
+@pytest.mark.parametrize(
+    "atom_type",
+    ("active-goal", "permission", "prohibition", "constraint", "frontier-state", "conflict", "unknown"),
+)
+def test_model_synthesized_unreviewed_critical_readiness_atoms_cannot_activate(atom_type: str) -> None:
+    atom = _atom(f"{atom_type}-critical", atom_type=atom_type, critical=True, classification="descriptive")
+
+    reasons = validate_atom_activation(atom, trust_label="model-synthesized-unreviewed")
+    assert "unreviewed-model-normative" in reasons
+
+
 def test_private_local_only_emits_valid_foundation_policy_omission() -> None:
     atom = _atom(
         "fact-1",
