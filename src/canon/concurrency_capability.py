@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+import weakref
 
 
 @dataclass(slots=True)
@@ -15,8 +16,9 @@ class LockCapability:
     dir_ref: int
     file_ref: int
     file_id: tuple[int, ...]
-    owner: object | None = None
+    owner: object | weakref.ReferenceType | None = None
     released: bool = False
+    registry_token: object = field(default_factory=object, repr=False)
 
 
 _REGISTRY: dict[int, LockCapability] = {}
@@ -24,14 +26,42 @@ _REGISTRY: dict[int, LockCapability] = {}
 
 def register(owner: object, capability: LockCapability) -> None:
     capability.owner = owner
+    capability.registry_token = object()
     _REGISTRY[id(owner)] = capability
 
 
 def lookup(owner: object) -> LockCapability | None:
-    capability = _REGISTRY.get(id(owner))
-    if capability is None or capability.owner is not owner:
+    owner_id = id(owner)
+    capability = _REGISTRY.get(owner_id)
+    if capability is None:
         return None
-    return capability
+    registered_owner = _owner(capability)
+    if registered_owner is owner:
+        return capability
+    if registered_owner is None:
+        _drop_if_current(owner_id, capability.registry_token)
+    return None
+
+
+def mark_released(owner: object, capability: LockCapability) -> None:
+    owner_id = id(owner)
+    token = object()
+    capability.released = True
+    capability.registry_token = token
+    capability.owner = weakref.ref(owner, lambda _ref: _drop_if_current(owner_id, token))
+
+
+def _owner(capability: LockCapability) -> object | None:
+    if isinstance(capability.owner, weakref.ReferenceType):
+        return capability.owner()
+    return capability.owner
+
+
+def _drop_if_current(owner_id: int, token: object) -> None:
+    current = _REGISTRY.get(owner_id)
+    if current is None or current.registry_token is not token:
+        return None
+    _REGISTRY.pop(owner_id, None)
 
 
 def unregister(owner: object) -> None:

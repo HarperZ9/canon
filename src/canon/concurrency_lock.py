@@ -99,7 +99,7 @@ def release_lock(owner: object, root: object, name: object, token: object, path:
         raise
     try:
         _backend.delete_capability(capability)
-        capability.released = True
+        _caps.mark_released(owner, capability)
     except _backend.RetryableReleaseError:
         raise
     except LockError:

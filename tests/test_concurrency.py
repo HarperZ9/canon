@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 import errno
+import gc
 import hashlib
 import os
 import socket
+import weakref
 from pathlib import Path
 
 import pytest
@@ -41,6 +43,21 @@ def _restore_displaced_lock_dir(lock_dir: Path, displaced: Path) -> None:
         lock_dir.unlink()
     if displaced.exists():
         displaced.rename(lock_dir)
+
+
+def _collect_garbage() -> None:
+    for _ in range(3):
+        gc.collect()
+
+
+def _assert_lock_collected(lock_ref: weakref.ReferenceType[RunLock], owner_id: int) -> None:
+    _collect_garbage()
+    assert lock_ref() is None
+    assert owner_id not in concurrency_capability._REGISTRY
+
+
+class _WeakOwner:
+    pass
 
 
 class _HostileSourceStateItem(SourceStateItem):
@@ -482,6 +499,8 @@ def test_windows_release_delete_failure_preserves_capability_for_retry(
     lock_path = tmp_path / ".canon-locks" / "workspace.lock"
     lock_path.parent.mkdir()
     lock = RunLock(root=tmp_path, name="workspace", token="retry-token", path=lock_path)
+    owner_id = id(lock)
+    lock_ref = weakref.ref(lock)
     cap = concurrency_capability.LockCapability(
         tmp_path, "workspace", "workspace.lock", "retry-token", lock_path, "windows", 10, 20, (2,)
     )
@@ -519,6 +538,9 @@ def test_windows_release_delete_failure_preserves_capability_for_retry(
     assert cap.released
     assert (cap.dir_ref, cap.file_ref) == (-1, -1)
     assert closed == [20, 10]
+
+    del lock
+    _assert_lock_collected(lock_ref, owner_id)
 
 
 def test_windows_release_native_replacement_after_child_close_survives(
@@ -598,6 +620,63 @@ def test_release_is_idempotent_after_success(tmp_path: Path) -> None:
     release_run_lock(lock)
     release_run_lock(lock)
     assert not lock.path.exists()
+
+
+def test_successful_release_does_not_keep_run_lock_alive_after_drop(tmp_path: Path) -> None:
+    lock = acquire_run_lock(tmp_path, "workspace")
+    owner_id = id(lock)
+    lock_ref = weakref.ref(lock)
+
+    release_run_lock(lock)
+    release_run_lock(lock)
+    assert concurrency_capability.lookup(lock) is not None
+
+    del lock
+    _assert_lock_collected(lock_ref, owner_id)
+
+
+def test_repeated_successful_releases_do_not_accumulate_registry_entries(tmp_path: Path) -> None:
+    lock_refs: list[weakref.ReferenceType[RunLock]] = []
+    owner_ids: list[int] = []
+
+    for index in range(20):
+        lock = acquire_run_lock(tmp_path, f"workspace-{index}")
+        owner_ids.append(id(lock))
+        lock_refs.append(weakref.ref(lock))
+        release_run_lock(lock)
+        del lock
+
+    _collect_garbage()
+
+    assert all(lock_ref() is None for lock_ref in lock_refs)
+    assert not any(owner_id in concurrency_capability._REGISTRY for owner_id in owner_ids)
+
+
+def test_stale_released_registry_entry_cannot_authorize_reused_id(tmp_path: Path) -> None:
+    stale_owner = _WeakOwner()
+    stale_ref = weakref.ref(stale_owner)
+    del stale_owner
+    _collect_garbage()
+    assert stale_ref() is None
+
+    lock_dir = tmp_path / ".canon-locks"
+    lock_path = lock_dir / "workspace.lock"
+    token = "stale-token"
+    lock_dir.mkdir()
+    lock_path.write_text(token, encoding="utf-8")
+    lock = RunLock(root=tmp_path, name="workspace", token=token, path=lock_path)
+    cap = concurrency_capability.LockCapability(
+        tmp_path, "workspace", "workspace.lock", token, lock_path, "fake", -1, -1, (9,)
+    )
+    cap.owner = stale_ref
+    cap.released = True
+    concurrency_capability._REGISTRY[id(lock)] = cap
+
+    with pytest.raises(LockError, match="lock-stale"):
+        release_run_lock(lock)
+
+    assert id(lock) not in concurrency_capability._REGISTRY
+    assert lock_path.read_text(encoding="utf-8") == token
 
 
 def test_release_uses_capability_when_lock_dir_swapped_before_release(tmp_path: Path) -> None:

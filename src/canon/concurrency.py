@@ -11,7 +11,7 @@ LockError = _locks.LockError
 LockError.__module__ = __name__
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, weakref_slot=True)
 class RunLock:
     root: Path
     name: str
