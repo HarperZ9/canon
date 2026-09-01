@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -64,6 +65,17 @@ def _source_state_digest(workspace: Path, records: str, atoms: str) -> str:
 
 def _tree(root: Path) -> list[str]:
     return sorted(path.relative_to(root).as_posix() for path in root.rglob("*"))
+
+
+class _HostileChunkStream(io.StringIO):
+    def read(self, size: int = -1) -> object:
+        del size
+        return _HostileChunk()
+
+
+class _HostileChunk:
+    def __repr__(self) -> str:
+        return "leaked-secret-token"
 
 
 def test_bootstrap_fixtures_use_authoritative_atom_and_record_schema() -> None:
@@ -195,6 +207,39 @@ def test_stdin_may_be_consumed_once_and_only_from_injected_stream(tmp_path: Path
     assert _json(stdout)["message"] == "invalid compile input"
 
 
+def test_stdin_is_rejected_once_utf8_bytes_exceed_source_limit(tmp_path: Path) -> None:
+    from canon.cli_artifacts import MAX_SOURCE_BYTES
+
+    workspace = tmp_path / "work"
+    workspace.mkdir()
+    _copy_inputs(workspace)
+
+    code, stdout, stderr = _run(
+        ["--json", "preview", *_base_args(workspace), "--records", "-"],
+        stdin=io.StringIO("\n" * (MAX_SOURCE_BYTES + 1)),
+    )
+
+    assert code == EX_USAGE
+    assert stderr == ""
+    assert _json(stdout)["failure_code"] == "invalid_args"
+
+
+def test_stdin_hostile_read_chunk_is_sanitized(tmp_path: Path) -> None:
+    workspace = tmp_path / "work"
+    workspace.mkdir()
+    _copy_inputs(workspace)
+
+    code, stdout, stderr = _run(
+        ["--json", "preview", *_base_args(workspace), "--records", "-"],
+        stdin=_HostileChunkStream(),
+    )
+
+    assert code == EX_USAGE
+    assert stderr == ""
+    assert _json(stdout)["failure_code"] == "invalid_args"
+    assert "leaked-secret-token" not in stdout + stderr
+
+
 @pytest.mark.parametrize(
     "body",
     [
@@ -322,11 +367,171 @@ def test_critical_ids_and_guided_target_are_reported_honestly(tmp_path: Path) ->
     assert data["target"]["host_enforcement_observed"] is False
 
 
+def test_compile_publish_parent_swap_does_not_create_outside_bundle_or_stage(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import canon.cli_publish as cli_publish
+
+    anchor = tmp_path / "anchor"
+    workspace = anchor / "work"
+    outside_workspace = tmp_path / "outside-work"
+    displaced = tmp_path / "displaced-work"
+    workspace.mkdir(parents=True)
+    outside_workspace.mkdir()
+    _copy_inputs(workspace)
+    attempted = False
+    swapped = False
+
+    def attempt_swap() -> None:
+        nonlocal attempted, swapped
+        attempted = True
+        try:
+            workspace.rename(displaced)
+            outside_workspace.rename(workspace)
+            swapped = True
+        except OSError:
+            pass
+
+    if os.name == "nt":
+        real_create = cli_publish._win.nt_create_relative
+
+        def swap_before_stage_create(
+            dir_handle: int,
+            name: str,
+            access: int,
+            share: int,
+            disposition: int,
+            options: int,
+        ) -> int:
+            if name.startswith(".canon-compile-") and not attempted:
+                attempt_swap()
+            return real_create(dir_handle, name, access, share, disposition, options)
+
+        monkeypatch.setattr(cli_publish._win, "nt_create_relative", swap_before_stage_create)
+    else:
+        real_mkdir = cli_publish.os.mkdir
+
+        def swap_before_stage_mkdir(path: object, *args: object, **kwargs: object) -> object:
+            if isinstance(path, str) and path.startswith(".canon-compile-") and not attempted:
+                attempt_swap()
+            return real_mkdir(path, *args, **kwargs)
+
+        monkeypatch.setattr(cli_publish.os, "mkdir", swap_before_stage_mkdir)
+
+    code, stdout, stderr = _run(["--json", "compile", *_base_args(workspace), "--out", "bundle"])
+
+    assert attempted
+    if swapped:
+        assert code == EX_SECURITY
+        assert _json(stdout)["failure_code"] == "unsafe_path"
+        assert not (workspace / "bundle").exists()
+        assert not any(path.name.startswith(".canon-compile-") for path in workspace.iterdir())
+        assert not any(path.name.startswith(".canon-compile-") for path in displaced.iterdir())
+    else:
+        assert code == EX_OK
+        assert (workspace / "bundle").is_dir()
+    assert stderr == ""
+
+
+def test_compile_publish_without_safe_backend_fails_before_stage_mutation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import canon.cli_publish as cli_publish
+
+    workspace = tmp_path / "work"
+    workspace.mkdir()
+    _copy_inputs(workspace)
+    if os.name == "nt":
+        monkeypatch.setattr(cli_publish._win, "supported", lambda: False)
+    else:
+        monkeypatch.setattr(cli_publish, "_posix_supported", lambda: False)
+
+    code, stdout, stderr = _run(["--json", "compile", *_base_args(workspace), "--out", "bundle"])
+
+    assert code == EX_SECURITY
+    assert stderr == ""
+    assert _json(stdout)["failure_code"] == "unsafe_path"
+    assert not (workspace / "bundle").exists()
+    assert not any(path.name.startswith(".canon-compile-") for path in workspace.iterdir())
+
+
+def test_compile_publish_stage_swap_does_not_write_outside_or_publish_symlink(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import canon.cli_publish as cli_publish
+
+    workspace = tmp_path / "work"
+    outside = tmp_path / "outside"
+    moved_stage = tmp_path / "moved-stage"
+    workspace.mkdir()
+    outside.mkdir()
+    _copy_inputs(workspace)
+    attempted = False
+    swapped = False
+
+    def attempt_stage_swap() -> None:
+        nonlocal attempted, swapped
+        attempted = True
+        try:
+            stage = next(path for path in workspace.iterdir() if path.name.startswith(".canon-compile-"))
+            stage.rename(moved_stage)
+            stage.symlink_to(outside, target_is_directory=True)
+            swapped = True
+        except (OSError, StopIteration):
+            pass
+
+    if os.name == "nt":
+        real_create = cli_publish._win.nt_create_relative
+
+        def swap_before_stage_file_create(
+            dir_handle: int,
+            name: str,
+            access: int,
+            share: int,
+            disposition: int,
+            options: int,
+        ) -> int:
+            if name in ARTIFACTS and not attempted:
+                attempt_stage_swap()
+            return real_create(dir_handle, name, access, share, disposition, options)
+
+        monkeypatch.setattr(cli_publish._win, "nt_create_relative", swap_before_stage_file_create)
+    else:
+        real_open = cli_publish.os.open
+
+        def swap_before_stage_file_open(path: object, *args: object, **kwargs: object) -> int:
+            if path in ARTIFACTS and not attempted:
+                attempt_stage_swap()
+            return real_open(path, *args, **kwargs)
+
+        monkeypatch.setattr(cli_publish.os, "open", swap_before_stage_file_open)
+
+    code, stdout, stderr = _run(["--json", "compile", *_base_args(workspace), "--out", "bundle"])
+
+    assert attempted
+    if swapped:
+        assert code == EX_SECURITY
+        assert _json(stdout)["failure_code"] == "unsafe_path"
+        assert _tree(outside) == []
+        assert not (workspace / "bundle").exists()
+        assert not any(path.is_symlink() for path in workspace.iterdir())
+        if moved_stage.exists():
+            assert not any(path.name in ARTIFACTS for path in moved_stage.rglob("*"))
+    else:
+        assert code == EX_OK
+        assert _tree(outside) == []
+        assert (workspace / "bundle").is_dir()
+    assert stderr == ""
+
+
 def test_output_path_rejects_symlink_parent_and_cleans_stage_on_publish_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import canon.cli_artifacts as cli_artifacts
+    import canon.cli_publish as cli_publish
 
     workspace = tmp_path / "work"
     outside = tmp_path / "outside"
@@ -343,11 +548,11 @@ def test_output_path_rejects_symlink_parent_and_cleans_stage_on_publish_failure(
     assert _json(blocked[1])["failure_code"] == "unsafe_path"
     assert _tree(outside) == []
 
-    def fail_rename(src: object, dst: object) -> None:
-        del src, dst
+    def fail_rename(parent: object, stage: object, target_name: object) -> None:
+        del parent, stage, target_name
         raise OSError("leaked-secret-token")
 
-    monkeypatch.setattr(cli_artifacts.os, "rename", fail_rename)
+    monkeypatch.setattr(cli_publish, "_rename_stage", fail_rename)
     code, stdout, stderr = _run(["--json", "compile", *_base_args(workspace), "--out", "bundle"])
 
     assert code == 8

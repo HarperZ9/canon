@@ -6,13 +6,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .canonical_json import sha256_bytes
+from .cli_publish import PublishError, publish_new_bundle
 from .path_policy import PathPolicyError, assert_not_protected, is_reparse_point, resolve_under_root
 from .source_state import SourceStateItem
 
 ARTIFACT_NAMES = ("canon.capsule.json", "CANON.md", "readiness-probe.json")
 MAX_SOURCE_BYTES = 2 * 1024 * 1024
-_STAGE_PREFIX = ".canon-compile-"
-_TEMP_ATTEMPTS = 8
 
 
 class ArtifactError(Exception):
@@ -77,20 +76,15 @@ def publish_artifacts(raw_out: object, *, workspace: WorkspaceRoot, artifacts: d
     expected = _artifact_items(artifacts)
     if _exists_or_link(target):
         return _preflight_existing(target, expected)
-    parent = _safe_parent(target)
-    stage = _make_stage(parent)
     try:
-        _write_stage(stage, expected)
-        os.rename(stage, target)
+        publish_new_bundle(target, expected, workspace_path=workspace.path, workspace_key=workspace.stat_key)
         return "created"
+    except PublishError as exc:
+        raise ArtifactError(exc.code) from exc
     except FileExistsError as exc:
         raise ArtifactError("conflict") from exc
-    except ArtifactError:
-        raise
     except OSError as exc:
         raise ArtifactError("io_error") from exc
-    finally:
-        _cleanup_stage(stage, tuple(artifacts))
 
 
 def output_relative(raw_out: object, *, workspace: WorkspaceRoot) -> str:
@@ -118,17 +112,6 @@ def _assert_workspace_stable(workspace: WorkspaceRoot) -> None:
         raise ArtifactError("unsafe_path")
     if is_reparse_point(workspace.path):
         raise ArtifactError("unsafe_path")
-
-
-def _safe_parent(target: Path) -> Path:
-    parent = target.parent
-    try:
-        info = parent.lstat()
-    except OSError as exc:
-        raise ArtifactError("unsafe_path") from exc
-    if not stat.S_ISDIR(info.st_mode) or is_reparse_point(parent):
-        raise ArtifactError("unsafe_path")
-    return parent
 
 
 def _artifact_items(artifacts: dict[str, bytes]) -> tuple[tuple[str, bytes], ...]:
@@ -217,46 +200,6 @@ def _read_fd(fd: int, size: int) -> bytes:
     return b"".join(chunks)
 
 
-def _make_stage(parent: Path) -> Path:
-    for _attempt in range(_TEMP_ATTEMPTS):
-        name = f"{_STAGE_PREFIX}{os.urandom(8).hex()}.tmp"
-        stage = parent / name
-        try:
-            stage.mkdir(mode=0o700)
-            return stage
-        except FileExistsError:
-            continue
-        except OSError as exc:
-            raise ArtifactError("io_error") from exc
-    raise ArtifactError("io_error")
-
-
-def _write_stage(stage: Path, expected: tuple[tuple[str, bytes], ...]) -> None:
-    for name, data in expected:
-        path = stage / name
-        try:
-            with open(path, "xb") as handle:
-                handle.write(data)
-                handle.flush()
-                os.fsync(handle.fileno())
-        except OSError as exc:
-            raise ArtifactError("io_error") from exc
-
-
-def _cleanup_stage(stage: Path, names: tuple[str, ...]) -> None:
-    if not stage.name.startswith(_STAGE_PREFIX):
-        return
-    for name in names:
-        try:
-            (stage / name).unlink(missing_ok=True)
-        except OSError:
-            pass
-    try:
-        stage.rmdir()
-    except OSError:
-        pass
-
-
 def _exists_or_link(path: Path) -> bool:
     try:
         return path.exists() or path.is_symlink()
@@ -273,4 +216,6 @@ def _relative_text(path: Path, root: Path) -> str:
 
 
 def _stat_key(info: os.stat_result) -> tuple[int, int]:
+    if os.name == "nt":
+        return (info.st_dev & 0xFFFFFFFF, info.st_ino)
     return (info.st_dev, info.st_ino)

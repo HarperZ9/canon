@@ -8,7 +8,7 @@ from .adapter import descriptor_for, validate_adapter_descriptor
 from .atom import CanonAtom, validate_atom
 from .canonical_json import canonical_json_text, sha256_bytes, sha256_text
 from .capsule import Budget, CapsuleBuildError, CapsuleCompileRequest, CapsuleTarget, SourceState, compile_capsule
-from .cli_artifacts import ARTIFACT_NAMES, ArtifactError, SourceBytes, checked_workspace, output_relative, publish_artifacts, read_source_file
+from .cli_artifacts import ARTIFACT_NAMES, MAX_SOURCE_BYTES, ArtifactError, SourceBytes, checked_workspace, output_relative, publish_artifacts, read_source_file
 from .cli_format import make_result, write_result
 from .schema import Record
 from .source_state import source_state_sha256
@@ -16,6 +16,7 @@ from .validator import validate_record
 
 _BOMS = (b"\xef\xbb\xbf", b"\xff\xfe", b"\xfe\xff", b"\x00\x00\xfe\xff", b"\xff\xfe\x00\x00")
 _BUDGETS = {"needle": 2048, "handoff": 8192, "archive": 32768, "custom": 8192}
+_STDIN_CHUNK_CHARS = 65536
 
 
 class CompileCliError(Exception):
@@ -97,15 +98,25 @@ def _load_sources(parsed: object, *, workspace, stdin: TextIO | None) -> _Loaded
 def _stdin_source(stdin: TextIO | None, role: str) -> SourceBytes:
     if stdin is None:
         raise CompileCliError("invalid_args")
+    chunks: list[bytes] = []
+    total = 0
     try:
-        text = stdin.read()
-    except Exception as exc:
-        raise CompileCliError("invalid_args") from exc
-    if type(text) is not str:
-        raise CompileCliError("invalid_args")
-    try:
-        return SourceBytes(f"stdin-{role}", text.encode("utf-8"))
-    except UnicodeEncodeError as exc:
+        while True:
+            text = stdin.read(_STDIN_CHUNK_CHARS)
+            if type(text) is not str:
+                raise CompileCliError("invalid_args")
+            if len(text) > _STDIN_CHUNK_CHARS:
+                raise CompileCliError("invalid_args")
+            if text == "":
+                return SourceBytes(f"stdin-{role}", b"".join(chunks))
+            data = text.encode("utf-8")
+            total += len(data)
+            if total > MAX_SOURCE_BYTES:
+                raise CompileCliError("invalid_args")
+            chunks.append(data)
+    except CompileCliError:
+        raise
+    except (OSError, UnicodeEncodeError) as exc:
         raise CompileCliError("invalid_args") from exc
 
 
