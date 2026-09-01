@@ -27,6 +27,16 @@ def _event_states(report: object) -> tuple[str, ...]:
     return tuple(event.state for event in report.events)  # type: ignore[attr-defined]
 
 
+def _success_report():
+    from canon.bootstrap import run_bootstrap
+
+    return run_bootstrap(_config(target="chatgpt-app", tier="guided"))
+
+
+def _report_serializers(report: object):
+    return (report.to_dict, report.to_result_data)  # type: ignore[attr-defined]
+
+
 def test_bootstrap_states_are_exact_and_ordered() -> None:
     from canon.bootstrap import BOOTSTRAP_STATES
 
@@ -265,6 +275,69 @@ def test_report_constructor_rejects_tampered_event_invariants() -> None:
         BootstrapReport(False, "tier_mislabeled", "bad", (ok_event,))
     with pytest.raises(TypeError, match="invalid bootstrap events"):
         BootstrapReport(False, "tier_mislabeled", "bad", (failed_event,))
+
+
+def test_event_serialization_revalidates_state_code_and_data_after_tamper() -> None:
+    from canon.bootstrap import BootstrapEvent
+
+    event = BootstrapEvent("detect_entry", True, "ok", "detected", {"safe": True})
+    object.__setattr__(event, "state", "not_a_state")
+    with pytest.raises(TypeError, match="invalid bootstrap event"):
+        event.to_dict()
+
+    event = BootstrapEvent("detect_entry", True, "ok", "detected")
+    object.__setattr__(event, "failure_code", "tier_mislabeled")
+    with pytest.raises(TypeError, match="invalid bootstrap event"):
+        event.to_dict()
+
+    event = BootstrapEvent("detect_entry", True, "ok", "detected")
+    object.__setattr__(event, "data", {"bad": object()})
+    with pytest.raises(TypeError, match="invalid bootstrap event"):
+        event.to_dict()
+
+
+def test_report_serialization_revalidates_shortened_success_events() -> None:
+    report = _success_report()
+    object.__setattr__(report, "events", report.events[:-1])
+
+    for serialize in _report_serializers(report):
+        with pytest.raises(TypeError, match="invalid bootstrap report"):
+            serialize()
+
+
+def test_report_serialization_revalidates_report_code_ok_and_exit_tamper() -> None:
+    for field, value in (("ok", False), ("failure_code", "tier_mislabeled"), ("exit_code", 7)):
+        report = _success_report()
+        object.__setattr__(report, field, value)
+
+        for serialize in _report_serializers(report):
+            with pytest.raises(TypeError, match="invalid bootstrap report"):
+                serialize()
+
+
+def test_report_serialization_revalidates_nested_event_tamper() -> None:
+    report = _success_report()
+    object.__setattr__(report.events[0], "failure_code", "tier_mislabeled")
+
+    for serialize in _report_serializers(report):
+        with pytest.raises(TypeError, match="invalid bootstrap events"):
+            serialize()
+
+
+def test_report_serialization_revalidates_data_tamper_without_repr_leak() -> None:
+    class Hostile:
+        def __repr__(self) -> str:
+            return "leaked-secret-token"
+
+    report = _success_report()
+    object.__setattr__(report, "data", {"bad": Hostile()})
+
+    for serialize in _report_serializers(report):
+        with pytest.raises(TypeError) as excinfo:
+            serialize()
+        message = str(excinfo.value)
+        assert "invalid bootstrap report" in message
+        assert "leaked-secret-token" not in message
 
 
 def test_event_order_is_always_terminal_prefix() -> None:

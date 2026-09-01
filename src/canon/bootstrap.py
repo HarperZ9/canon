@@ -59,6 +59,7 @@ class BootstrapEvent:
         object.__setattr__(self, "data", snapshot_data(self.data))
 
     def to_dict(self) -> dict[str, object]:
+        _require_event_serializable(self)
         return {
             "data": thaw_mapping_or_none(self.data),
             "failure_code": self.failure_code,
@@ -87,6 +88,7 @@ class BootstrapReport:
         object.__setattr__(self, "exit_code", exit_code_for(self.failure_code))
 
     def to_dict(self) -> dict[str, object]:
+        _require_report_serializable(self)
         return {
             "data": thaw_mapping_or_none(self.data),
             "events": [event.to_dict() for event in self.events],
@@ -97,6 +99,7 @@ class BootstrapReport:
         }
 
     def to_result_data(self) -> dict[str, object]:
+        _require_report_serializable(self)
         data = thaw_mapping_or_none(self.data) or {}
         data["events"] = [event.to_dict() for event in self.events]
         return data
@@ -218,6 +221,40 @@ def _require_state(state: object) -> None:
     if type(state) is not str or state not in BOOTSTRAP_STATES:
         raise TypeError("invalid bootstrap state")
 
+
+def _require_event_serializable(event: BootstrapEvent) -> None:
+    try:
+        _require_state(event.state)
+        require_bool(event.ok, "event ok")
+        safe_text(event.failure_code, "event failure_code")
+        safe_text(event.message, "event message")
+        _require_event_invariant(event)
+        _require_serializable_data(event.data, "invalid bootstrap event")
+    except TypeError:
+        raise TypeError("invalid bootstrap event") from None
+
+
+def _require_report_serializable(report: BootstrapReport) -> None:
+    try:
+        require_bool(report.ok, "report ok")
+        safe_text(report.failure_code, "report failure_code")
+        safe_text(report.message, "report message")
+    except TypeError:
+        raise TypeError("invalid bootstrap report") from None
+    try:
+        _require_events(report.events)
+        for event in report.events:
+            _require_event_serializable(event)
+    except TypeError:
+        raise TypeError("invalid bootstrap events") from None
+    try:
+        _require_report_invariant(report)
+        _require_report_exit_code(report)
+        _require_serializable_data(report.data, "invalid bootstrap report")
+    except TypeError:
+        raise TypeError("invalid bootstrap report") from None
+
+
 def _require_event_invariant(event: BootstrapEvent) -> None:
     if event.ok != (event.failure_code == "ok"):
         raise TypeError("invalid bootstrap event")
@@ -242,15 +279,21 @@ def _require_report_invariant(report: BootstrapReport) -> None:
         raise TypeError("invalid bootstrap report")
 
 
+def _require_report_exit_code(report: BootstrapReport) -> None:
+    expected = exit_code_for(report.failure_code)
+    if type(report.exit_code) is not int or isinstance(report.exit_code, bool) or report.exit_code != expected:
+        raise TypeError("invalid bootstrap report")
+
+
+def _require_serializable_data(data: Mapping[str, object] | None, message: str) -> None:
+    try:
+        snapshot_data(thaw_mapping_or_none(data))
+    except TypeError:
+        raise TypeError(message) from None
+
+
 def _event_states(events: tuple[BootstrapEvent, ...]) -> tuple[str, ...]:
     return tuple(event.state for event in events)
 
 
-__all__ = [
-    "BOOTSTRAP_STATES",
-    "BootstrapConfig",
-    "BootstrapConfigError",
-    "BootstrapEvent",
-    "BootstrapReport",
-    "run_bootstrap",
-]
+__all__ = ["BOOTSTRAP_STATES", "BootstrapConfig", "BootstrapConfigError", "BootstrapEvent", "BootstrapReport", "run_bootstrap"]
