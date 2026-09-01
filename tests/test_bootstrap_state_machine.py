@@ -59,6 +59,33 @@ def test_non_enforced_placeholder_reaches_full_prefix_with_adapter_tiers() -> No
     assert report.data["requested_tier"] == "guided"  # type: ignore[index]
 
 
+def test_unsupported_descriptor_terminates_before_lifecycle_release(monkeypatch: pytest.MonkeyPatch) -> None:
+    import canon.bootstrap as bootstrap
+    from canon.adapter import AdapterDescriptor
+    from canon.exit_codes import EX_UNSUPPORTED
+
+    descriptor = AdapterDescriptor(
+        adapter_id="retired-target",
+        display_name="Retired Target",
+        version="1",
+        integration_tier="unsupported",
+        target_surfaces=("CANON.md",),
+        import_modes=("file",),
+        export_modes=("stdout",),
+        bootstrap={"can_block_before_work": False},
+    )
+    monkeypatch.setattr(bootstrap, "descriptor_for", lambda target: descriptor)
+
+    report = bootstrap.run_bootstrap(_config(target="retired-target", tier="unsupported"))
+
+    assert report.ok is False
+    assert report.failure_code == "unsupported_lifecycle"
+    assert report.exit_code == EX_UNSUPPORTED
+    assert _event_states(report) == ("detect_entry",)
+    assert report.events[0].failure_code == "unsupported_lifecycle"
+    assert "release_to_work" not in _event_states(report)
+
+
 @pytest.mark.parametrize("target", ("chatgpt-app", "local-runner"))
 def test_guided_targets_forced_to_enforced_fail_tier_mislabeled(target: str) -> None:
     from canon.bootstrap import run_bootstrap
@@ -93,11 +120,10 @@ class _HostileStr(str):
         return "leaked-secret-token"
 
 
-def test_malformed_config_fails_before_events_without_hostile_repr() -> None:
-    from canon.bootstrap import BootstrapConfig, run_bootstrap
-    from canon.exit_codes import EX_USAGE
+def test_config_constructor_rejects_malformed_values_without_hostile_repr() -> None:
+    from canon.bootstrap import BootstrapConfig, BootstrapConfigError
 
-    hostile = run_bootstrap(
+    with pytest.raises(BootstrapConfigError) as hostile:
         BootstrapConfig(
             workspace="C:/work/canon",
             state_dir="C:/work/canon/.canon",
@@ -107,15 +133,39 @@ def test_malformed_config_fails_before_events_without_hostile_repr() -> None:
             offline=False,
             run_id=_HostileStr("run-1"),
         )
-    )
-    nested = run_bootstrap(_config(readiness_response={"ids": [object()]}))
+    with pytest.raises(BootstrapConfigError) as nested:
+        _config(readiness_response={"ids": [object()]})
 
-    for report in (hostile, nested):
-        assert report.ok is False
-        assert report.failure_code == "invalid_args"
-        assert report.exit_code == EX_USAGE
-        assert report.events == ()
-        assert "leaked-secret-token" not in report.message
+    assert "leaked-secret-token" not in str(hostile.value)
+    assert "object" not in str(nested.value)
+
+
+def test_run_bootstrap_revalidates_tampered_config_as_empty_event_invalid_args() -> None:
+    from canon.bootstrap import run_bootstrap
+    from canon.exit_codes import EX_USAGE
+
+    config = _config()
+    object.__setattr__(config, "run_id", _HostileStr("run-1"))
+    report = run_bootstrap(config)
+
+    assert report.ok is False
+    assert report.failure_code == "invalid_args"
+    assert report.exit_code == EX_USAGE
+    assert report.events == ()
+    assert "leaked-secret-token" not in report.message
+
+
+def test_config_snapshots_readiness_response_before_caller_mutation() -> None:
+    response = {"ids": ["goal-1"], "nested": {"ok": True}}
+    config = _config(readiness_response=response)
+
+    response["ids"].append("goal-2")  # type: ignore[attr-defined]
+    response["nested"]["ok"] = False  # type: ignore[index]
+
+    assert config.readiness_response["ids"] == ("goal-1",)  # type: ignore[index]
+    assert config.readiness_response["nested"]["ok"] is True  # type: ignore[index]
+    with pytest.raises(TypeError):
+        config.readiness_response["nested"]["ok"] = False  # type: ignore[index]
 
 
 def test_enforced_placeholder_without_readiness_response_fails_gate_code(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -166,6 +216,55 @@ def test_reports_and_events_are_immutable_snapshots() -> None:
 
     assert report.data["adapter_id"] == "chatgpt-app"  # type: ignore[index]
     assert report.events[0].data["state"] == "detect_entry"  # type: ignore[index]
+
+
+def test_event_constructor_enforces_ok_failure_code_invariant() -> None:
+    from canon.bootstrap import BootstrapEvent
+
+    with pytest.raises(TypeError, match="invalid bootstrap event"):
+        BootstrapEvent("detect_entry", True, "readiness_failed", "bad")
+    with pytest.raises(TypeError, match="invalid bootstrap event"):
+        BootstrapEvent("detect_entry", False, "ok", "bad")
+
+
+def test_report_constructor_enforces_terminal_success_and_failure_invariants() -> None:
+    from canon.bootstrap import BOOTSTRAP_STATES, BootstrapEvent, BootstrapReport
+
+    full = tuple(BootstrapEvent(state, True, "ok", state) for state in BOOTSTRAP_STATES)
+    failed = (BootstrapEvent("detect_entry", False, "tier_mislabeled", "bad"),)
+    mismatch = (BootstrapEvent("detect_entry", False, "tier_mislabeled", "bad"),)
+
+    assert BootstrapReport(True, "ok", "ready", full).exit_code == 0
+    assert BootstrapReport(False, "invalid_args", "invalid bootstrap config", ()).exit_code == 2
+    assert BootstrapReport(False, "tier_mislabeled", "bad", failed).exit_code == 7
+
+    with pytest.raises(TypeError, match="invalid bootstrap report"):
+        BootstrapReport(True, "ok", "ready", full[:-1])
+    with pytest.raises(TypeError, match="invalid bootstrap report"):
+        BootstrapReport(True, "readiness_failed", "ready", full)
+    with pytest.raises(TypeError, match="invalid bootstrap report"):
+        BootstrapReport(False, "ok", "bad", failed)
+    with pytest.raises(TypeError, match="invalid bootstrap report"):
+        BootstrapReport(False, "readiness_failed", "bad", mismatch)
+    with pytest.raises(TypeError, match="invalid bootstrap report"):
+        BootstrapReport(False, "readiness_failed", "bad", ())
+    with pytest.raises(TypeError, match="invalid bootstrap report"):
+        BootstrapReport(False, "invalid_args", "bad", ())
+
+
+def test_report_constructor_rejects_tampered_event_invariants() -> None:
+    from canon.bootstrap import BootstrapEvent, BootstrapReport
+
+    ok_event = BootstrapEvent("detect_entry", True, "ok", "detected")
+    object.__setattr__(ok_event, "failure_code", "tier_mislabeled")
+
+    failed_event = BootstrapEvent("detect_entry", False, "tier_mislabeled", "bad")
+    object.__setattr__(failed_event, "ok", True)
+
+    with pytest.raises(TypeError, match="invalid bootstrap events"):
+        BootstrapReport(False, "tier_mislabeled", "bad", (ok_event,))
+    with pytest.raises(TypeError, match="invalid bootstrap events"):
+        BootstrapReport(False, "tier_mislabeled", "bad", (failed_event,))
 
 
 def test_event_order_is_always_terminal_prefix() -> None:

@@ -22,6 +22,7 @@ _FAILURE_EXIT_CODES = {
     "conflict": EX_CONFLICT,
     "critical_atom_loss": EX_BUDGET,
     "tier_mislabeled": EX_UNSUPPORTED,
+    "unsupported_lifecycle": EX_UNSUPPORTED,
     "io_error": EX_IO,
 }
 

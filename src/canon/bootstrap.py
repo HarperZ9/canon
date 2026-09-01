@@ -1,12 +1,17 @@
 from __future__ import annotations
 
-import math
-import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from types import MappingProxyType
 
-from .adapter import INTEGRATION_TIERS, assert_requested_tier_allowed, descriptor_for
+from .adapter import assert_requested_tier_allowed, descriptor_for
+from .bootstrap_validation import (
+    BootstrapConfigError,
+    require_bool,
+    safe_text,
+    snapshot_config_values,
+    snapshot_data,
+    thaw_mapping_or_none,
+)
 from .exit_codes import exit_code_for
 
 BOOTSTRAP_STATES = (
@@ -21,13 +26,6 @@ BOOTSTRAP_STATES = (
     "release_to_work",
 )
 
-_ADAPTER_ID_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
-_TOKEN_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
-
-
-class BootstrapConfigError(ValueError): pass
-
-
 @dataclass(frozen=True, slots=True)
 class BootstrapConfig:
     workspace: str
@@ -38,6 +36,10 @@ class BootstrapConfig:
     offline: bool
     run_id: str
     readiness_response: Mapping[str, object] | None = None
+
+    def __post_init__(self) -> None:
+        for name, value in _snapshot_config(self).items():
+            object.__setattr__(self, name, value)
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,14 +52,15 @@ class BootstrapEvent:
 
     def __post_init__(self) -> None:
         _require_state(self.state)
-        _require_bool(self.ok, "event ok")
-        _safe_text(self.failure_code, "event failure_code")
-        _safe_text(self.message, "event message")
-        object.__setattr__(self, "data", _snapshot_mapping_or_none(self.data))
+        require_bool(self.ok, "event ok")
+        safe_text(self.failure_code, "event failure_code")
+        safe_text(self.message, "event message")
+        _require_event_invariant(self)
+        object.__setattr__(self, "data", snapshot_data(self.data))
 
     def to_dict(self) -> dict[str, object]:
         return {
-            "data": _thaw_mapping_or_none(self.data),
+            "data": thaw_mapping_or_none(self.data),
             "failure_code": self.failure_code,
             "message": self.message,
             "ok": self.ok,
@@ -75,16 +78,17 @@ class BootstrapReport:
     exit_code: int = field(init=False)
 
     def __post_init__(self) -> None:
-        _require_bool(self.ok, "report ok")
-        _safe_text(self.failure_code, "report failure_code")
-        _safe_text(self.message, "report message")
+        require_bool(self.ok, "report ok")
+        safe_text(self.failure_code, "report failure_code")
+        safe_text(self.message, "report message")
         _require_events(self.events)
-        object.__setattr__(self, "data", _snapshot_mapping_or_none(self.data))
+        _require_report_invariant(self)
+        object.__setattr__(self, "data", snapshot_data(self.data))
         object.__setattr__(self, "exit_code", exit_code_for(self.failure_code))
 
     def to_dict(self) -> dict[str, object]:
         return {
-            "data": _thaw_mapping_or_none(self.data),
+            "data": thaw_mapping_or_none(self.data),
             "events": [event.to_dict() for event in self.events],
             "exit_code": self.exit_code,
             "failure_code": self.failure_code,
@@ -93,7 +97,7 @@ class BootstrapReport:
         }
 
     def to_result_data(self) -> dict[str, object]:
-        data = _thaw_mapping_or_none(self.data) or {}
+        data = thaw_mapping_or_none(self.data) or {}
         data["events"] = [event.to_dict() for event in self.events]
         return data
 
@@ -111,6 +115,8 @@ def run_bootstrap(config: BootstrapConfig) -> BootstrapReport:
         return _terminal(events, "detect_entry", "invalid_args", "unsupported bootstrap target", {"reason": "unsupported_target"})
 
     base = _adapter_data(descriptor.adapter_id, descriptor.integration_tier, snapshot)
+    if descriptor.integration_tier == "unsupported":
+        return _terminal(events, "detect_entry", "unsupported_lifecycle", "unsupported bootstrap lifecycle", base)
     try:
         assert_requested_tier_allowed(descriptor, snapshot["tier"])
     except ValueError:
@@ -127,16 +133,16 @@ def run_bootstrap(config: BootstrapConfig) -> BootstrapReport:
 def _snapshot_config(config: BootstrapConfig) -> dict[str, object]:
     if type(config) is not BootstrapConfig:
         raise BootstrapConfigError("invalid bootstrap config")
-    return {
-        "workspace": _path_text(config.workspace),
-        "state_dir": _path_text(config.state_dir),
-        "target": _adapter_id(config.target),
-        "tier": _tier(config.tier),
-        "profile": _token(config.profile, "profile"),
-        "offline": _exact_bool(config.offline),
-        "run_id": _token(config.run_id, "run_id"),
-        "readiness_response": _snapshot_response(config.readiness_response),
-    }
+    return snapshot_config_values(
+        workspace=config.workspace,
+        state_dir=config.state_dir,
+        target=config.target,
+        tier=config.tier,
+        profile=config.profile,
+        offline=config.offline,
+        run_id=config.run_id,
+        readiness_response=config.readiness_response,
+    )
 
 
 def _terminal(
@@ -198,6 +204,11 @@ def _require_events(events: object) -> None:
     states = tuple(event.state for event in events if type(event) is BootstrapEvent)
     if len(states) != len(events) or states != BOOTSTRAP_STATES[: len(states)]:
         raise TypeError("invalid bootstrap events")
+    for event in events:
+        try:
+            _require_event_invariant(event)
+        except TypeError:
+            raise TypeError("invalid bootstrap events") from None
     failures = [event for event in events if not event.ok]
     if len(failures) > 1 or (failures and events[-1] is not failures[0]):
         raise TypeError("invalid bootstrap events")
@@ -207,87 +218,39 @@ def _require_state(state: object) -> None:
     if type(state) is not str or state not in BOOTSTRAP_STATES:
         raise TypeError("invalid bootstrap state")
 
-def _snapshot_mapping_or_none(data: Mapping[str, object] | None) -> Mapping[str, object] | None:
-    if data is None:
-        return None
-    if type(data) is not dict:
-        raise TypeError("invalid bootstrap data")
-    return _snapshot_mapping(data)
-
-def _snapshot_mapping(data: dict[str, object]) -> Mapping[str, object]:
-    return MappingProxyType({_safe_text(key, "data key"): _snapshot_value(value) for key, value in data.items()})
-
-def _snapshot_value(value: object) -> object:
-    if value is None or type(value) in (str, bool):
-        return value
-    if type(value) is int:
-        return value
-    if type(value) is float and math.isfinite(value):
-        return value
-    if type(value) is dict:
-        return _snapshot_mapping(value)
-    if type(value) in (list, tuple):
-        return tuple(_snapshot_value(item) for item in value)
-    raise TypeError("invalid bootstrap data")
-
-def _thaw_mapping_or_none(data: Mapping[str, object] | None) -> dict[str, object] | None:
-    if data is None:
-        return None
-    return {key: _thaw_value(value) for key, value in data.items()}
-
-def _thaw_value(value: object) -> object:
-    if isinstance(value, Mapping):
-        return {key: _thaw_value(item) for key, item in value.items()}
-    if type(value) in (list, tuple):
-        return [_thaw_value(item) for item in value]
-    return value
-
-def _path_text(value: object) -> str:
-    if type(value) is not str or value == "" or _has_control(value):
-        raise BootstrapConfigError("invalid bootstrap config")
-    return value
-
-def _adapter_id(value: object) -> str:
-    if type(value) is not str or _ADAPTER_ID_RE.fullmatch(value) is None:
-        raise BootstrapConfigError("invalid bootstrap config")
-    return value
-
-def _tier(value: object) -> str:
-    if type(value) is not str or value not in INTEGRATION_TIERS:
-        raise BootstrapConfigError("invalid bootstrap config")
-    return value
-
-def _token(value: object, name: str) -> str:
-    if type(value) is not str or _TOKEN_RE.fullmatch(value) is None:
-        raise BootstrapConfigError(f"invalid bootstrap {name}")
-    return value
-
-def _exact_bool(value: object) -> bool:
-    if type(value) is not bool:
-        raise BootstrapConfigError("invalid bootstrap config")
-    return value
-
-def _snapshot_response(value: object) -> object:
-    if value is None:
-        return None
-    if type(value) is not dict:
-        raise BootstrapConfigError("invalid bootstrap config")
-    try:
-        return _snapshot_mapping(value)
-    except TypeError as exc:
-        raise BootstrapConfigError("invalid bootstrap config") from exc
-
-def _require_bool(value: object, name: str) -> None:
-    if type(value) is not bool:
-        raise TypeError(f"invalid bootstrap {name}")
-
-def _safe_text(value: object, name: str) -> str:
-    if type(value) is not str or value == "" or _has_control(value):
-        raise TypeError(f"invalid bootstrap {name}")
-    return value
-
-def _has_control(value: str) -> bool:
-    return "\0" in value or any(ord(char) < 32 or ord(char) == 127 for char in value)
+def _require_event_invariant(event: BootstrapEvent) -> None:
+    if event.ok != (event.failure_code == "ok"):
+        raise TypeError("invalid bootstrap event")
 
 
-__all__ = ["BOOTSTRAP_STATES", "BootstrapConfig", "BootstrapEvent", "BootstrapReport", "run_bootstrap"]
+def _require_report_invariant(report: BootstrapReport) -> None:
+    exit_code = exit_code_for(report.failure_code)
+    if report.ok:
+        if report.failure_code != "ok" or exit_code != 0:
+            raise TypeError("invalid bootstrap report")
+        if _event_states(report.events) != BOOTSTRAP_STATES or any(not event.ok for event in report.events):
+            raise TypeError("invalid bootstrap report")
+        return
+    if report.failure_code == "ok" or exit_code == 0:
+        raise TypeError("invalid bootstrap report")
+    if not report.events:
+        if report.failure_code != "invalid_args" or report.message != "invalid bootstrap config":
+            raise TypeError("invalid bootstrap report")
+        return
+    terminal = report.events[-1]
+    if terminal.ok or terminal.failure_code != report.failure_code:
+        raise TypeError("invalid bootstrap report")
+
+
+def _event_states(events: tuple[BootstrapEvent, ...]) -> tuple[str, ...]:
+    return tuple(event.state for event in events)
+
+
+__all__ = [
+    "BOOTSTRAP_STATES",
+    "BootstrapConfig",
+    "BootstrapConfigError",
+    "BootstrapEvent",
+    "BootstrapReport",
+    "run_bootstrap",
+]

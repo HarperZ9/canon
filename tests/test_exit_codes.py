@@ -39,5 +39,6 @@ def test_failure_codes_map_to_stable_process_exit_codes() -> None:
     assert exit_code_for("conflict") == 5
     assert exit_code_for("critical_atom_loss") == 6
     assert exit_code_for("tier_mislabeled") == 7
+    assert exit_code_for("unsupported_lifecycle") == 7
     assert exit_code_for("io_error") == 8
     assert exit_code_for("future-code") == 70
