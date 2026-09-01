@@ -147,6 +147,75 @@ def test_quarantine_path_refuses_protected_path_without_reading(
     assert _openai_key() not in _serialized_result(result)
 
 
+def test_relative_path_inside_protected_cwd_is_quarantined_without_reading(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    protected = tmp_path / ".ssh"
+    protected.mkdir()
+    (protected / "note.txt").write_text(f"token={_openai_key()}", encoding="utf-8")
+    read_attempts: list[Path] = []
+
+    def fail_read(self: Path, *args: object, **kwargs: object) -> bytes:
+        read_attempts.append(self)
+        raise AssertionError("content read")
+
+    monkeypatch.chdir(protected)
+    monkeypatch.setattr(Path, "read_bytes", fail_read)
+    monkeypatch.setattr(Path, "read_text", fail_read)
+
+    result = quarantine_path("note.txt", source_id="relative-protected")
+
+    assert read_attempts == []
+    assert result.safe_text is None
+    assert [finding.code for finding in result.findings] == ["protected-path"]
+
+
+def test_symlink_ancestor_is_rejected_without_reading(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    real_dir = tmp_path / "real"
+    real_dir.mkdir()
+    (real_dir / "note.txt").write_text("clear text", encoding="utf-8")
+    link_dir = tmp_path / "link-dir"
+    try:
+        link_dir.symlink_to(real_dir, target_is_directory=True)
+    except (NotImplementedError, OSError) as exc:
+        pytest.skip(f"symlink unavailable: {exc}")
+    read_attempts: list[Path] = []
+
+    def fail_read(self: Path, *args: object, **kwargs: object) -> bytes:
+        read_attempts.append(self)
+        raise AssertionError("content read")
+
+    monkeypatch.setattr(Path, "read_bytes", fail_read)
+    monkeypatch.setattr(Path, "read_text", fail_read)
+
+    with pytest.raises(SecretQuarantineError, match="reparse-path"):
+        quarantine_path(link_dir / "note.txt", source_id="symlink-ancestor")
+    assert read_attempts == []
+
+
+def test_path_resolution_errors_fail_closed_without_reading(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "note.txt"
+    source.write_text("clear text", encoding="utf-8")
+    read_attempts: list[Path] = []
+
+    def fail_resolve(self: Path, *args: object, **kwargs: object) -> Path:
+        raise OSError("resolution failed")
+
+    def fail_read(self: Path, *args: object, **kwargs: object) -> bytes:
+        read_attempts.append(self)
+        raise AssertionError("content read")
+
+    monkeypatch.setattr(Path, "resolve", fail_resolve)
+    monkeypatch.setattr(Path, "read_bytes", fail_read)
+    monkeypatch.setattr(Path, "read_text", fail_read)
+
+    with pytest.raises(SecretQuarantineError, match="invalid-path"):
+        quarantine_path(source, source_id="resolve-error")
+    assert read_attempts == []
+
+
 def test_quarantine_path_scans_unprotected_utf8_file(tmp_path: Path) -> None:
     canary = _openai_key()
     source = tmp_path / "note.txt"
@@ -157,6 +226,21 @@ def test_quarantine_path_scans_unprotected_utf8_file(tmp_path: Path) -> None:
     assert result.safe_text is None
     assert [finding.code for finding in result.findings] == ["openai-api-key"]
     assert canary not in _serialized_result(result)
+
+
+def test_multi_finding_quarantine_uses_one_source_level_omission() -> None:
+    text = f"{_openai_key()} {_email()} {_ssn()}"
+
+    result = quarantine_text(text, source_id="multi-source")
+
+    assert len(result.findings) == 3
+    omission = result.omissions[0]
+    assert omission.count == 1
+    assert omission.affected_ids == ("multi-source",)
+    assert omission.affected_source_refs == ("multi-source",)
+    assert validate_omission(omission) == []
+    assert validate_transform_receipt(result.receipts[0]) == []
+    assert _openai_key() not in _serialized_result(result)
 
 
 def test_invalid_text_source_and_path_fail_closed_without_raw_leak() -> None:

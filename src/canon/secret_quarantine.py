@@ -67,13 +67,20 @@ def quarantine_text(text: str, *, source_id: str, critical: bool = False) -> Sec
 def quarantine_path(path: str | Path, *, source_id: str, critical: bool = False) -> SecretQuarantine:
     checked_source = _require_source_id(source_id)
     checked_path, raw_path = _require_path(path)
-    protected = _classify_protected(checked_path)
+    unresolved = _unresolved_absolute(checked_path)
+    protected = _has_protected_path(raw_path, unresolved)
     if protected:
         finding = _metadata_finding("protected-path", checked_source, raw_path)
         if critical is True:
             raise SecretQuarantineError(f"critical-secret: {checked_source}")
         return _quarantine((finding,), source_id=checked_source, input_hash=finding.sha256)
-    _reject_reparse_chain(checked_path, checked_source)
+    _reject_reparse_chain(unresolved, checked_source)
+    resolved = _resolve_target(unresolved)
+    if _has_protected_path(resolved):
+        finding = _metadata_finding("protected-path", checked_source, raw_path)
+        if critical is True:
+            raise SecretQuarantineError(f"critical-secret: {checked_source}")
+        return _quarantine((finding,), source_id=checked_source, input_hash=finding.sha256)
     text = _read_utf8_text(checked_path, checked_source)
     return quarantine_text(text, source_id=checked_source, critical=critical)
 
@@ -100,9 +107,9 @@ def _quarantine(
 ) -> SecretQuarantine:
     omission = Omission(
         reason="secret",
-        count=len(findings),
-        affected_ids=_source_refs(source_id, len(findings)),
-        affected_source_refs=_source_refs(source_id, len(findings)),
+        count=1,
+        affected_ids=(source_id,),
+        affected_source_refs=(source_id,),
         critical=False,
         decision="omitted",
         does_not_prove=(_LIMITATION,),
@@ -126,10 +133,6 @@ def _quarantine(
         does_not_prove=(_LIMITATION,),
     )
     return SecretQuarantine(None, findings, (omission,), (receipt,), ("secret",))
-
-
-def _source_refs(source_id: str, count: int) -> tuple[str, ...]:
-    return (source_id,) if count == 1 else tuple(source_id for _ in range(count))
 
 
 def _require_text(text: object) -> str:
@@ -172,7 +175,22 @@ def _require_utf8(value: str, code: str) -> None:
         raise SecretQuarantineError(f"{code}: non-utf8 text") from exc
 
 
-def _classify_protected(path: Path) -> bool:
+def _unresolved_absolute(path: Path) -> Path:
+    return path if path.is_absolute() else Path.cwd() / path
+
+
+def _resolve_target(path: Path) -> Path:
+    try:
+        return path.resolve(strict=False)
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise SecretQuarantineError("invalid-path: cannot resolve path") from exc
+
+
+def _has_protected_path(*paths: str | Path) -> bool:
+    return any(_classify_protected(path) for path in paths)
+
+
+def _classify_protected(path: str | Path) -> bool:
     try:
         return bool(classify_protected_path(path))
     except PathPolicyError as exc:
