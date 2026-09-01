@@ -77,8 +77,8 @@ def snapshot_response(value: object) -> object:
         if type(value) is _FrozenBootstrapMapping:
             _require_serializable_mapping(value)
             return value
-    except TypeError as exc:
-        raise BootstrapConfigError("invalid bootstrap config") from exc
+    except TypeError:
+        raise BootstrapConfigError("invalid bootstrap config") from None
     raise BootstrapConfigError("invalid bootstrap config")
 
 
@@ -176,13 +176,20 @@ def _require_serializable_value(value: object) -> None:
 
 
 def _require_frozen_items(value: object, error: type[Exception]) -> tuple[tuple[str, object], ...]:
-    if type(value) is not _FrozenBootstrapMapping or type(value._items) is not tuple:
-        raise error(_error_message(error))
-    for item in value._items:
+    message = _error_message(error)
+    if type(value) is not _FrozenBootstrapMapping:
+        raise error(message) from None
+    try:
+        items = object.__getattribute__(value, "_items")
+    except AttributeError:
+        raise error(message) from None
+    if type(items) is not tuple:
+        raise error(message) from None
+    for item in items:
         if type(item) is not tuple or len(item) != 2:
-            raise error(_error_message(error))
+            raise error(message) from None
         _safe_key(item[0], error)
-    return value._items
+    return items
 
 
 def _error_message(error: type[Exception]) -> str:

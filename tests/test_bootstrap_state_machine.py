@@ -105,6 +105,33 @@ def _assert_sanitized_type_error(callable_object: object, canary: _Canary, text:
     assert canary.calls == []
 
 
+def _assert_sanitized_error(callable_object: object, error_type: type[Exception], text: str, canary: _Canary | None) -> None:
+    with pytest.raises(error_type) as excinfo:
+        callable_object()  # type: ignore[operator]
+    message = str(excinfo.value)
+    assert text in message
+    assert _Canary.token not in message
+    assert excinfo.value.__cause__ is None
+    if canary is not None:
+        assert canary.calls == []
+
+
+def _malformed_frozen_mapping_cases():
+    from canon.bootstrap import BootstrapEvent
+    from canon.bootstrap_validation import _FrozenBootstrapMapping
+
+    uninitialized = _FrozenBootstrapMapping.__new__(_FrozenBootstrapMapping)
+
+    deleted = BootstrapEvent("detect_entry", True, "ok", "detected", {"safe": True}).data
+    object.__delattr__(deleted, "_items")  # type: ignore[arg-type]
+
+    canary = _Canary()
+    injected = _FrozenBootstrapMapping.__new__(_FrozenBootstrapMapping)
+    object.__setattr__(injected, "_items", canary)
+
+    return (("uninitialized", uninitialized, None), ("deleted", deleted, None), ("injected", injected, canary))
+
+
 def test_bootstrap_states_are_exact_and_ordered() -> None:
     from canon.bootstrap import BOOTSTRAP_STATES
 
@@ -269,6 +296,27 @@ def test_config_internal_snapshot_can_be_revalidated_on_rerun() -> None:
     assert report.ok is True
     assert config.readiness_response["ids"] == ("goal-1",)  # type: ignore[index]
     assert config.readiness_response["nested"]["ok"] is True  # type: ignore[index]
+
+
+def test_config_rejects_malformed_private_readiness_snapshot_without_raw_attribute_error() -> None:
+    from canon.bootstrap import BootstrapConfigError, run_bootstrap
+    from canon.exit_codes import EX_USAGE
+
+    for _, malformed, canary in _malformed_frozen_mapping_cases():
+        _assert_sanitized_error(lambda: _config(readiness_response=malformed), BootstrapConfigError, "invalid bootstrap config", canary)
+
+        config = _config()
+        object.__setattr__(config, "readiness_response", malformed)
+        report = run_bootstrap(config)
+
+        assert report.ok is False
+        assert report.failure_code == "invalid_args"
+        assert report.exit_code == EX_USAGE
+        assert report.events == ()
+        assert "AttributeError" not in report.message
+        assert _Canary.token not in report.message
+        if canary is not None:
+            assert canary.calls == []
 
 
 def test_enforced_placeholder_without_readiness_response_fails_gate_code(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -538,6 +586,43 @@ def test_serialization_rejects_tampered_private_mapping_internals_sanitized() ->
         event.to_dict()
     assert "invalid bootstrap event" in str(excinfo.value)
     assert "object" not in str(excinfo.value)
+
+
+def test_event_serialization_rejects_uninitialized_or_deleted_private_mapping_sanitized() -> None:
+    from canon.bootstrap import BootstrapEvent
+
+    for _, malformed, canary in _malformed_frozen_mapping_cases():
+        event = BootstrapEvent("detect_entry", True, "ok", "detected")
+        object.__setattr__(event, "data", malformed)
+
+        _assert_sanitized_error(event.to_dict, TypeError, "invalid bootstrap event", canary)
+
+
+def test_report_serialization_rejects_uninitialized_or_deleted_private_mapping_sanitized() -> None:
+    for serialize_name in ("to_dict", "to_result_data"):
+        for _, malformed, canary in _malformed_frozen_mapping_cases():
+            report = _success_report()
+            object.__setattr__(report, "data", malformed)
+
+            _assert_sanitized_error(getattr(report, serialize_name), TypeError, "invalid bootstrap report", canary)
+
+
+def test_report_event_serialization_rejects_malformed_nested_private_mapping_sanitized() -> None:
+    for serialize_name in ("to_dict", "to_result_data"):
+        for _, malformed, canary in _malformed_frozen_mapping_cases():
+            report = _success_report()
+            object.__setattr__(report.events[0], "data", malformed)
+
+            _assert_sanitized_error(getattr(report, serialize_name), TypeError, "invalid bootstrap events", canary)
+
+
+def test_report_data_serialization_rejects_malformed_nested_private_mapping_sanitized() -> None:
+    for serialize_name in ("to_dict", "to_result_data"):
+        for _, malformed, canary in _malformed_frozen_mapping_cases():
+            report = _success_report()
+            object.__setattr__(report, "data", {"bad": malformed})
+
+            _assert_sanitized_error(getattr(report, serialize_name), TypeError, "invalid bootstrap report", canary)
 
 
 def test_event_order_is_always_terminal_prefix() -> None:
