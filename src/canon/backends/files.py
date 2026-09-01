@@ -51,10 +51,19 @@ class FilesBackend:
         path.write_text(record.to_json(), encoding="utf-8")
 
     def get(self, key: str) -> Record | None:
-        path = self._path(key)
+        scope, rid = split_key(key)
+        requested_key = f"{scope}/{rid}"
+        path = self._root / scope / (quote(rid, safe="") + ".json")
         if not path.is_file():
             return None
-        return Record.from_json(path.read_text(encoding="utf-8"))
+        try:
+            rec = Record.from_json(path.read_text(encoding="utf-8"))
+        except (KeyError, TypeError, ValueError) as exc:
+            raise InvalidRecord("invalid record JSON") from exc
+        guard_put(self, rec)
+        if record_key(rec) != requested_key:
+            raise InvalidRecord("record key mismatch")
+        return rec
 
     def records(self) -> list[Record]:
         out: list[Record] = []

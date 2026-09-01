@@ -7,6 +7,7 @@ record can exercise it, a put never raises for it.
 """
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 from urllib.parse import quote
 
@@ -16,6 +17,18 @@ from canon.backends import CAP_AUDIT_CHAIN, FilesBackend, InvalidKey, InvalidRec
 from canon.schema import KINDS
 
 from ._helpers import RECORD_FILES, load_dict, load_record
+
+
+def _write_json_at_key(root, key: str, body: dict) -> None:
+    scope, sep, rid = key.partition("/")
+    assert sep
+    path = root / scope / (quote(rid, safe="") + ".json")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(body, sort_keys=True), encoding="utf-8")
+
+
+def _write_record_at_key(root, key: str, rec) -> None:
+    _write_json_at_key(root, key, rec.to_dict())
 
 
 @pytest.mark.parametrize("kind", list(RECORD_FILES))
@@ -49,6 +62,60 @@ def test_temporal_history_survives(tmp_path) -> None:
 
 def test_get_missing_returns_none(tmp_path) -> None:
     assert FilesBackend(tmp_path).get("global/nope") is None
+
+
+def test_get_rejects_embedded_scope_mismatch_without_outside_lookup_or_body_leak(tmp_path) -> None:
+    be = FilesBackend(tmp_path)
+    rec = load_record(RECORD_FILES["episodic-memory"])
+    be.put(rec)
+    poison = replace(rec, data={**rec.data, "text": "DO-NOT-LEAK-RAW-BODY"})
+    _write_record_at_key(tmp_path, "workspace/mem-000123", poison)
+
+    with pytest.raises(InvalidRecord) as caught:
+        be.get("workspace/mem-000123")
+
+    assert "record key mismatch" in str(caught.value)
+    assert "DO-NOT-LEAK-RAW-BODY" not in str(caught.value)
+
+
+def test_get_rejects_embedded_id_mismatch(tmp_path) -> None:
+    rec = load_record(RECORD_FILES["personality-block"])
+    poison = replace(rec, id="other-voice-canon")
+    _write_record_at_key(tmp_path, "workspace/voice-canon", poison)
+
+    with pytest.raises(InvalidRecord, match="record key mismatch"):
+        FilesBackend(tmp_path).get("workspace/voice-canon")
+
+
+def test_get_rejects_pre_encoded_embedded_id_for_canonical_slash_key(tmp_path) -> None:
+    rec = load_record(RECORD_FILES["personality-block"])
+    poison = replace(rec, id="voice%2Fcanon")
+    _write_record_at_key(tmp_path, "workspace/voice/canon", poison)
+
+    with pytest.raises(InvalidRecord, match="record key mismatch"):
+        FilesBackend(tmp_path).get("workspace/voice/canon")
+
+
+def test_get_rejects_semantically_invalid_embedded_record(tmp_path) -> None:
+    rec = replace(load_record(RECORD_FILES["episodic-memory"]), kind="not-a-kind")
+    _write_record_at_key(tmp_path, "global/mem-000123", rec)
+
+    with pytest.raises(InvalidRecord, match="unknown kind"):
+        FilesBackend(tmp_path).get("global/mem-000123")
+
+
+def test_get_treats_class_marker_json_as_untrusted_plain_json(tmp_path) -> None:
+    body = load_record(RECORD_FILES["personality-block"]).to_dict()
+    body["__class__"] = "HostileRecord"
+    body["scope"] = "global"
+    body["data"]["body"] = "DO-NOT-LEAK-CLASS-MARKER"
+    _write_json_at_key(tmp_path, "workspace/voice-canon", body)
+
+    with pytest.raises(InvalidRecord) as caught:
+        FilesBackend(tmp_path).get("workspace/voice-canon")
+
+    assert "__class__" not in str(caught.value)
+    assert "DO-NOT-LEAK-CLASS-MARKER" not in str(caught.value)
 
 
 def test_structural_drop_never_blocks_put(tmp_path) -> None:
