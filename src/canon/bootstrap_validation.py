@@ -3,17 +3,38 @@ from __future__ import annotations
 import math
 import re
 from collections.abc import Mapping
-from types import MappingProxyType
 
 from .adapter import INTEGRATION_TIERS
 
 _ADAPTER_ID_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 _TOKEN_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
-_SNAPSHOT_PROXIES: list[Mapping[str, object]] = []
 
 
 class BootstrapConfigError(ValueError):
     pass
+
+
+class _FrozenBootstrapMapping(Mapping[str, object]):
+    __slots__ = ("_items", "__weakref__")
+
+    def __init__(self, items: tuple[tuple[str, object], ...]) -> None:
+        object.__setattr__(self, "_items", items)
+        _require_frozen_items(self, TypeError)
+
+    def __getitem__(self, key: str) -> object:
+        for item_key, value in _require_frozen_items(self, TypeError):
+            if item_key == key:
+                return value
+        raise KeyError(key)
+
+    def __iter__(self):
+        return (key for key, _ in _require_frozen_items(self, TypeError))
+
+    def __len__(self) -> int:
+        return len(_require_frozen_items(self, TypeError))
+
+    def __setattr__(self, name: str, value: object) -> None:
+        raise TypeError("frozen bootstrap mapping")
 
 
 def snapshot_config_values(
@@ -50,12 +71,15 @@ def snapshot_data(data: Mapping[str, object] | None) -> Mapping[str, object] | N
 def snapshot_response(value: object) -> object:
     if value is None:
         return None
-    if type(value) not in (dict, MappingProxyType):
-        raise BootstrapConfigError("invalid bootstrap config")
     try:
-        return _snapshot_mapping(value, BootstrapConfigError)
+        if type(value) is dict:
+            return _snapshot_mapping(value, BootstrapConfigError)
+        if type(value) is _FrozenBootstrapMapping:
+            _require_serializable_mapping(value)
+            return value
     except TypeError as exc:
         raise BootstrapConfigError("invalid bootstrap config") from exc
+    raise BootstrapConfigError("invalid bootstrap config")
 
 
 def thaw_mapping_or_none(data: Mapping[str, object] | None) -> dict[str, object] | None:
@@ -83,13 +107,11 @@ def safe_text(value: object, name: str) -> str:
     return value
 
 
-def _snapshot_mapping(data: Mapping[object, object], error: type[Exception]) -> Mapping[str, object]:
-    items: dict[str, object] = {}
+def _snapshot_mapping(data: dict[object, object], error: type[Exception]) -> Mapping[str, object]:
+    items: list[tuple[str, object]] = []
     for key, value in data.items():
-        items[_safe_key(key, error)] = _snapshot_value(value, error)
-    proxy = MappingProxyType(items)
-    _SNAPSHOT_PROXIES.append(proxy)
-    return proxy
+        items.append((_safe_key(key, error), _snapshot_value(value, error)))
+    return _FrozenBootstrapMapping(tuple(items))
 
 
 def _snapshot_value(value: object, error: type[Exception]) -> object:
@@ -99,15 +121,15 @@ def _snapshot_value(value: object, error: type[Exception]) -> object:
         return value
     if type(value) is float and math.isfinite(value):
         return value
-    if type(value) in (dict, MappingProxyType):
+    if type(value) is dict:
         return _snapshot_mapping(value, error)
     if type(value) in (list, tuple):
-        return tuple(_snapshot_value(item, error) for item in tuple(value))
+        return tuple(_snapshot_value(item, error) for item in value)
     raise error("invalid bootstrap config" if error is BootstrapConfigError else "invalid bootstrap data")
 
 
 def _thaw_value(value: object) -> object:
-    if type(value) is dict or _is_snapshot_proxy(value):
+    if type(value) is dict or type(value) is _FrozenBootstrapMapping:
         return _thaw_mapping(value)
     if type(value) in (list, tuple):
         return [_thaw_value(item) for item in value]
@@ -115,7 +137,9 @@ def _thaw_value(value: object) -> object:
 
 
 def _thaw_mapping(data: object) -> dict[str, object]:
-    return {key: _thaw_value(item) for key, item in data.items()}  # type: ignore[attr-defined]
+    if type(data) is dict:
+        return {key: _thaw_value(item) for key, item in data.items()}
+    return {key: _thaw_value(item) for key, item in _require_frozen_items(data, TypeError)}
 
 
 def _require_serializable_data_shape(data: object) -> None:
@@ -125,9 +149,13 @@ def _require_serializable_data_shape(data: object) -> None:
 
 
 def _require_serializable_mapping(data: object) -> None:
-    if type(data) is not dict and not _is_snapshot_proxy(data):
+    if type(data) is dict:
+        items = data.items()
+    elif type(data) is _FrozenBootstrapMapping:
+        items = _require_frozen_items(data, TypeError)
+    else:
         raise TypeError("invalid bootstrap data")
-    for key, value in data.items():  # type: ignore[attr-defined]
+    for key, value in items:
         _safe_key(key, TypeError)
         _require_serializable_value(value)
 
@@ -137,7 +165,7 @@ def _require_serializable_value(value: object) -> None:
         return
     if type(value) is float and math.isfinite(value):
         return
-    if type(value) is dict or _is_snapshot_proxy(value):
+    if type(value) is dict or type(value) is _FrozenBootstrapMapping:
         _require_serializable_mapping(value)
         return
     if type(value) in (list, tuple):
@@ -147,8 +175,18 @@ def _require_serializable_value(value: object) -> None:
     raise TypeError("invalid bootstrap data")
 
 
-def _is_snapshot_proxy(value: object) -> bool:
-    return type(value) is MappingProxyType and any(value is proxy for proxy in _SNAPSHOT_PROXIES)
+def _require_frozen_items(value: object, error: type[Exception]) -> tuple[tuple[str, object], ...]:
+    if type(value) is not _FrozenBootstrapMapping or type(value._items) is not tuple:
+        raise error(_error_message(error))
+    for item in value._items:
+        if type(item) is not tuple or len(item) != 2:
+            raise error(_error_message(error))
+        _safe_key(item[0], error)
+    return value._items
+
+
+def _error_message(error: type[Exception]) -> str:
+    return "invalid bootstrap config" if error is BootstrapConfigError else "invalid bootstrap data"
 
 
 def _path_text(value: object) -> str:

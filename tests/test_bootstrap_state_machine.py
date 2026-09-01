@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import builtins
+import gc
 import socket
+import weakref
 from collections.abc import Mapping
 from pathlib import Path
 from types import MappingProxyType
@@ -244,6 +246,31 @@ def test_config_snapshots_readiness_response_before_caller_mutation() -> None:
         config.readiness_response["nested"]["ok"] = False  # type: ignore[index]
 
 
+def test_config_rejects_mappingproxy_readiness_response_without_dispatch() -> None:
+    from canon.bootstrap import BootstrapConfigError
+
+    with pytest.raises(BootstrapConfigError, match="invalid bootstrap config"):
+        _config(readiness_response=MappingProxyType({"ok": True}))
+
+    canary = _Canary()
+    with pytest.raises(BootstrapConfigError) as excinfo:
+        _config(readiness_response=MappingProxyType(_HostileMapping(canary)))
+    assert "invalid bootstrap config" in str(excinfo.value)
+    assert _Canary.token not in str(excinfo.value)
+    assert canary.calls == []
+
+
+def test_config_internal_snapshot_can_be_revalidated_on_rerun() -> None:
+    from canon.bootstrap import run_bootstrap
+
+    config = _config(readiness_response={"ids": ["goal-1"], "nested": {"ok": True}})
+    report = run_bootstrap(config)
+
+    assert report.ok is True
+    assert config.readiness_response["ids"] == ("goal-1",)  # type: ignore[index]
+    assert config.readiness_response["nested"]["ok"] is True  # type: ignore[index]
+
+
 def test_enforced_placeholder_without_readiness_response_fails_gate_code(monkeypatch: pytest.MonkeyPatch) -> None:
     import canon.bootstrap as bootstrap
     from canon.adapter import AdapterDescriptor
@@ -472,11 +499,11 @@ def test_serialization_rejects_hostile_sequence_subclasses_without_dispatch() ->
     _assert_sanitized_type_error(report.to_dict, canary, "invalid bootstrap report")
 
 
-def test_serialization_preserves_stored_mappingproxy_and_direct_valid_shapes() -> None:
+def test_serialization_preserves_stored_frozen_mapping_and_direct_valid_shapes() -> None:
     from canon.bootstrap import BootstrapEvent
 
     event = BootstrapEvent("detect_entry", True, "ok", "detected", {"nested": {"ids": ["a", 1, 1.5, None, True]}})
-    assert type(event.data) is MappingProxyType
+    assert type(event.data) is not MappingProxyType
     assert event.to_dict()["data"] == {"nested": {"ids": ["a", 1, 1.5, None, True]}}
 
     object.__setattr__(event, "data", {"nested": ("a", {"ok": True})})
@@ -485,6 +512,32 @@ def test_serialization_preserves_stored_mappingproxy_and_direct_valid_shapes() -
     report = _success_report()
     object.__setattr__(report, "data", {"nested": ("a", {"ok": True})})
     assert report.to_result_data()["nested"] == ["a", {"ok": True}]
+
+
+def test_bootstrap_snapshot_mapping_is_not_globally_retained() -> None:
+    from canon.bootstrap import BootstrapEvent
+
+    event = BootstrapEvent("detect_entry", True, "ok", "detected", {"safe": True})
+    snapshot = event.data
+    snapshot_ref = weakref.ref(snapshot)  # type: ignore[arg-type]
+
+    object.__setattr__(event, "data", None)
+    del snapshot
+    gc.collect()
+
+    assert snapshot_ref() is None
+
+
+def test_serialization_rejects_tampered_private_mapping_internals_sanitized() -> None:
+    from canon.bootstrap import BootstrapEvent
+
+    event = BootstrapEvent("detect_entry", True, "ok", "detected", {"safe": True})
+    object.__setattr__(event.data, "_items", (("bad", object()),))  # type: ignore[arg-type]
+
+    with pytest.raises(TypeError) as excinfo:
+        event.to_dict()
+    assert "invalid bootstrap event" in str(excinfo.value)
+    assert "object" not in str(excinfo.value)
 
 
 def test_event_order_is_always_terminal_prefix() -> None:
