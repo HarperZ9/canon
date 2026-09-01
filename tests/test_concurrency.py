@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 import canon.concurrency_lock as concurrency_lock
+import canon.concurrency_windows as concurrency_windows
 from canon.concurrency import (
     LockError,
     RunLock,
@@ -22,6 +23,22 @@ from canon.source_state import SourceStateError, SourceStateItem, source_state_s
 
 def _sha(hex_char: str) -> str:
     return "sha256:" + hex_char * 64
+
+
+def _swap_lock_dir_to_symlink(lock_dir: Path, displaced: Path, outside: Path) -> None:
+    try:
+        lock_dir.rename(displaced)
+        lock_dir.symlink_to(outside, target_is_directory=True)
+    except OSError:
+        _restore_displaced_lock_dir(lock_dir, displaced)
+        pytest.skip("current platform or privileges do not allow directory symlinks")
+
+
+def _restore_displaced_lock_dir(lock_dir: Path, displaced: Path) -> None:
+    if lock_dir.is_symlink():
+        lock_dir.unlink()
+    if displaced.exists():
+        displaced.rename(lock_dir)
 
 
 class _HostileSourceStateItem(SourceStateItem):
@@ -190,7 +207,7 @@ def test_acquire_rejects_lock_directory_swap_after_prepare(
     assert not (outside / "workspace.lock").exists()
 
 
-def test_acquire_rejects_fallback_lock_directory_swap_back_before_return(
+def test_acquire_rejects_swap_back_without_outside_lock(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -199,8 +216,17 @@ def test_acquire_rejects_fallback_lock_directory_swap_back_before_return(
     displaced = tmp_path / "displaced-locks"
     root.mkdir()
     outside.mkdir()
+    real_snapshot = concurrency_lock._lock_dir_snapshot
     real_open = os.open
     swapped = False
+
+    def snapshot_then_swap(lock_dir: Path) -> tuple[Path, int, int]:
+        nonlocal swapped
+        snapshot = real_snapshot(lock_dir)
+        if not swapped:
+            swapped = True
+            _swap_lock_dir_to_symlink(lock_dir, displaced, outside)
+        return snapshot
 
     def open_with_swap(
         path: object,
@@ -209,32 +235,97 @@ def test_acquire_rejects_fallback_lock_directory_swap_back_before_return(
         *args: object,
         **kwargs: object,
     ) -> int:
-        nonlocal swapped
-        if not swapped and Path(os.fspath(path)).name == "workspace.lock":
-            swapped = True
+        try:
+            return real_open(path, flags, mode, *args, **kwargs)
+        finally:
             lock_dir = root / ".canon-locks"
-            try:
-                lock_dir.rename(displaced)
-                lock_dir.symlink_to(outside, target_is_directory=True)
-            except OSError:
-                pytest.skip("current platform or privileges do not allow directory symlinks")
-            try:
-                return real_open(path, flags, mode, *args, **kwargs)
-            finally:
-                lock_dir.unlink(missing_ok=True)
-                displaced.rename(lock_dir)
-        return real_open(path, flags, mode, *args, **kwargs)
+            _restore_displaced_lock_dir(lock_dir, displaced)
 
-    monkeypatch.setattr(concurrency_lock, "_can_use_dir_fd_lock", lambda: False)
+    monkeypatch.setattr(concurrency_lock, "_lock_dir_snapshot", snapshot_then_swap)
     monkeypatch.setattr(os, "open", open_with_swap)
 
     try:
-        with pytest.raises(LockError, match="lock-open"):
+        with pytest.raises(LockError, match="lock-open|lock-reparse"):
             acquire_run_lock(root, "workspace")
+        assert not (outside / "workspace.lock").exists()
     finally:
         (outside / "workspace.lock").unlink(missing_ok=True)
+        _restore_displaced_lock_dir(root / ".canon-locks", displaced)
 
     assert not (root / ".canon-locks" / "workspace.lock").exists()
+
+
+def test_acquire_refuses_when_stable_parent_primitive_unavailable_before_create(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    called = False
+
+    def fail_open(*args: object, **kwargs: object) -> int:
+        nonlocal called
+        called = True
+        raise AssertionError("full-path os.open fallback must not be used")
+
+    monkeypatch.setattr(concurrency_lock, "_can_use_dir_fd_lock", lambda: False)
+    monkeypatch.setattr(concurrency_lock, "_can_use_windows_lock", lambda: False, raising=False)
+    monkeypatch.setattr(os, "open", fail_open)
+
+    with pytest.raises(LockError, match="lock-unsupported"):
+        acquire_run_lock(tmp_path, "workspace")
+
+    assert not called
+    assert not (tmp_path / ".canon-locks" / "workspace.lock").exists()
+
+
+def test_windows_conflict_uses_stable_parent_handle_not_full_path_open(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    if os.name != "nt":
+        pytest.skip("Windows stable-parent primitive regression")
+    first = acquire_run_lock(tmp_path, "workspace")
+
+    def fail_open(*args: object, **kwargs: object) -> int:
+        raise AssertionError("full-path os.open fallback must not be used")
+
+    monkeypatch.setattr(os, "open", fail_open)
+    try:
+        with pytest.raises(LockError, match="lock-held"):
+            acquire_run_lock(tmp_path, "workspace")
+        assert first.path.read_text(encoding="utf-8") == first.token
+    finally:
+        release_run_lock(first)
+
+
+def test_acquire_handle_cleanup_survives_lock_directory_swap(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "root"
+    outside = tmp_path / "outside"
+    displaced = tmp_path / "displaced-locks"
+    root.mkdir()
+    outside.mkdir()
+
+    def swap_then_fail(
+        lock_dir: Path,
+        snapshot: tuple[Path, int, int],
+        lock_path: Path,
+        token: str,
+    ) -> None:
+        _swap_lock_dir_to_symlink(lock_dir, displaced, outside)
+        raise LockError("lock-reparse", str(lock_path))
+
+    monkeypatch.setattr(concurrency_lock, "_verify_created_lock", swap_then_fail)
+
+    try:
+        with pytest.raises(LockError, match="lock-reparse"):
+            acquire_run_lock(root, "workspace")
+    finally:
+        _restore_displaced_lock_dir(root / ".canon-locks", displaced)
+
+    assert not (root / ".canon-locks" / "workspace.lock").exists()
+    assert not (outside / "workspace.lock").exists()
 
 
 def test_release_refuses_lock_path_outside_lock_root(tmp_path: Path) -> None:
@@ -335,7 +426,6 @@ def test_acquire_cleans_up_partial_lock_write(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    real_write = os.write
     calls = 0
 
     def partial_then_fail(fd: int, data: bytes) -> int:
@@ -345,24 +435,35 @@ def test_acquire_cleans_up_partial_lock_write(
             return max(1, len(data) // 2)
         raise OSError(errno.ENOSPC, "no space left")
 
-    monkeypatch.setattr(os, "write", partial_then_fail)
+    def fail_windows_write(handle: int, data: bytes) -> None:
+        raise OSError(errno.ENOSPC, "no space left")
+
+    if os.name == "nt":
+        monkeypatch.setattr(concurrency_windows, "_write_file", fail_windows_write)
+    else:
+        monkeypatch.setattr(os, "write", partial_then_fail)
 
     with pytest.raises(LockError, match="lock-write") as caught:
         acquire_run_lock(tmp_path, "workspace")
 
     assert isinstance(caught.value.__cause__, OSError)
     assert not (tmp_path / ".canon-locks" / "workspace.lock").exists()
-    monkeypatch.setattr(os, "write", real_write)
 
 
-def test_acquire_maps_raw_os_open_errors(
+def test_acquire_maps_raw_stable_open_errors(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     def deny_open(*args: object, **kwargs: object) -> int:
         raise PermissionError(errno.EACCES, "denied")
 
-    monkeypatch.setattr(os, "open", deny_open)
+    def deny_windows_open(path: Path) -> int:
+        raise PermissionError(errno.EACCES, "denied")
+
+    if os.name == "nt":
+        monkeypatch.setattr(concurrency_windows, "open_directory", deny_windows_open)
+    else:
+        monkeypatch.setattr(os, "open", deny_open)
 
     with pytest.raises(LockError, match="lock-open") as caught:
         acquire_run_lock(tmp_path, "workspace")
