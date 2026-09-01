@@ -174,14 +174,48 @@ def test_failed_aggregate_review_does_not_mutate_seen_replay_keys() -> None:
     assert review.accepted_atoms == ()
 
 
-def test_embedded_blocked_atom_trust_prevents_end_to_end_acceptance() -> None:
-    item = _item("capsule-embedded", atom=_atom("fact-embedded", trust_label="stale"))
+@pytest.mark.parametrize(
+    ("embedded_trust", "expected"),
+    (
+        ("signed-unknown-key", "untrusted-import"),
+        ("imported-untrusted", "untrusted-import"),
+        ("model-synthesized-unreviewed", "untrusted-import"),
+        ("secret-quarantined", "secret-quarantined"),
+        ("stale", "stale"),
+        ("public-exportable", "untrusted-import"),
+        ("private-local-only", "untrusted-import"),
+    ),
+)
+def test_embedded_non_activating_atom_trust_prevents_end_to_end_acceptance(
+    embedded_trust: str,
+    expected: str,
+) -> None:
+    item = _item(
+        f"capsule-embedded-{embedded_trust}",
+        atom=_atom(f"fact-embedded-{embedded_trust}", trust_label=embedded_trust),
+        nonce=f"nonce-embedded-{embedded_trust}",
+    )
 
     review = _review((item,))
 
     assert not review.ok
-    assert [finding.code for finding in review.findings] == ["stale"]
+    assert [finding.code for finding in review.findings] == [expected]
     assert review.accepted_atoms == ()
+
+
+@pytest.mark.parametrize("embedded_trust", ("trusted-local", "signed-pinned", "unsigned-local"))
+def test_embedded_activating_atom_trust_accepts_end_to_end(embedded_trust: str) -> None:
+    item = _item(
+        f"capsule-activate-{embedded_trust}",
+        atom=_atom(f"fact-activate-{embedded_trust}", trust_label=embedded_trust),
+        nonce=f"nonce-activate-{embedded_trust}",
+    )
+
+    review = _review((item,))
+
+    assert review.ok
+    assert review.findings == ()
+    assert tuple(atom.id for atom in review.accepted_atoms) == (f"fact-activate-{embedded_trust}",)
 
 
 def test_malformed_import_item_fields_fail_first_without_leak_or_downstream_work() -> None:

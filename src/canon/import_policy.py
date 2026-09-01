@@ -67,8 +67,8 @@ def validate_atom_activation(atom: CanonAtom, *, trust_label: str) -> tuple[str,
     reasons: list[str] = []
     if trust_label not in TRUST_LABELS:
         _add(reasons, "invalid-trust-label")
-    elif trust_label in _BLOCKED_TRUST:
-        _add(reasons, _BLOCKED_TRUST[trust_label])
+    elif trust_label not in _ACTIVATING_TRUST:
+        _add(reasons, _BLOCKED_TRUST.get(trust_label, "untrusted-import"))
     atom_dict = _validated_atom_dict(atom, reasons)
     if atom_dict is None:
         return tuple(reasons)
@@ -204,10 +204,10 @@ def _add_atom_policy_reasons(atom_dict: dict, reasons: list[str]) -> None:
     trust_label = _trust_label(atom_dict)
     if trust_label not in TRUST_LABELS:
         _add(reasons, "invalid-atom-trust-label")
-    elif trust_label in _BLOCKED_TRUST:
-        _add(reasons, _BLOCKED_TRUST[trust_label])
-    elif trust_label == "model-synthesized-unreviewed" and _normative_like(atom_dict):
-        _add(reasons, "unreviewed-model-normative")
+    elif trust_label not in _ACTIVATING_TRUST:
+        _add(reasons, _BLOCKED_TRUST.get(trust_label, "untrusted-import"))
+        if trust_label == "model-synthesized-unreviewed" and _normative_like(atom_dict):
+            _add(reasons, "unreviewed-model-normative")
     if _disclosure_profile(atom_dict) not in _ATOM_DISCLOSURE_PROFILES:
         _add(reasons, "invalid-atom-disclosure-profile")
     if _freshness_state(atom_dict) == "stale" or atom_dict.get("status") == "stale":
