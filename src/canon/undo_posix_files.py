@@ -35,11 +35,9 @@ def read_at(parent: DirCap, name: str, *, required: bool) -> bytes | None:
 
 def write_new_or_same(parent: DirCap, name: str, data: bytes) -> str:
     check_name(name)
-    current = read_at(parent, name, required=False)
-    if current is not None:
-        if current == data:
-            return "idempotent"
-        raise UndoError("conflict")
+    status = _existing_status(parent, name, data, required=False)
+    if status is not None:
+        return status
     created_key: tuple[int, int] | None = None
     fd: int | None = None
     try:
@@ -48,6 +46,9 @@ def write_new_or_same(parent: DirCap, name: str, data: bytes) -> str:
         created_key = _fd_key(fd)
         _write_all(fd, data)
         os.fsync(fd)
+    except FileExistsError:
+        close_fd(fd)
+        return _existing_status(parent, name, data, required=True) or _conflict()
     except Exception:
         close_fd(fd)
         _cleanup_created(parent.fd, name, created_key)
@@ -62,6 +63,19 @@ def write_new_or_same(parent: DirCap, name: str, data: bytes) -> str:
         _cleanup_created(parent.fd, name, created_key)
         raise
     return "created"
+
+
+def _existing_status(parent: DirCap, name: str, data: bytes, *, required: bool) -> str | None:
+    current = read_at(parent, name, required=required)
+    if current is None:
+        return None
+    if current == data:
+        return "idempotent"
+    raise UndoError("conflict")
+
+
+def _conflict() -> str:
+    raise UndoError("conflict")
 
 
 def replace_at(root: DirCap, parent: DirCap, name: str, expected_hash: str, data: bytes) -> None:

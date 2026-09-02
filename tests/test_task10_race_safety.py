@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from canon.canonical_json import canonical_json_text, sha256_bytes
-from canon.exit_codes import EX_OK, EX_SECURITY
+from canon.exit_codes import EX_CONFLICT, EX_OK, EX_SECURITY
 
 FIXTURES = Path(__file__).parent / "fixtures" / "bootstrap"
 BEGIN = "<!-- canon:begin scope=workspace -->"
@@ -68,6 +68,128 @@ def _swap_dir_to_replacement(path: Path, replacement: Path, displaced: Path) -> 
         return True
     except OSError:
         return False
+
+
+def _skip_without_posix_dirfd() -> None:
+    if os.name == "nt":
+        pytest.skip("POSIX dir-fd race contract")
+    from canon import undo_posix
+
+    if not undo_posix.supported():
+        pytest.skip("POSIX dir-fd operations are unavailable")
+
+
+def _open_posix_root(path: Path):
+    from canon.undo_posix_core import open_root
+
+    info = path.lstat()
+    return open_root(path, (info.st_dev, info.st_ino))
+
+
+def _race_file_into_create(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    root: Path,
+    name: str,
+    kind: str,
+    expected: bytes,
+) -> None:
+    import canon.undo_posix_files as files
+
+    real_open = files.os.open
+    fired = False
+
+    def raced_open(path: object, flags: int, mode: int = 0o777, *, dir_fd: int | None = None) -> int:
+        nonlocal fired
+        if path == name and flags & os.O_CREAT and flags & os.O_EXCL and not fired:
+            fired = True
+            _create_race_target(root / name, kind, expected)
+        if dir_fd is None:
+            return real_open(path, flags, mode)
+        return real_open(path, flags, mode, dir_fd=dir_fd)
+
+    monkeypatch.setattr(files.os, "open", raced_open)
+
+
+def _create_race_target(path: Path, kind: str, expected: bytes) -> None:
+    if kind == "exact":
+        path.write_bytes(expected)
+    elif kind == "divergent":
+        path.write_bytes(b"racer\n")
+    elif kind == "symlink":
+        outside = path.parent / "outside-race.txt"
+        outside.write_bytes(b"outside\n")
+        path.symlink_to(outside)
+    elif kind == "nonregular":
+        path.mkdir()
+    else:
+        raise AssertionError(kind)
+
+
+@pytest.mark.parametrize(
+    ("kind", "expected_status", "expected_code"),
+    (
+        ("exact", "idempotent", None),
+        ("divergent", None, "conflict"),
+        ("symlink", None, "unsafe_path"),
+        ("nonregular", None, "unsafe_path"),
+    ),
+)
+def test_posix_write_new_or_same_classifies_create_race(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    kind: str,
+    expected_status: str | None,
+    expected_code: str | None,
+) -> None:
+    _skip_without_posix_dirfd()
+    from canon.undo_receipts import UndoError
+    from canon.undo_posix_core import close_root
+    import canon.undo_posix_files as files
+
+    root = tmp_path / "root"
+    root.mkdir()
+    cap = _open_posix_root(root)
+    _race_file_into_create(monkeypatch, root=root, name="out.txt", kind=kind, expected=b"expected\n")
+
+    try:
+        if expected_status is not None:
+            assert files.write_new_or_same(cap, "out.txt", b"expected\n") == expected_status
+        else:
+            with pytest.raises(UndoError, match=expected_code or ""):
+                files.write_new_or_same(cap, "out.txt", b"expected\n")
+    except FileExistsError:
+        pytest.fail("FileExistsError escaped after an O_EXCL create race")
+    finally:
+        close_root(cap)
+
+
+def test_export_out_create_race_returns_canonical_conflict_without_traceback(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _skip_without_posix_dirfd()
+    import canon.export_output as export_output
+    import canon.undo_posix_core as undo_posix_core
+
+    workspace = tmp_path / "work"
+    workspace.mkdir()
+    _copy_inputs(workspace)
+    monkeypatch.setattr(export_output, "supported", lambda: True)
+    monkeypatch.setattr(undo_posix_core, "supported", lambda: True)
+    _race_file_into_create(monkeypatch, root=workspace, name="canon.md", kind="divergent", expected=b"unused\n")
+
+    try:
+        code, stdout, stderr = _run(["--json", "export", *_base_args(workspace), "--format", "canon-md", "--out", "canon.md"])
+    except FileExistsError:
+        pytest.fail("FileExistsError escaped instead of a canonical CLI result")
+
+    assert code == EX_CONFLICT
+    assert stderr == ""
+    payload = _json(stdout)
+    assert payload["failure_code"] == "conflict"
+    assert "Traceback" not in stdout
+    assert (workspace / "canon.md").read_text(encoding="utf-8") == "racer\n"
 
 
 @pytest.mark.parametrize(("fmt", "name"), FILE_FORMATS)
