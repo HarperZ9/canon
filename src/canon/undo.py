@@ -4,14 +4,19 @@ import json
 from pathlib import Path
 
 from .canonical_json import canonical_json_text, sha256_bytes
-from .cli_artifacts import WorkspaceRoot
+from .cli_artifacts import ArtifactError, WorkspaceRoot, checked_workspace
 from .undo_io import (
     checked_receipt_target,
     ensure_undo_root,
+    list_receipt_files,
+    read_receipt_file,
     read_regular_file,
+    read_workspace_file,
     receipt_path,
     replace_file_guarded,
+    replace_workspace_file,
     undo_root_path,
+    write_receipt_file,
     write_new_or_same,
 )
 from .undo_receipts import UNDO_RECEIPT_SCHEMA, UndoApplyResult, UndoError, UndoReceipt, valid_receipt_id
@@ -19,18 +24,17 @@ from .undo_receipts import UNDO_RECEIPT_SCHEMA, UndoApplyResult, UndoError, Undo
 
 class UndoStore:
     def __init__(self, workspace: str | Path | WorkspaceRoot) -> None:
-        self._root = workspace.path if type(workspace) is WorkspaceRoot else Path(workspace)
+        self._workspace = _checked_workspace(workspace)
+        self._root = self._workspace.path
 
     def write(self, receipt: UndoReceipt) -> str:
         data = canonical_json_text(receipt.to_dict()).encode("utf-8")
-        root = ensure_undo_root(self._root)
-        return write_new_or_same(receipt_path(root, receipt.receipt_id), data)
+        return write_receipt_file(self._workspace, receipt.receipt_id, data)
 
     def load(self, receipt_id: str) -> UndoReceipt:
         if not valid_receipt_id(receipt_id):
             raise UndoError("invalid_args")
-        root = undo_root_path(self._root)
-        data = read_regular_file(receipt_path(root, receipt_id))
+        data = read_receipt_file(self._workspace, receipt_id)
         try:
             text = data.decode("utf-8")
             value = json.loads(text)
@@ -41,29 +45,28 @@ class UndoStore:
         return UndoReceipt.from_dict(value, expected_id=receipt_id)
 
     def list_metadata(self) -> list[dict[str, object]]:
-        root = undo_root_path(self._root)
-        if not _exists_or_link(root):
-            return []
-        return [self.load(path.stem).metadata() for path in sorted(root.glob("undo-*.json"))]
+        return [self.load(Path(name).stem).metadata() for name in list_receipt_files(self._workspace)]
 
     def apply(self, receipt_id: str, *, workspace: WorkspaceRoot) -> UndoApplyResult:
         receipt = self.load(receipt_id)
-        target = checked_receipt_target(receipt, workspace=workspace)
-        current = read_regular_file(target)
+        checked_receipt_target(receipt, workspace=workspace)
+        current = read_workspace_file(workspace, receipt.target_path)
         current_hash = sha256_bytes(current)
         if current_hash == receipt.preimage_sha256:
             return UndoApplyResult(receipt.receipt_id, receipt.target_path, False, True)
         if current_hash != receipt.postimage_sha256:
             raise UndoError("conflict")
-        replace_file_guarded(target, receipt.postimage_sha256, receipt.preimage_text.encode("utf-8"))
+        replace_workspace_file(workspace, receipt.target_path, receipt.postimage_sha256, receipt.preimage_text.encode("utf-8"))
         return UndoApplyResult(receipt.receipt_id, receipt.target_path, True, False)
 
 
-def _exists_or_link(path: Path) -> bool:
+def _checked_workspace(workspace: str | Path | WorkspaceRoot) -> WorkspaceRoot:
+    if type(workspace) is WorkspaceRoot:
+        return workspace
     try:
-        return path.exists() or path.is_symlink()
-    except OSError:
-        return True
+        return checked_workspace(str(Path(workspace)))
+    except (ArtifactError, TypeError, OSError) as exc:
+        raise UndoError("unsafe_path") from exc
 
 
 __all__ = [

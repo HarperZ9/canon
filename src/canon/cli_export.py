@@ -22,7 +22,8 @@ from .registry import ROOT_WORKSPACE, Surface, pool_for
 from .secret_quarantine import scan_text
 from .surface import SurfaceError, render_surface
 from .textblock import RenderRefused
-from .undo import UndoError, UndoReceipt, UndoStore, read_regular_file, replace_file_guarded
+from .undo import UndoError, UndoReceipt, UndoStore
+from .undo_io import read_workspace_file, replace_workspace_file
 
 _FORMATS = frozenset({"canon-md", "capsule-json", "readiness-json", "bundle", "region"})
 _LOCAL_SURFACES = {
@@ -60,7 +61,7 @@ def run_export_command(
 def run_undo_command(parsed: object, *, stdout: TextIO, stderr: TextIO, color: bool) -> int:
     try:
         workspace = checked_workspace(parsed.workspace)  # type: ignore[attr-defined]
-        store = UndoStore(workspace.path)
+        store = UndoStore(workspace)
         if parsed.undo_command == "list":  # type: ignore[attr-defined]
             data = {"command": "undo", "receipts": store.list_metadata(), "workspace": "."}
             result = make_result(ok=True, command="undo", failure_code="ok", message="undo receipts", data=data)
@@ -80,8 +81,18 @@ def render_region_inner(bundle: object, surface: Surface) -> str:
     return render_surface(pool_for(surface, pool), surface.scope)
 
 
-def replace_region_file(path: Path, expected_hash: str, postimage: bytes) -> None:
-    replace_file_guarded(path, expected_hash, postimage)
+def replace_region_file(
+    path: Path,
+    expected_hash: str,
+    postimage: bytes,
+    *,
+    workspace: WorkspaceRoot | None = None,
+    relative: str | None = None,
+) -> None:
+    _ = path
+    if workspace is None or relative is None:
+        raise UndoError("unsafe_path")
+    replace_workspace_file(workspace, relative, expected_hash, postimage)
 
 
 def _run_export(parsed: object, fmt: str, bundle: object, data: dict, workspace: WorkspaceRoot, stdout: TextIO):
@@ -115,7 +126,7 @@ def _write_file_result(raw_out: object, fmt: str, bundle: object, data: dict, wo
 def _apply_region_result(parsed: object, bundle: object, data: dict, workspace: WorkspaceRoot):
     surface = _LOCAL_SURFACES[bundle.capsule.target.adapter]  # type: ignore[attr-defined]
     target = checked_region_path(parsed.apply_region, workspace, expected=surface.relative_path)  # type: ignore[attr-defined]
-    preimage = read_regular_file(target)
+    preimage = read_workspace_file(workspace, surface.relative_path)
     pre_hash = sha256_bytes(preimage)
     try:
         host = preimage.decode("utf-8")
@@ -139,8 +150,8 @@ def _apply_region_result(parsed: object, bundle: object, data: dict, workspace: 
         return make_result(ok=True, command="export", failure_code="ok", message="export complete", data=meta)
     receipt = _receipt(bundle, data, surface, host, post_hash, sha256_text(inner))
     meta["receipt_id"] = receipt.receipt_id
-    meta["receipt_status"] = UndoStore(workspace.path).write(receipt)
-    replace_region_file(target, pre_hash, postimage)
+    meta["receipt_status"] = UndoStore(workspace).write(receipt)
+    replace_region_file(target, pre_hash, postimage, workspace=workspace, relative=surface.relative_path)
     return make_result(ok=True, command="export", failure_code="ok", message="export complete", data=meta)
 
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -44,6 +45,7 @@ def _host(inner: str = "OLD\n") -> str:
 
 
 def _apply_region(workspace: Path) -> tuple[str, str]:
+    _skip_windows_mutation_disabled()
     _copy_inputs(workspace)
     target = workspace / "AGENTS.md"
     preimage = _host()
@@ -52,6 +54,11 @@ def _apply_region(workspace: Path) -> tuple[str, str]:
     assert code == EX_OK
     assert stderr == ""
     return _json(stdout)["data"]["receipt_id"], preimage  # type: ignore[return-value]
+
+
+def _skip_windows_mutation_disabled() -> None:
+    if os.name == "nt":
+        pytest.skip("Task10 local mutation safely fails closed on Windows")
 
 
 def test_region_apply_creates_canonical_receipt_and_cli_never_prints_preimage(tmp_path: Path) -> None:
@@ -179,7 +186,115 @@ def test_undo_apply_rejects_receipt_ids_not_paths(tmp_path: Path) -> None:
     assert _json(stdout)["failure_code"] == "invalid_args"
 
 
+def test_windows_undo_apply_fails_closed_before_restore_write(tmp_path: Path) -> None:
+    if os.name != "nt":
+        pytest.skip("Windows fail-closed mutation contract")
+    from canon.undo import UndoReceipt
+
+    workspace = tmp_path / "work"
+    workspace.mkdir()
+    preimage = _host()
+    postimage = _host("NEW\n")
+    (workspace / "AGENTS.md").write_text(postimage, encoding="utf-8", newline="")
+    receipt = UndoReceipt.for_region(
+        target_path="AGENTS.md",
+        target_adapter="codex-cli",
+        target_surface="AGENTS.md",
+        scope="workspace",
+        preimage_text=preimage,
+        postimage_sha256=sha256_bytes(postimage.encode("utf-8")),
+        postimage_region_sha256=sha256_bytes(b"NEW\n"),
+        capsule_id="sha256:" + ("1" * 64),
+        manifest_sha256="sha256:" + ("2" * 64),
+        source_state={"records_digest": "sha256:" + ("3" * 64)},
+    )
+    undo_dir = workspace / ".canon" / "undo"
+    undo_dir.mkdir(parents=True)
+    (undo_dir / f"{receipt.receipt_id}.json").write_text(
+        canonical_json_text(receipt.to_dict()), encoding="utf-8", newline="\n"
+    )
+
+    code, stdout, stderr = _run(["--json", "undo", "apply", receipt.receipt_id, "--workspace", str(workspace)])
+
+    assert code == EX_SECURITY
+    assert stderr == ""
+    assert _json(stdout)["failure_code"] == "unsafe_path"
+    assert (workspace / "AGENTS.md").read_text(encoding="utf-8") == postimage
+
+
+def test_windows_undo_apply_already_restored_stays_read_only(tmp_path: Path) -> None:
+    if os.name != "nt":
+        pytest.skip("Windows read-only undo no-op contract")
+    from canon.undo import UndoReceipt
+
+    workspace = tmp_path / "work"
+    workspace.mkdir()
+    preimage = _host()
+    postimage = _host("NEW\n")
+    (workspace / "AGENTS.md").write_text(preimage, encoding="utf-8", newline="")
+    receipt = UndoReceipt.for_region(
+        target_path="AGENTS.md",
+        target_adapter="codex-cli",
+        target_surface="AGENTS.md",
+        scope="workspace",
+        preimage_text=preimage,
+        postimage_sha256=sha256_bytes(postimage.encode("utf-8")),
+        postimage_region_sha256=sha256_bytes(b"NEW\n"),
+        capsule_id="sha256:" + ("1" * 64),
+        manifest_sha256="sha256:" + ("2" * 64),
+        source_state={"records_digest": "sha256:" + ("3" * 64)},
+    )
+    undo_dir = workspace / ".canon" / "undo"
+    undo_dir.mkdir(parents=True)
+    (undo_dir / f"{receipt.receipt_id}.json").write_text(
+        canonical_json_text(receipt.to_dict()), encoding="utf-8", newline="\n"
+    )
+
+    code, stdout, stderr = _run(["--json", "undo", "apply", receipt.receipt_id, "--workspace", str(workspace)])
+
+    assert code == EX_OK
+    assert stderr == ""
+    data = _json(stdout)["data"]
+    assert data["already_restored"] is True
+    assert data["changed"] is False
+    assert (workspace / "AGENTS.md").read_text(encoding="utf-8") == preimage
+
+
+def test_windows_existing_receipt_write_keeps_read_only_append_contract(tmp_path: Path) -> None:
+    if os.name != "nt":
+        pytest.skip("Windows read-only receipt contract")
+    from canon.undo import UndoError, UndoReceipt, UndoStore
+
+    workspace = tmp_path / "work"
+    workspace.mkdir()
+    receipt = UndoReceipt.for_region(
+        target_path="AGENTS.md",
+        target_adapter="codex-cli",
+        target_surface="AGENTS.md",
+        scope="workspace",
+        preimage_text=_host(),
+        postimage_sha256="sha256:" + ("2" * 64),
+        postimage_region_sha256="sha256:" + ("3" * 64),
+        capsule_id="sha256:" + ("4" * 64),
+        manifest_sha256="sha256:" + ("5" * 64),
+        source_state={"records_digest": "sha256:" + ("6" * 64)},
+    )
+    undo_dir = workspace / ".canon" / "undo"
+    undo_dir.mkdir(parents=True)
+    receipt_path = undo_dir / f"{receipt.receipt_id}.json"
+    receipt_path.write_text(canonical_json_text(receipt.to_dict()), encoding="utf-8", newline="\n")
+
+    assert UndoStore(workspace).write(receipt) == "idempotent"
+    divergent = json.loads(receipt_path.read_text(encoding="utf-8"))
+    divergent["target_adapter"] = "claude-code"
+    receipt_path.write_text(canonical_json_text(divergent), encoding="utf-8", newline="\n")
+
+    with pytest.raises(UndoError, match="conflict"):
+        UndoStore(workspace).write(receipt)
+
+
 def test_undo_apply_uses_path_policy_from_receipt_target(tmp_path: Path) -> None:
+    _skip_windows_mutation_disabled()
     from canon.undo import UndoReceipt, UndoStore
 
     workspace = tmp_path / "work"
@@ -211,6 +326,7 @@ def test_undo_apply_uses_path_policy_from_receipt_target(tmp_path: Path) -> None
 
 
 def test_undo_store_is_append_only_and_detects_divergent_same_id(tmp_path: Path) -> None:
+    _skip_windows_mutation_disabled()
     from canon.undo import UndoError, UndoReceipt, UndoStore
 
     workspace = tmp_path / "work"

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -69,6 +70,11 @@ def _write_expected_bundle(workspace: Path, target: Path) -> None:
         assert code == EX_OK
         assert stderr == ""
         (target / name).write_text(stdout, encoding="utf-8", newline="\n")
+
+
+def _skip_windows_mutation_disabled() -> None:
+    if os.name == "nt":
+        pytest.skip("Task10 local mutation safely fails closed on Windows")
 
 
 def test_export_canon_md_raw_stdout_has_no_result_prose(tmp_path: Path) -> None:
@@ -201,6 +207,7 @@ def test_export_bundle_existing_mismatch_conflicts_without_overwrite(tmp_path: P
 
 
 def test_export_region_codex_writes_only_agents_region_and_receipt(tmp_path: Path) -> None:
+    _skip_windows_mutation_disabled()
     workspace = tmp_path / "work"
     workspace.mkdir()
     _copy_inputs(workspace)
@@ -225,6 +232,7 @@ def test_export_region_codex_writes_only_agents_region_and_receipt(tmp_path: Pat
 
 
 def test_export_region_claude_code_writes_only_claude_region(tmp_path: Path) -> None:
+    _skip_windows_mutation_disabled()
     workspace = tmp_path / "work"
     workspace.mkdir()
     _copy_inputs(workspace)
@@ -256,6 +264,7 @@ def test_export_region_missing_duplicate_or_malformed_markers_conflict(tmp_path:
 
 
 def test_export_region_idempotent_current_region_creates_no_duplicate_receipt(tmp_path: Path) -> None:
+    _skip_windows_mutation_disabled()
     workspace = tmp_path / "work"
     workspace.mkdir()
     _copy_inputs(workspace)
@@ -272,6 +281,30 @@ def test_export_region_idempotent_current_region_creates_no_duplicate_receipt(tm
     assert _json(stdout)["data"]["changed"] is False
     assert target.read_bytes() == before
     assert len(list((workspace / ".canon" / "undo").glob("undo-*.json"))) == 1
+
+
+def test_export_region_windows_identical_region_remains_read_only_noop(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    if os.name != "nt":
+        pytest.skip("Windows fail-closed no-op contract")
+    import canon.cli_export as cli_export
+
+    workspace = tmp_path / "work"
+    workspace.mkdir()
+    _copy_inputs(workspace)
+    target = workspace / "AGENTS.md"
+    target.write_text(_host(), encoding="utf-8", newline="")
+    monkeypatch.setattr(cli_export, "render_region_inner", lambda *_args, **_kwargs: "OLD\n")
+
+    code, stdout, stderr = _run(["--json", "export", *_base_args(workspace), "--format", "region", "--apply-region", "AGENTS.md"])
+
+    assert code == EX_OK
+    assert stderr == ""
+    assert _json(stdout)["data"]["changed"] is False
+    assert target.read_text(encoding="utf-8") == _host()
+    assert not (workspace / ".canon" / "undo").exists()
 
 
 def test_export_region_disallowed_adapter_is_unsupported_lifecycle(tmp_path: Path) -> None:
@@ -321,6 +354,7 @@ def test_export_region_unsafe_paths_fail_before_mutation(tmp_path: Path, target_
 
 
 def test_export_region_current_hash_drift_conflicts_without_command_mutation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _skip_windows_mutation_disabled()
     import canon.cli_export as cli_export
 
     workspace = tmp_path / "work"
@@ -331,9 +365,9 @@ def test_export_region_current_hash_drift_conflicts_without_command_mutation(tmp
     drifted = f"human edit\n{BEGIN}\nstill human\n{END}\n"
     real_replace = cli_export.replace_region_file
 
-    def drift_before_replace(path: Path, expected_hash: str, postimage: bytes) -> None:
+    def drift_before_replace(path: Path, expected_hash: str, postimage: bytes, **kwargs: object) -> None:
         target.write_text(drifted, encoding="utf-8")
-        real_replace(path, expected_hash, postimage)
+        real_replace(path, expected_hash, postimage, **kwargs)
 
     monkeypatch.setattr(cli_export, "replace_region_file", drift_before_replace)
 
