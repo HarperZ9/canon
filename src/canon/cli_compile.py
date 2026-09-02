@@ -5,13 +5,14 @@ from typing import TextIO
 
 from .adapter import descriptor_for, validate_adapter_descriptor
 from .atom import CanonAtom, validate_atom
-from .bootstrap_sources import SourceParseError, strict_jsonl_objects
+from .bootstrap_sources import SourceParseError, strict_jsonl_objects, utf8_text
 from .canonical_json import canonical_json_text, sha256_bytes, sha256_text
 from .capsule import Budget, CapsuleBuildError, CapsuleCompileRequest, CapsuleTarget, SourceState, compile_capsule
 from .cli_artifacts import ARTIFACT_NAMES, MAX_SOURCE_BYTES, ArtifactError, SourceBytes, checked_workspace, output_relative, publish_artifacts, read_source_file
 from .cli_format import make_result, write_result
 from .schema import Record
 from .source_state import source_state_sha256
+from .secret_quarantine import scan_text
 from .validator import validate_record
 
 _BUDGETS = {"needle": 2048, "handoff": 8192, "archive": 32768, "custom": 8192}
@@ -59,8 +60,10 @@ def run_compile_command(
         return write_result(result, stdout=stdout, stderr=stderr, json_output=_json_output(parsed), color=color)
 
 
-def _bundle_and_data(parsed: object, *, workspace, stdin: TextIO | None):
+def _bundle_and_data(parsed: object, *, workspace, stdin: TextIO | None, scan_sources: bool = False):
     sources = _load_sources(parsed, workspace=workspace, stdin=stdin)
+    if scan_sources:
+        _scan_loaded_sources(sources)
     records = _records_from_source(sources.records)
     atoms = _atoms_from_source(sources.atoms)
     descriptor = _descriptor(parsed.target)  # type: ignore[attr-defined]
@@ -82,6 +85,11 @@ def _bundle_and_data(parsed: object, *, workspace, stdin: TextIO | None):
     )
     bundle = compile_capsule(request)
     return bundle, _result_data(bundle, parsed, sources)
+
+
+def compile_bundle_for_cli(parsed: object, *, workspace, stdin: TextIO | None, scan_sources: bool = False):
+    """Return the Task 7 compile bundle/result data without writing output."""
+    return _bundle_and_data(parsed, workspace=workspace, stdin=stdin, scan_sources=scan_sources)
 
 
 def _load_sources(parsed: object, *, workspace, stdin: TextIO | None) -> _LoadedSources:
@@ -150,6 +158,18 @@ def _jsonl_objects(data: bytes) -> tuple[dict, ...]:
         return tuple(item.value for item in strict_jsonl_objects(data))
     except SourceParseError as exc:
         raise CompileCliError("invalid_args")
+
+
+def _scan_loaded_sources(sources: _LoadedSources) -> None:
+    for source in (sources.records, sources.atoms):
+        try:
+            text = utf8_text(source.data)
+            findings = tuple(scan_text(source.path, source_id="source-path"))
+            findings += tuple(scan_text(text, source_id="source-text"))
+        except Exception as exc:
+            raise CompileCliError("invalid_args") from exc
+        if findings:
+            raise CompileCliError("secret_quarantine")
 
 
 def _descriptor(target_id: object):
@@ -235,6 +255,11 @@ def _artifact_bytes(bundle: object) -> dict[str, bytes]:
     }
 
 
+def bundle_artifacts(bundle: object) -> dict[str, bytes]:
+    """Return Task 7 artifact bytes for callers that need publish semantics."""
+    return _artifact_bytes(bundle)
+
+
 def _raw_markdown_stdout(parsed: object) -> bool:
     return parsed.command == "compile" and parsed.out is None and parsed.json_output is False  # type: ignore[attr-defined]
 
@@ -267,4 +292,4 @@ def _json_output(parsed: object) -> bool:
     return getattr(parsed, "json_output", False) is True
 
 
-__all__ = ["run_compile_command"]
+__all__ = ["bundle_artifacts", "compile_bundle_for_cli", "run_compile_command"]

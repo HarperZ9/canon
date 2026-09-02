@@ -10,6 +10,7 @@ from typing import TextIO
 
 from .bootstrap import BootstrapConfig, BootstrapConfigError, run_bootstrap
 from .cli_format import color_enabled, make_result, write_result
+from .cli_parser import ParserExit, build_canon_parser
 from .cli_init import run_init
 from .exit_codes import EX_OK, EX_USAGE
 
@@ -26,48 +27,9 @@ COMMANDS = (
 )
 
 
-class _ParserExit(Exception):
-    def __init__(self, status: int) -> None:
-        self.status = status
-
-
-class _CanonArgumentParser(argparse.ArgumentParser):
-    def __init__(
-        self,
-        *args: object,
-        stdout: TextIO | None = None,
-        stderr: TextIO | None = None,
-        **kwargs: object,
-    ) -> None:
-        super().__init__(*args, **kwargs)
-        self._canon_stdout = stdout if stdout is not None else sys.stdout
-        self._canon_stderr = stderr if stderr is not None else sys.stderr
-
-    def _print_message(self, message: str, file: TextIO | None = None) -> None:
-        if not message:
-            return
-        target = self._stream_for(file)
-        target.write(message)
-
-    def exit(self, status: int = 0, message: str | None = None) -> None:
-        if message:
-            self._print_message(message, sys.stderr)
-        raise _ParserExit(status)
-
-    def print_help(self, file: TextIO | None = None) -> None:
-        super().print_help(file or self._canon_stdout)
-
-    def _stream_for(self, file: TextIO | None) -> TextIO:
-        if file is None or file is sys.stderr or file is sys.__stderr__:
-            return self._canon_stderr
-        if file is sys.stdout or file is sys.__stdout__:
-            return self._canon_stdout
-        return file
-
-
 def build_parser() -> argparse.ArgumentParser:
     """Build the stable placeholder parser for canon commands."""
-    return _build_parser()
+    return build_canon_parser(COMMANDS)
 
 
 def run_cli(
@@ -87,10 +49,10 @@ def run_cli(
     json_requested = _json_requested(tokens)
     parse_color = color_enabled(environ=environ, no_color="--no-color" in tokens, is_tty=_is_tty(stdout))
     parser_stderr = io.StringIO()
-    parser = _build_parser(stdout=stdout, stderr=parser_stderr)
+    parser = build_canon_parser(COMMANDS, stdout=stdout, stderr=parser_stderr)
     try:
         parsed = parser.parse_args(tokens)
-    except _ParserExit as error:
+    except ParserExit as error:
         if error.status == EX_OK:
             return error.status
         return _parse_error(stdout, stderr, json_requested=json_requested, color=parse_color)
@@ -121,6 +83,14 @@ def _run_parsed(
         from .doctor import run_doctor_command
 
         return run_doctor_command(parsed, stdin=stdin, stdout=stdout, stderr=stderr, color=color)
+    if parsed.command == "export":
+        from .cli_export import run_export_command
+
+        return run_export_command(parsed, stdin=stdin, stdout=stdout, stderr=stderr, color=color)
+    if parsed.command == "undo":
+        from .cli_export import run_undo_command
+
+        return run_undo_command(parsed, stdout=stdout, stderr=stderr, color=color)
     return write_result(
         _command_result(parsed),
         stdout=stdout,
@@ -176,71 +146,6 @@ def _bootstrap_result(parsed: argparse.Namespace):
         message=report.message,
         data=report.to_result_data(),
     )
-
-
-def _build_parser(stdout: TextIO | None = None, stderr: TextIO | None = None) -> _CanonArgumentParser:
-    parser = _CanonArgumentParser(
-        prog="canon",
-        description="Canon bootstrap command surface.",
-        stdout=stdout,
-        stderr=stderr,
-    )
-    parser.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
-    parser.add_argument("--no-color", action="store_true", help="disable colored output")
-    subparsers = parser.add_subparsers(dest="command", metavar="command", required=True, title="commands")
-    for command in COMMANDS:
-        subparser = subparsers.add_parser(command, help=f"{command} placeholder")
-        subparser._canon_stdout = parser._canon_stdout
-        subparser._canon_stderr = parser._canon_stderr
-        if command == "init":
-            _add_init_args(subparser)
-        elif command == "bootstrap":
-            _add_bootstrap_args(subparser)
-        elif command in ("compile", "preview"):
-            _add_compile_args(subparser, include_out=command == "compile")
-        elif command == "doctor":
-            _add_doctor_args(subparser)
-    return parser
-
-
-def _add_init_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--workspace", default=".", help="workspace path")
-    parser.add_argument("--state-dir", default=None, help="state directory path")
-    parser.add_argument("--apply", action="store_true", help="create Canon-owned local state")
-
-
-def _add_bootstrap_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--workspace", default=".", help="workspace path")
-    parser.add_argument("--state-dir", default=".canon", help="state directory path")
-    parser.add_argument("--target", required=True, help="adapter target id")
-    parser.add_argument("--tier", required=True, help="requested integration tier")
-    parser.add_argument("--profile", default="handoff", help="capsule profile")
-    parser.add_argument("--offline", action="store_true", help="avoid later online work")
-    parser.add_argument("--run-id", required=True, help="bootstrap run id")
-    parser.add_argument("--records", default=None, help="Record JSONL input path")
-    parser.add_argument("--atoms", default=None, help="CanonAtom JSONL input path")
-    parser.add_argument("--readiness-response", default=None, help="readiness response JSON path")
-    parser.add_argument("--started-at", default="not-recorded", help="explicit witness start time")
-
-
-def _add_compile_args(parser: argparse.ArgumentParser, *, include_out: bool) -> None:
-    parser.add_argument("--workspace", default=".", help="workspace path")
-    parser.add_argument("--records", required=True, help="Record JSONL input path or '-'")
-    parser.add_argument("--atoms", required=True, help="CanonAtom JSONL input path or '-'")
-    parser.add_argument("--target", required=True, help="adapter target id")
-    parser.add_argument("--profile", default="handoff", help="capsule profile")
-    parser.add_argument("--offline", action="store_true", help="avoid later online work")
-    if include_out:
-        parser.add_argument("--out", default=None, help="output directory below workspace")
-
-
-def _add_doctor_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--workspace", default=".", help="workspace path")
-    parser.add_argument("--target", required=True, help="adapter target id")
-    parser.add_argument("--records", default=None, help="Record JSONL input path or '-'")
-    parser.add_argument("--atoms", default=None, help="CanonAtom JSONL input path or '-'")
-    parser.add_argument("--offline", action="store_true", help="record reachability as unknown")
-    parser.add_argument("--expected-source-state", default=None, help="expected source state sha256")
 
 
 def _argv_copy(argv: list[str], stderr: TextIO) -> list[str] | None:
