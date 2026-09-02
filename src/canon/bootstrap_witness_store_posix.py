@@ -65,7 +65,7 @@ def _create_once(
 
 def _read_existing(dir_fd: int, name: str, verify: Callable[[], None]) -> bytes | None:
     try:
-        fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=dir_fd)
+        fd = os.open(name, _read_flags(), dir_fd=dir_fd)
     except FileNotFoundError:
         return None
     except OSError as exc:
@@ -88,7 +88,7 @@ def _cleanup_created(dir_fd: int, name: str, expected_key: tuple[int, int] | Non
     if expected_key is None:
         return
     try:
-        fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=dir_fd)
+        fd = os.open(name, _read_flags(), dir_fd=dir_fd)
     except FileNotFoundError:
         return
     except OSError as exc:
@@ -96,7 +96,7 @@ def _cleanup_created(dir_fd: int, name: str, expected_key: tuple[int, int] | Non
     try:
         info = os.fstat(fd)
         if not stat.S_ISREG(info.st_mode) or _stat_key(info) != expected_key:
-            raise PosixWitnessWriteError("io_error")
+            raise PosixWitnessWriteError("conflict")
     finally:
         os.close(fd)
     try:
@@ -114,6 +114,10 @@ def _verify(verify: Callable[[], None]) -> None:
         raise
     except Exception as exc:
         raise PosixWitnessWriteError("unsafe_path") from exc
+
+
+def _read_flags() -> int:
+    return os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
 
 
 def _close_if_open(fd: int | None) -> None:

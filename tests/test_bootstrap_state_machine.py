@@ -5,6 +5,7 @@ import io
 import json
 import os
 import socket
+import stat
 import subprocess
 import tempfile
 import weakref
@@ -909,6 +910,60 @@ def test_witness_child_swap_after_handle_open_fails_without_outside_artifacts(
         assert not _has_files(displaced)
 
 
+@pytest.mark.parametrize("helper", ("read-existing", "cleanup-created"))
+def test_posix_witness_fifo_probe_opens_are_nonblocking_before_fstat(
+    monkeypatch: pytest.MonkeyPatch,
+    helper: str,
+) -> None:
+    import canon.bootstrap_witness_store_posix as posix
+
+    nonblock = 0x400000
+    monkeypatch.setattr(posix.os, "O_NONBLOCK", nonblock, raising=False)
+    monkeypatch.setattr(posix.os, "O_NOFOLLOW", 0x200000, raising=False)
+    calls: list[int] = []
+
+    def fake_open(name: str, flags: int, *args: object, **kwargs: object) -> int:
+        del name, args, kwargs
+        calls.append(flags)
+        if not flags & nonblock:
+            raise AssertionError("missing O_NONBLOCK")
+        raise FileNotFoundError
+
+    monkeypatch.setattr(posix.os, "open", fake_open)
+    if helper == "read-existing":
+        assert posix._read_existing(99, "run-fifo.json", lambda: None) is None
+    else:
+        posix._cleanup_created(99, "run-fifo.json", (1, 2))
+    assert calls
+
+
+def test_posix_witness_cleanup_rejects_nonregular_replacement_as_conflict(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import canon.bootstrap_witness_store_posix as posix
+
+    nonblock = 0x400000
+    monkeypatch.setattr(posix.os, "O_NONBLOCK", nonblock, raising=False)
+    monkeypatch.setattr(posix.os, "O_NOFOLLOW", 0x200000, raising=False)
+    info = os.stat_result((stat.S_IFIFO | 0o600, 2, 1, 1, 0, 0, 0, 0, 0, 0))
+    closed: list[int] = []
+
+    def fake_open(name: str, flags: int, *args: object, **kwargs: object) -> int:
+        del name, args, kwargs
+        assert flags & nonblock
+        return 44
+
+    monkeypatch.setattr(posix.os, "open", fake_open)
+    monkeypatch.setattr(posix.os, "fstat", lambda fd: info)
+    monkeypatch.setattr(posix.os, "close", lambda fd: closed.append(fd))
+
+    with pytest.raises(posix.PosixWitnessWriteError) as excinfo:
+        posix._cleanup_created(99, "run-fifo.json", (1, 2))
+
+    assert excinfo.value.code == "conflict"
+    assert closed == [44]
+
+
 @pytest.mark.parametrize("failure", ("write", "fsync", "close"))
 def test_witness_created_file_is_removed_after_partial_write_failure(
     tmp_path: Path,
@@ -1060,6 +1115,72 @@ def test_cli_secret_witness_string_returns_canonical_quarantine_without_state(tm
     assert stderr.getvalue() == ""
     assert "Traceback" not in rendered
     assert canary not in rendered
+    assert not (workspace / ".canon").exists()
+
+
+@pytest.mark.parametrize("field", ("records_path", "atoms_path", "readiness_response_path", "started_at"))
+def test_control_config_strings_return_invalid_args_before_state_mutation(tmp_path: Path, field: str) -> None:
+    from canon.bootstrap import run_bootstrap
+
+    workspace = tmp_path / "work"
+    workspace.mkdir()
+    _copy_inputs(workspace)
+    config = _source_config(workspace, started_at="not-recorded")
+    object.__setattr__(config, field, "before\x1bafter")
+
+    report = run_bootstrap(config)
+    rendered = json.dumps(report.to_dict(), sort_keys=True) + repr(report)
+
+    assert report.ok is False
+    assert report.failure_code == "invalid_args"
+    assert report.events == ()
+    assert "Traceback" not in rendered
+    assert "before" not in rendered
+    assert not (workspace / ".canon").exists()
+
+
+@pytest.mark.parametrize(
+    ("option", "replacement"),
+    (
+        ("--records", "before\x1bafter"),
+        ("--atoms", "before\x1bafter"),
+        ("--readiness-response", "before\x1bafter"),
+        ("--started-at", "before\x1bafter"),
+    ),
+)
+def test_cli_control_bootstrap_strings_return_canonical_invalid_args_without_state(
+    tmp_path: Path,
+    option: str,
+    replacement: str,
+) -> None:
+    from canon.canonical_json import canonical_json_text
+    from canon.cli import run_cli
+    from canon.exit_codes import EX_USAGE
+
+    workspace = tmp_path / "work"
+    workspace.mkdir()
+    _copy_inputs(workspace)
+    args = [
+        "--json", "bootstrap", "--workspace", str(workspace), "--state-dir", ".canon",
+        "--target", "codex-cli", "--tier", "native-advisory", "--profile", "handoff",
+        "--run-id", "run-cli-control", "--records", "records.jsonl", "--atoms",
+        "atoms.jsonl", "--readiness-response", "readiness_pass.json",
+        "--started-at", "not-recorded",
+    ]
+    args[args.index(option) + 1] = replacement
+    stdout, stderr = io.StringIO(), io.StringIO()
+
+    code = run_cli(args, stdout=stdout, stderr=stderr, environ={})
+    payload = json.loads(stdout.getvalue())
+    rendered = stdout.getvalue() + stderr.getvalue()
+
+    assert code == EX_USAGE
+    assert payload["failure_code"] == "invalid_args"
+    assert payload["message"] == "invalid bootstrap config"
+    assert stdout.getvalue() == canonical_json_text(payload)
+    assert stderr.getvalue() == ""
+    assert "Traceback" not in rendered
+    assert "before" not in rendered
     assert not (workspace / ".canon").exists()
 
 

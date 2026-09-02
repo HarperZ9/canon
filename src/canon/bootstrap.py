@@ -95,7 +95,7 @@ def _snapshot_config(config: BootstrapConfig) -> dict[str, object]:
     snapshot["records_path"] = _optional_path(config.records_path, "records_path")
     snapshot["atoms_path"] = _optional_path(config.atoms_path, "atoms_path")
     snapshot["readiness_response_path"] = _optional_path(config.readiness_response_path, "readiness_response_path")
-    snapshot["started_at"] = config_text(safe_text(config.started_at, "started_at"), "started_at")
+    snapshot["started_at"] = _config_text(config.started_at, "started_at")
     if snapshot["readiness_response"] is not None and snapshot["readiness_response_path"] is not None:
         raise BootstrapConfigError("invalid bootstrap config")
     return snapshot
@@ -121,7 +121,16 @@ def _adapter_data(adapter_id: str, authoritative_tier: str, config: dict[str, ob
 
 
 def _optional_path(value: object, name: str) -> str | None:
-    return None if value is None else config_text(safe_text(value, name), name)
+    return None if value is None else _config_text(value, name)
+
+
+def _config_text(value: object, name: str) -> str:
+    try:
+        return config_text(safe_text(value, name), name)
+    except BootstrapConfigError:
+        raise
+    except TypeError:
+        raise BootstrapConfigError("invalid bootstrap config") from None
 
 
 __all__ = ["BOOTSTRAP_STATES", "BootstrapConfig", "BootstrapConfigError", "BootstrapEvent", "BootstrapReport", "run_bootstrap"]
