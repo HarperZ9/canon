@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .canonical_json import sha256_text
+from .bootstrap_witness_store_posix import PosixWitnessWriteError, write_once_posix
 from .cli_artifacts import WorkspaceRoot
 from .path_policy import is_reparse_point, resolve_under_root
 from .witness import BootstrapWitness, validate_bootstrap_witness
@@ -23,6 +24,25 @@ class WitnessWrite:
     status: str
 
 
+@dataclass(slots=True)
+class _WitnessRoot:
+    path: Path
+    handle: object | None = None
+
+    def verify_live(self) -> None:
+        if self.handle is not None:
+            try:
+                self.handle.verify_live()
+            except Exception as exc:
+                raise BootstrapWitnessStoreError("unsafe_path") from exc
+            return
+        _verify_path_root(self.path)
+
+    def close(self) -> None:
+        if self.handle is not None:
+            self.handle.close()
+
+
 def write_bootstrap_witness(
     witness: BootstrapWitness,
     *,
@@ -35,16 +55,19 @@ def write_bootstrap_witness(
     _assert_workspace_stable(workspace)
     _verify_state_root(state_root)
     root = _witness_root(state_dir, state_root)
-    target = _target_path(root, witness.run_id)
-    data = witness.to_json().encode("utf-8")
-    _verify_state_root(state_root)
-    status = _write_once(target, data)
-    _verify_state_root(state_root)
-    _assert_workspace_stable(workspace)
-    return WitnessWrite(_relative_text(target, workspace.path), status)
+    try:
+        target = _target_path(root.path, witness.run_id)
+        data = witness.to_json().encode("utf-8")
+        root.verify_live()
+        status = _write_once(root, target.name, data)
+        root.verify_live()
+        _assert_workspace_stable(workspace)
+        return WitnessWrite(_relative_text(target, workspace.path), status)
+    finally:
+        root.close()
 
 
-def _witness_root(state_dir: Path, state_root: object | None = None) -> Path:
+def _witness_root(state_dir: Path, state_root: object | None = None) -> _WitnessRoot:
     if state_root is not None:
         return _witness_root_bound(state_root)
     try:
@@ -62,16 +85,15 @@ def _witness_root(state_dir: Path, state_root: object | None = None) -> Path:
         raise
     except OSError as exc:
         raise BootstrapWitnessStoreError("io_error") from exc
-    return root
+    return _WitnessRoot(root)
 
 
-def _witness_root_bound(state_root: object) -> Path:
+def _witness_root_bound(state_root: object) -> _WitnessRoot:
     try:
         handle = state_root.open_child_dir("witnesses", create=True)
         if handle is None:
             raise BootstrapWitnessStoreError("unsafe_path")
-        try: return handle.path
-        finally: handle.close()
+        return _WitnessRoot(handle.path, handle)
     except BootstrapWitnessStoreError:
         raise
     except Exception as exc:
@@ -99,7 +121,16 @@ def _target_path(root: Path, run_id: str) -> Path:
         raise BootstrapWitnessStoreError("unsafe_path") from exc
 
 
-def _write_once(path: Path, data: bytes) -> str:
+def _write_once(root: _WitnessRoot, name: str, data: bytes) -> str:
+    if root.handle is not None and os.name != "nt":
+        return _write_once_posix(root, name, data)
+    root.verify_live()
+    status = _write_once_path(root.path / name, data)
+    root.verify_live()
+    return status
+
+
+def _write_once_path(path: Path, data: bytes) -> str:
     if path.exists() or path.is_symlink():
         return _existing_status(path, data)
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
@@ -127,6 +158,13 @@ def _write_once(path: Path, data: bytes) -> str:
         _cleanup_created(path, created_key)
         raise BootstrapWitnessStoreError("io_error")
     return "created"
+
+
+def _write_once_posix(root: _WitnessRoot, name: str, data: bytes) -> str:
+    try:
+        return write_once_posix(root.handle.ref, name, data, verify=root.verify_live, write_all=_write_all)
+    except PosixWitnessWriteError as exc:
+        raise BootstrapWitnessStoreError(exc.code) from exc
 
 
 def _existing_status(path: Path, expected: bytes) -> str:
@@ -208,6 +246,15 @@ def _assert_workspace_stable(workspace: WorkspaceRoot) -> None:
     if _stat_key(info) != workspace.stat_key or not stat.S_ISDIR(info.st_mode):
         raise BootstrapWitnessStoreError("unsafe_path")
     if is_reparse_point(workspace.path):
+        raise BootstrapWitnessStoreError("unsafe_path")
+
+
+def _verify_path_root(path: Path) -> None:
+    try:
+        info = path.lstat()
+    except OSError as exc:
+        raise BootstrapWitnessStoreError("unsafe_path") from exc
+    if not stat.S_ISDIR(info.st_mode) or is_reparse_point(path):
         raise BootstrapWitnessStoreError("unsafe_path")
 
 

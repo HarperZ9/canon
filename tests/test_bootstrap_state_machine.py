@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import gc
+import io
 import json
+import os
 import socket
 import subprocess
 import tempfile
@@ -130,11 +132,22 @@ def _rehash_cached_capsule(entry: dict[str, object]) -> None:
 def _try_swap_dir_to_symlink(path: Path, outside: Path, displaced: Path) -> bool:
     try:
         path.rename(displaced)
-        path.symlink_to(outside, target_is_directory=True)
+        try:
+            path.symlink_to(outside, target_is_directory=True)
+        except (NotImplementedError, OSError):
+            try:
+                displaced.rename(path)
+            except OSError:
+                pass
+            raise
         return True
     except (NotImplementedError, OSError) as exc:
         assert not outside.joinpath(path.name).exists()
         return False
+
+
+def _has_files(root: Path) -> bool:
+    return root.exists() and any(path.is_file() for path in root.rglob("*"))
 
 
 def _assert_no_raw_material(rendered: str, workspace: Path) -> None:
@@ -503,6 +516,74 @@ def test_forged_cache_capsule_payload_must_match_current_sources(tmp_path: Path,
     assert _tree(workspace / ".canon" / "witnesses") == witnesses_before
 
 
+def test_forged_cache_canon_md_hash_must_match_cached_capsule(tmp_path: Path) -> None:
+    workspace = tmp_path / "work"
+    workspace.mkdir()
+    _copy_inputs(workspace)
+    first = _run_source_bootstrap(workspace)
+    witnesses_before = _tree(workspace / ".canon" / "witnesses")
+    entry = _cache_entry(first, workspace)
+    entry["canon_md_sha256"] = "sha256:" + ("0" * 64)
+    _write_cache_entry(first, workspace, entry)
+
+    report = _run_source_bootstrap(workspace, run_id="run-forged-canon-md")
+
+    assert report.ok is False
+    assert report.events[-1].state == "compile_or_reuse_capsule"
+    assert "release_to_work" not in _event_states(report)
+    assert _tree(workspace / ".canon" / "witnesses") == witnesses_before
+
+
+@pytest.mark.parametrize(
+    ("bad_value", "hidden"),
+    (
+        ("not-a-list", "not-a-list"),
+        ([17], None),
+        (["sk-live-abcdefghijklmnopqrstuvwxyz012345"], "sk-live-abcdefghijklmnopqrstuvwxyz012345"),
+    ),
+)
+def test_cli_rejects_corrupt_cache_does_not_prove_without_traceback(
+    tmp_path: Path,
+    bad_value: object,
+    hidden: str | None,
+) -> None:
+    from canon.canonical_json import canonical_json_text
+    from canon.cli import run_cli
+    from canon.exit_codes import EX_IO
+
+    workspace = tmp_path / "work"
+    workspace.mkdir()
+    _copy_inputs(workspace)
+    first = _run_source_bootstrap(workspace)
+    entry = _cache_entry(first, workspace)
+    entry["does_not_prove"] = bad_value
+    _write_cache_entry(first, workspace, entry)
+    stdout, stderr = io.StringIO(), io.StringIO()
+
+    code = run_cli(
+        [
+            "--json", "bootstrap", "--workspace", str(workspace), "--state-dir", ".canon",
+            "--target", "codex-cli", "--tier", "native-advisory", "--profile", "handoff",
+            "--run-id", "run-corrupt-proof", "--records", "records.jsonl", "--atoms",
+            "atoms.jsonl", "--readiness-response", "readiness_pass.json",
+        ],
+        stdout=stdout,
+        stderr=stderr,
+        environ={},
+    )
+    payload = json.loads(stdout.getvalue())
+    rendered = stdout.getvalue() + stderr.getvalue()
+
+    assert code == EX_IO
+    assert payload["failure_code"] == "io_error"
+    assert payload["message"] == "bootstrap cache failed"
+    assert stdout.getvalue() == canonical_json_text(payload)
+    assert stderr.getvalue() == ""
+    assert "Traceback" not in rendered
+    if hidden is not None:
+        assert hidden not in rendered
+
+
 def test_failed_readiness_is_terminal_and_reports_missing_ids(tmp_path: Path) -> None:
     workspace = tmp_path / "work"
     workspace.mkdir()
@@ -710,6 +791,124 @@ def test_state_dir_ancestor_swap_writes_no_outside_artifacts(
     assert not (outside / "state" / "witnesses").exists()
 
 
+def test_state_child_handle_identity_detects_or_blocks_public_cache_swap(tmp_path: Path) -> None:
+    from canon.bootstrap_runtime import resolve_workspace
+    from canon.bootstrap_state_root import BootstrapStateRootError, open_bootstrap_state_root
+
+    workspace_path = tmp_path / "work"
+    workspace_path.mkdir()
+    outside = tmp_path / "outside"
+    displaced = tmp_path / "displaced-cache"
+    outside.mkdir()
+    workspace, state_dir = resolve_workspace(str(workspace_path), ".canon/state")
+    root = open_bootstrap_state_root(workspace, state_dir)
+    child = root.open_child_dir("cache", create=True)
+    assert child is not None
+
+    try:
+        child.verify_live()
+        swapped = _try_swap_dir_to_symlink(state_dir / "cache", outside, displaced)
+        if swapped:
+            with pytest.raises(BootstrapStateRootError):
+                child.verify_live()
+        else:
+            child.verify_live()
+    finally:
+        child.close()
+        root.close()
+
+    assert not _has_files(outside)
+
+
+def test_cache_child_swap_after_handle_open_fails_without_outside_artifacts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import canon.bootstrap_runtime_cache as cache_runtime
+
+    workspace = tmp_path / "work"
+    workspace.mkdir()
+    _copy_inputs(workspace)
+    outside = tmp_path / "outside-cache"
+    displaced = tmp_path / "displaced-cache"
+    outside.mkdir()
+    state_dir = workspace / ".canon" / "state"
+    swapped = False
+    swap_blocked = False
+
+    def swap_cache_child() -> None:
+        nonlocal swapped, swap_blocked
+        if not swapped and not swap_blocked:
+            swapped = _try_swap_dir_to_symlink(state_dir / "cache", outside, displaced)
+            swap_blocked = not swapped
+
+    if os.name == "nt":
+        real_write_path = cache_runtime._cache._win_write_path
+
+        def write_path_after_swap(*args: object, **kwargs: object) -> object:
+            swap_cache_child()
+            return real_write_path(*args, **kwargs)
+
+        monkeypatch.setattr(cache_runtime._cache, "_win_write_path", write_path_after_swap)
+    else:
+        real_write_all = cache_runtime._cache._posix_write_all
+
+        def write_all_after_swap(fd: int, data: bytes) -> None:
+            swap_cache_child()
+            real_write_all(fd, data)
+
+        monkeypatch.setattr(cache_runtime._cache, "_posix_write_all", write_all_after_swap)
+
+    report = _run_source_bootstrap(workspace, state_dir=".canon/state", run_id="run-cache-child-swap")
+
+    assert swapped or swap_blocked
+    assert not _has_files(outside)
+    if swapped:
+        assert report.ok is False
+        assert report.failure_code == "unsafe_path"
+        assert report.events[-1].state == "compile_or_reuse_capsule"
+        assert "release_to_work" not in _event_states(report)
+        assert not _has_files(displaced)
+
+
+def test_witness_child_swap_after_handle_open_fails_without_outside_artifacts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import canon.bootstrap_witness_store as store
+
+    workspace = tmp_path / "work"
+    workspace.mkdir()
+    _copy_inputs(workspace)
+    outside = tmp_path / "outside-witnesses"
+    displaced = tmp_path / "displaced-witnesses"
+    outside.mkdir()
+    state_dir = workspace / ".canon" / "state"
+    swapped = False
+    swap_blocked = False
+    real_write_all = store._write_all
+
+    def write_all_after_swap(fd: int, data: bytes) -> None:
+        nonlocal swapped, swap_blocked
+        if not swapped and not swap_blocked:
+            swapped = _try_swap_dir_to_symlink(state_dir / "witnesses", outside, displaced)
+            swap_blocked = not swapped
+        real_write_all(fd, data)
+
+    monkeypatch.setattr(store, "_write_all", write_all_after_swap)
+
+    report = _run_source_bootstrap(workspace, state_dir=".canon/state", run_id="run-witness-child-swap")
+
+    assert swapped or swap_blocked
+    assert not _has_files(outside)
+    if swapped:
+        assert report.ok is False
+        assert report.failure_code == "unsafe_path"
+        assert report.events[-1].state == "emit_witness"
+        assert "release_to_work" not in _event_states(report)
+        assert not _has_files(displaced)
+
+
 @pytest.mark.parametrize("failure", ("write", "fsync", "close"))
 def test_witness_created_file_is_removed_after_partial_write_failure(
     tmp_path: Path,
@@ -806,6 +1005,85 @@ def test_secret_inputs_are_quarantined_before_cache_witness_or_public_leak(tmp_p
     rendered = json.dumps(report.to_dict(), sort_keys=True) + repr(report)
     assert report.failure_code == "secret_quarantine"
     assert canary not in rendered
+    assert not (workspace / ".canon").exists()
+
+
+@pytest.mark.parametrize("field", ("run_id", "started_at"))
+def test_secret_config_strings_are_quarantined_before_state_mutation(tmp_path: Path, field: str) -> None:
+    from canon.bootstrap import run_bootstrap
+
+    canary = "sk-live-abcdefghijklmnopqrstuvwxyz012345"
+    workspace = tmp_path / "work"
+    workspace.mkdir()
+    _copy_inputs(workspace)
+    config = _source_config(workspace, run_id="run-config-secret", started_at="not-recorded")
+    object.__setattr__(config, field, canary)
+
+    report = run_bootstrap(config)
+    rendered = json.dumps(report.to_dict(), sort_keys=True) + repr(report)
+
+    assert report.ok is False
+    assert report.failure_code == "secret_quarantine"
+    assert canary not in rendered
+    assert not (workspace / ".canon").exists()
+
+
+def test_cli_secret_witness_string_returns_canonical_quarantine_without_state(tmp_path: Path) -> None:
+    from canon.canonical_json import canonical_json_text
+    from canon.cli import run_cli
+    from canon.exit_codes import EX_SECURITY
+
+    canary = "sk-live-abcdefghijklmnopqrstuvwxyz012345"
+    workspace = tmp_path / "work"
+    workspace.mkdir()
+    _copy_inputs(workspace)
+    stdout, stderr = io.StringIO(), io.StringIO()
+
+    code = run_cli(
+        [
+            "--json", "bootstrap", "--workspace", str(workspace), "--state-dir", ".canon",
+            "--target", "codex-cli", "--tier", "native-advisory", "--profile", "handoff",
+            "--run-id", "run-cli-secret", "--records", "records.jsonl", "--atoms",
+            "atoms.jsonl", "--readiness-response", "readiness_pass.json",
+            "--started-at", canary,
+        ],
+        stdout=stdout,
+        stderr=stderr,
+        environ={},
+    )
+    payload = json.loads(stdout.getvalue())
+    rendered = stdout.getvalue() + stderr.getvalue()
+
+    assert code == EX_SECURITY
+    assert payload["failure_code"] == "secret_quarantine"
+    assert stdout.getvalue() == canonical_json_text(payload)
+    assert stderr.getvalue() == ""
+    assert "Traceback" not in rendered
+    assert canary not in rendered
+    assert not (workspace / ".canon").exists()
+
+
+@pytest.mark.parametrize("mode", ("direct", "file"))
+def test_readiness_response_escaped_nul_is_rejected_without_traceback_or_state(
+    tmp_path: Path,
+    mode: str,
+) -> None:
+    workspace = tmp_path / "work"
+    workspace.mkdir()
+    _copy_inputs(workspace)
+    response = _read_json(workspace / "readiness_pass.json")
+    response["operator_note"] = "before\u0000after"
+    if mode == "file":
+        (workspace / "readiness_nul.json").write_text(json.dumps(response) + "\n", encoding="utf-8")
+        report = _run_source_bootstrap(workspace, readiness_response_path="readiness_nul.json")
+    else:
+        report = _run_source_bootstrap(workspace, readiness_response=response, readiness_response_path=None)
+    rendered = json.dumps(report.to_dict(), sort_keys=True) + repr(report)
+
+    assert report.ok is False
+    assert report.failure_code == "invalid_args"
+    assert "Traceback" not in rendered
+    assert "before" not in rendered
     assert not (workspace / ".canon").exists()
 
 

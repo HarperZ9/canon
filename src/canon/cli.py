@@ -8,7 +8,7 @@ import sys
 from collections.abc import Mapping
 from typing import TextIO
 
-from .bootstrap import BootstrapConfig, run_bootstrap
+from .bootstrap import BootstrapConfig, BootstrapConfigError, run_bootstrap
 from .cli_format import color_enabled, make_result, write_result
 from .cli_init import run_init
 from .exit_codes import EX_OK, EX_USAGE
@@ -150,8 +150,8 @@ def _init_result(parsed: argparse.Namespace):
 
 
 def _bootstrap_result(parsed: argparse.Namespace):
-    report = run_bootstrap(
-        BootstrapConfig(
+    try:
+        config = BootstrapConfig(
             workspace=parsed.workspace,
             state_dir=parsed.state_dir,
             target=parsed.target,
@@ -164,6 +164,10 @@ def _bootstrap_result(parsed: argparse.Namespace):
             readiness_response_path=parsed.readiness_response,
             started_at=parsed.started_at,
         )
+    except BootstrapConfigError as exc:
+        return make_result(ok=False, command="bootstrap", failure_code=exc.code, message="invalid bootstrap config")
+    report = run_bootstrap(
+        config
     )
     return make_result(
         ok=report.ok,

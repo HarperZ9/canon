@@ -11,7 +11,7 @@ from .canonical_json import CanonicalJSONError, canonical_json_text
 from .capsule import Budget, SourceState
 from .cli_artifacts import ArtifactError, SourceBytes, WorkspaceRoot, read_source_file
 from .schema import Record
-from .secret_quarantine import scan_text
+from .secret_quarantine import SecretQuarantineError, scan_text
 from .source_state import SourceStateItem, source_state_sha256
 from .validator import validate_record
 
@@ -119,11 +119,18 @@ def _scan_readiness_response(response: dict[str, object]) -> None:
     try: rendered = canonical_json_text(response)
     except (CanonicalJSONError, TypeError, ValueError) as exc:
         raise BootstrapRuntimeError("invalid_args", "invalid readiness response") from exc
-    if scan_text(rendered, source_id="readiness-response"):
-        raise BootstrapRuntimeError("secret_quarantine", "secret quarantine")
+    _scan_or_fail(rendered)
     for value in _string_leaves(response):
-        if scan_text(value, source_id="readiness-response"):
-            raise BootstrapRuntimeError("secret_quarantine", "secret quarantine")
+        _scan_or_fail(value)
+
+
+def _scan_or_fail(text: str) -> None:
+    try:
+        findings = scan_text(text, source_id="readiness-response")
+    except SecretQuarantineError as exc:
+        raise BootstrapRuntimeError("invalid_args", "invalid readiness response") from exc
+    if findings:
+        raise BootstrapRuntimeError("secret_quarantine", "secret quarantine")
 
 
 def _string_leaves(value: object):

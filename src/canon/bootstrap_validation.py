@@ -5,13 +5,16 @@ import re
 from collections.abc import Mapping
 
 from .adapter import INTEGRATION_TIERS
+from .secret_quarantine import SecretQuarantineError, scan_text
 
 _ADAPTER_ID_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 _TOKEN_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 
 
 class BootstrapConfigError(ValueError):
-    pass
+    def __init__(self, message: str = "invalid bootstrap config", *, code: str = "invalid_args") -> None:
+        self.code = code
+        super().__init__(message)
 
 
 class _FrozenBootstrapMapping(Mapping[str, object]):
@@ -49,13 +52,13 @@ def snapshot_config_values(
     readiness_response: object,
 ) -> dict[str, object]:
     return {
-        "workspace": _path_text(workspace),
-        "state_dir": _path_text(state_dir),
-        "target": _adapter_id(target),
-        "tier": _tier(tier),
-        "profile": _token(profile, "profile"),
+        "workspace": config_text(_path_text(workspace), "workspace"),
+        "state_dir": config_text(_path_text(state_dir), "state_dir"),
+        "target": config_text(_adapter_id(target), "target"),
+        "tier": config_text(_tier(tier), "tier"),
+        "profile": config_text(_token(profile, "profile"), "profile"),
         "offline": _exact_bool(offline),
-        "run_id": _token(run_id, "run_id"),
+        "run_id": config_text(_token(run_id, "run_id"), "run_id"),
         "readiness_response": snapshot_response(readiness_response),
     }
 
@@ -104,6 +107,15 @@ def require_bool(value: object, name: str) -> None:
 def safe_text(value: object, name: str) -> str:
     if type(value) is not str or value == "" or _has_control(value):
         raise TypeError(f"invalid bootstrap {name}")
+    return value
+
+
+def config_text(value: str, name: str) -> str:
+    try:
+        if scan_text(value, source_id=f"bootstrap-config-{name}"):
+            raise BootstrapConfigError("invalid bootstrap config", code="secret_quarantine")
+    except SecretQuarantineError as exc:
+        raise BootstrapConfigError("invalid bootstrap config") from exc
     return value
 
 

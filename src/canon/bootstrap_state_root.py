@@ -23,9 +23,16 @@ class BootstrapStateRootError(OSError):
 
 @dataclass(slots=True)
 class BootstrapDirHandle:
+    state_root: BootstrapStateRoot
     path: Path
     ref: int
     _closed: bool = False
+
+    def verify_live(self) -> None:
+        if self._closed:
+            raise BootstrapStateRootError("unsafe_path")
+        self.state_root.verify_live()
+        _verify_dir_identity(self.path, self.ref)
 
     def close(self) -> None:
         if not self._closed:
@@ -57,8 +64,9 @@ class BootstrapStateRoot:
             if not create:
                 return None
             raise BootstrapStateRootError("unsafe_path") from None
-        self.verify_live()
-        return BootstrapDirHandle(self.path / name, handle)
+        child = BootstrapDirHandle(self, self.path / name, handle)
+        child.verify_live()
+        return child
 
     def close(self) -> None:
         if not self._closed:

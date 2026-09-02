@@ -10,7 +10,7 @@ from .bootstrap_runtime import (
     load_runtime, present_event_data, readiness_result, resolve_workspace, result_data,
 )
 from .bootstrap_runtime_error import BootstrapRuntimeError
-from .bootstrap_validation import BootstrapConfigError, safe_text, snapshot_config_values
+from .bootstrap_validation import BootstrapConfigError, config_text, safe_text, snapshot_config_values
 from .bootstrap_witness_store import BootstrapWitnessStoreError, write_bootstrap_witness
 
 
@@ -36,7 +36,7 @@ class BootstrapConfig:
 
 def run_bootstrap(config: BootstrapConfig) -> BootstrapReport:
     try: snapshot = _snapshot_config(config)
-    except BootstrapConfigError: return make_report(False, "invalid_args", "invalid bootstrap config", (), None)
+    except BootstrapConfigError as exc: return _invalid_config_report(exc)
     events: list[BootstrapEvent] = []
     try: descriptor = descriptor_for(snapshot["target"])
     except KeyError:
@@ -95,10 +95,16 @@ def _snapshot_config(config: BootstrapConfig) -> dict[str, object]:
     snapshot["records_path"] = _optional_path(config.records_path, "records_path")
     snapshot["atoms_path"] = _optional_path(config.atoms_path, "atoms_path")
     snapshot["readiness_response_path"] = _optional_path(config.readiness_response_path, "readiness_response_path")
-    snapshot["started_at"] = safe_text(config.started_at, "started_at")
+    snapshot["started_at"] = config_text(safe_text(config.started_at, "started_at"), "started_at")
     if snapshot["readiness_response"] is not None and snapshot["readiness_response_path"] is not None:
         raise BootstrapConfigError("invalid bootstrap config")
     return snapshot
+
+
+def _invalid_config_report(exc: BootstrapConfigError) -> BootstrapReport:
+    if exc.code == "secret_quarantine":
+        return _terminal([], "detect_entry", "secret_quarantine", "invalid bootstrap config", None)
+    return make_report(False, "invalid_args", "invalid bootstrap config", (), None)
 
 
 def _terminal(events: list[BootstrapEvent], state: str, code: str, message: str, data: dict[str, object] | None) -> BootstrapReport:
@@ -115,7 +121,7 @@ def _adapter_data(adapter_id: str, authoritative_tier: str, config: dict[str, ob
 
 
 def _optional_path(value: object, name: str) -> str | None:
-    return None if value is None else safe_text(value, name)
+    return None if value is None else config_text(safe_text(value, name), name)
 
 
 __all__ = ["BOOTSTRAP_STATES", "BootstrapConfig", "BootstrapConfigError", "BootstrapEvent", "BootstrapReport", "run_bootstrap"]
