@@ -79,6 +79,8 @@ def _add_command_args(command: str, parser: argparse.ArgumentParser) -> None:
         _add_doctor_args(parser)
     elif command == "export":
         _add_export_args(parser)
+    elif command == "rescue":
+        _add_rescue_args(parser)
     elif command == "undo":
         _add_undo_args(parser)
 
@@ -133,6 +135,17 @@ def _add_export_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--format", default=None, help="export format")
     parser.add_argument("--out", default=None, help="output path below workspace")
     parser.add_argument("--apply-region", default=None, help="existing host file region to replace")
+
+
+def _add_rescue_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--workspace", default=".", help="workspace path")
+    parser.add_argument("--records", required=True, help="Record JSONL input path or '-'")
+    parser.add_argument("--atoms", required=True, help="CanonAtom JSONL input path or '-'")
+    parser.add_argument("--target", required=True, help="adapter target id")
+    parser.add_argument("--profile", default="handoff", help="capsule profile")
+    parser.add_argument("--offline", action="store_true", help="record degraded/offline handoff metadata")
+    parser.add_argument("--include-transcript", default=None, help="untrusted transcript path or '-'")
+    parser.add_argument("--out", default=None, help="existing rescue artifact directory below workspace")
 
 
 def _add_undo_args(parser: argparse.ArgumentParser) -> None:
