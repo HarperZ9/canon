@@ -13,6 +13,11 @@ from canon.exit_codes import EX_OK, EX_SECURITY
 FIXTURES = Path(__file__).parent / "fixtures" / "bootstrap"
 BEGIN = "<!-- canon:begin scope=workspace -->"
 END = "<!-- canon:end -->"
+FILE_FORMATS = (
+    ("canon-md", "canon.md"),
+    ("capsule-json", "capsule.json"),
+    ("readiness-json", "readiness.json"),
+)
 
 
 def _copy_inputs(workspace: Path) -> None:
@@ -49,6 +54,13 @@ def _tree(root: Path) -> list[str]:
     return sorted(path.relative_to(root).as_posix() for path in root.rglob("*"))
 
 
+def _payload(workspace: Path, fmt: str) -> str:
+    code, stdout, stderr = _run(["export", *_base_args(workspace), "--format", fmt])
+    assert code == EX_OK
+    assert stderr == ""
+    return stdout
+
+
 def _swap_dir_to_replacement(path: Path, replacement: Path, displaced: Path) -> bool:
     try:
         path.rename(displaced)
@@ -56,6 +68,121 @@ def _swap_dir_to_replacement(path: Path, replacement: Path, displaced: Path) -> 
         return True
     except OSError:
         return False
+
+
+@pytest.mark.parametrize(("fmt", "name"), FILE_FORMATS)
+def test_export_out_missing_target_uses_platform_safe_contract(tmp_path: Path, fmt: str, name: str) -> None:
+    workspace = tmp_path / "work"
+    workspace.mkdir()
+    _copy_inputs(workspace)
+
+    code, stdout, stderr = _run(["--json", "export", *_base_args(workspace), "--format", fmt, "--out", name])
+
+    assert stderr == ""
+    if os.name == "nt":
+        assert code == EX_SECURITY
+        assert _json(stdout)["failure_code"] == "unsafe_path"
+        assert not (workspace / name).exists()
+    else:
+        assert code == EX_OK
+        payload = _json(stdout)
+        assert payload["data"]["write_status"] == "created"
+        assert (workspace / name).read_text(encoding="utf-8") == _payload(workspace, fmt)
+
+
+@pytest.mark.parametrize(("fmt", "name"), FILE_FORMATS)
+def test_export_out_existing_identical_is_idempotent_and_metadata_only(
+    tmp_path: Path,
+    fmt: str,
+    name: str,
+) -> None:
+    workspace = tmp_path / "work"
+    workspace.mkdir()
+    _copy_inputs(workspace)
+    expected = _payload(workspace, fmt)
+    target = workspace / name
+    target.write_text(expected, encoding="utf-8", newline="\n")
+
+    code, stdout, stderr = _run(["--json", "export", *_base_args(workspace), "--format", fmt, "--out", name])
+
+    assert code == EX_OK
+    assert stderr == ""
+    payload = _json(stdout)
+    assert payload["data"]["out"] == name
+    assert payload["data"]["write_status"] == "idempotent"
+    assert target.read_text(encoding="utf-8") == expected
+    assert expected not in stdout
+    assert str(workspace) not in stdout
+
+
+@pytest.mark.parametrize(("fmt", "name"), FILE_FORMATS)
+def test_export_out_rejects_workspace_swap_after_output_validation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    fmt: str,
+    name: str,
+) -> None:
+    import canon.cli_export as cli_export
+
+    workspace = tmp_path / "work"
+    outside = tmp_path / "outside-work"
+    displaced = tmp_path / "displaced-work"
+    workspace.mkdir()
+    outside.mkdir()
+    _copy_inputs(workspace)
+    real_checked = cli_export.checked_output_path
+    swapped = False
+
+    def swap_after_validation(*args: object, **kwargs: object) -> Path:
+        nonlocal swapped
+        target = real_checked(*args, **kwargs)
+        if not swapped:
+            swapped = _swap_dir_to_replacement(workspace, outside, displaced)
+        return target
+
+    monkeypatch.setattr(cli_export, "checked_output_path", swap_after_validation)
+
+    code, stdout, stderr = _run(["--json", "export", *_base_args(workspace), "--format", fmt, "--out", name])
+
+    assert swapped
+    assert code == EX_SECURITY
+    assert stderr == ""
+    assert _json(stdout)["failure_code"] == "unsafe_path"
+    assert not (workspace / name).exists()
+    assert not (displaced / name).exists()
+
+
+@pytest.mark.parametrize(("fmt", "name"), FILE_FORMATS)
+def test_export_out_rejects_nonregular_target_without_payload_leak(tmp_path: Path, fmt: str, name: str) -> None:
+    workspace = tmp_path / "work"
+    workspace.mkdir()
+    _copy_inputs(workspace)
+    (workspace / name).mkdir()
+
+    code, stdout, stderr = _run(["--json", "export", *_base_args(workspace), "--format", fmt, "--out", name])
+
+    assert code == EX_SECURITY
+    assert stderr == ""
+    assert _json(stdout)["failure_code"] == "unsafe_path"
+    assert "# CANON" not in stdout
+
+
+@pytest.mark.parametrize(("fmt", "name"), FILE_FORMATS)
+def test_export_out_rejects_symlink_target_without_outside_write(tmp_path: Path, fmt: str, name: str) -> None:
+    workspace = tmp_path / "work"
+    outside = tmp_path / "outside.txt"
+    workspace.mkdir()
+    _copy_inputs(workspace)
+    outside.write_text("outside\n", encoding="utf-8")
+    (workspace / name).symlink_to(outside)
+
+    code, stdout, stderr = _run(["--json", "export", *_base_args(workspace), "--format", fmt, "--out", name])
+
+    assert code == EX_SECURITY
+    assert stderr == ""
+    assert _json(stdout)["failure_code"] == "unsafe_path"
+    assert outside.read_text(encoding="utf-8") == "outside\n"
+    assert "# CANON" not in stdout
 
 
 def test_export_region_rejects_workspace_swap_after_target_validation(

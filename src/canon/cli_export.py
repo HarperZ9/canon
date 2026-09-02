@@ -12,10 +12,10 @@ from .cli_export_support import (
     checked_output_path,
     checked_region_path,
     relative_path,
-    write_once,
     write_stdout,
 )
 from .cli_compile import CompileCliError, bundle_artifacts, compile_bundle_for_cli
+from .export_output import write_output_file
 from .cli_format import make_result, write_result
 from .region import RegionError, extract_region, splice_region
 from .registry import ROOT_WORKSPACE, Surface, pool_for
@@ -116,9 +116,10 @@ def _run_export(parsed: object, fmt: str, bundle: object, data: dict, workspace:
 def _write_file_result(raw_out: object, fmt: str, bundle: object, data: dict, workspace: WorkspaceRoot):
     payload = _payload_text(fmt, bundle).encode("utf-8")
     path = checked_output_path(raw_out, workspace)
-    status = write_once(path, payload)
+    relative = relative_path(path, workspace.path)
+    status = write_output_file(workspace, relative, payload)
     meta = _metadata(fmt, bundle, data)
-    meta["out"] = relative_path(path, workspace.path)
+    meta["out"] = relative
     meta["write_status"] = status
     return make_result(ok=True, command="export", failure_code="ok", message="export complete", data=meta)
 

@@ -7,7 +7,6 @@ from typing import TextIO
 
 from .cli_artifacts import WorkspaceRoot
 from .path_policy import PathPolicyError, assert_operational_surface_path
-from .undo_io import write_new_or_same
 
 
 class ExportCliError(Exception):
@@ -30,10 +29,6 @@ def checked_output_path(raw: object, workspace: WorkspaceRoot) -> Path:
         raise ExportCliError("unsafe_path") from exc
     _reject_reserved(path, workspace.path)
     return path
-
-
-def write_once(path: Path, data: bytes) -> str:
-    return write_new_or_same(path, data)
 
 
 def write_stdout(stdout: TextIO, text: str) -> None:
@@ -63,6 +58,5 @@ __all__ = [
     "checked_output_path",
     "checked_region_path",
     "relative_path",
-    "write_once",
     "write_stdout",
 ]
