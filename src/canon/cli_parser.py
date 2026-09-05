@@ -5,6 +5,18 @@ import sys
 from typing import TextIO
 
 
+_COMMAND_HELP = {
+    "init": "set up canon-owned local state in this workspace",
+    "compile": "compile a handoff capsule from records and atoms",
+    "preview": "preview a handoff capsule without writing artifacts",
+    "doctor": "check an adapter target and its source state",
+    "export": "write capsule artifacts to the workspace",
+    "rescue": "recover a handoff from a rescue artifact",
+    "undo": "list or apply a local undo receipt",
+    "bootstrap": "run the guided bootstrap to release-to-work",
+}
+
+
 class ParserExit(Exception):
     def __init__(self, status: int) -> None:
         self.status = status
@@ -50,14 +62,14 @@ def build_canon_parser(
     stderr: TextIO | None = None,
 ) -> CanonArgumentParser:
     parser = CanonArgumentParser(
-        prog="canon", description="Canon bootstrap command surface.",
+        prog="canon", description="Prepare, check, and hand off a canon capsule across your tools.",
         stdout=stdout, stderr=stderr,
     )
     parser.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
     parser.add_argument("--no-color", action="store_true", help="disable colored output")
     subparsers = parser.add_subparsers(dest="command", metavar="command", required=True, title="commands")
     for command in commands:
-        subparser = subparsers.add_parser(command, help=f"{command} placeholder")
+        subparser = subparsers.add_parser(command, help=_COMMAND_HELP.get(command, command))
         _inherit_streams(subparser, parser)
         _add_command_args(command, subparser)
     return parser

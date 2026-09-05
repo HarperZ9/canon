@@ -17,7 +17,6 @@ COMMANDS = (
     "doctor",
     "export",
     "rescue",
-    "import-review",
     "undo",
     "bootstrap",
 )
@@ -166,7 +165,7 @@ def test_json_requested_after_subcommand_keeps_canonical_sanitized_parse_error()
     assert canary not in stdout.getvalue() + stderr.getvalue()
 
 
-def test_placeholder_commands_emit_accessible_result_to_injected_stdout() -> None:
+def test_bare_command_invocations_emit_accessible_result_to_injected_stdout() -> None:
     from canon.cli import run_cli
     from canon.exit_codes import EX_OK
 
@@ -206,7 +205,7 @@ def test_run_cli_does_not_mutate_caller_argv() -> None:
     assert argv == before
 
 
-def test_build_parser_returns_argparse_parser_with_placeholder_commands() -> None:
+def test_build_parser_returns_argparse_parser_listing_every_command() -> None:
     import argparse
 
     from canon.cli import build_parser

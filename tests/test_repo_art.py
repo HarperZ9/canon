@@ -221,13 +221,13 @@ def test_four_gate_functions_share_one_exit_code():
 
 def test_the_source_tree_is_the_size_the_card_claims():
     assert CARD["source modules"]["value"] == "102 files"
-    assert CARD["source lines"]["value"] == "18,359 lines"
+    assert CARD["source lines"]["value"] == "18,372 lines"
     modules = sorted((ROOT / "src" / "canon").rglob("*.py"))
     assert len(modules) == 102
     lines = sum(
         len(path.read_text(encoding="utf-8").splitlines()) for path in modules
     )
-    assert lines == 18359
+    assert lines == 18372
 
 
 def test_the_roadmap_names_two_surfaces_the_catalog_does_not_carry():

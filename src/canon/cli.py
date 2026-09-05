@@ -21,14 +21,13 @@ COMMANDS = (
     "doctor",
     "export",
     "rescue",
-    "import-review",
     "undo",
     "bootstrap",
 )
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """Build the stable placeholder parser for canon commands."""
+    """Build the argument parser for canon commands."""
     return build_canon_parser(COMMANDS)
 
 
@@ -109,7 +108,9 @@ def _command_result(parsed: argparse.Namespace):
         return _init_result(parsed)
     if parsed.command == "bootstrap":
         return _bootstrap_result(parsed)
-    return make_result(ok=True, command=parsed.command, failure_code="ok", message="ready")
+    # Every other command is routed to its own handler in _run_parsed before it
+    # reaches here, so an unhandled command is a wiring fault, not a silent pass.
+    raise RuntimeError(f"unrouted canon command: {parsed.command!r}")
 
 
 def _init_result(parsed: argparse.Namespace):
