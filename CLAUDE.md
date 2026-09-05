@@ -202,6 +202,31 @@ crucible persona verdict from V3, not a self-report:
   (disclosed boundary), plus the recorded audit (0 critical, 1 warning folded, 2
   info disclosed).
 
+MCP is the door band. Every band before it faced inward, so a harness holding
+the files canon writes had no way to ask canon what it believes. This band adds
+that door and still writes nothing:
+- `src/canon/blocks.py` loads an authored block set from a directory of JSON
+  records. It reads `*.json` only, and a file that does not parse or does not
+  validate comes back as a problem string rather than being skipped, so a pool
+  never quietly drops the record someone just wrote.
+- `src/canon/local_mcp.py` serves six read-only tools over zero-dependency stdio
+  JSON-RPC. `canon.status` is liveness and stays true whatever the directory
+  holds; `canon.doctor` is readiness and reads false when the block directory is
+  missing or holds a file that will not load. `canon.blocks`, `canon.render`,
+  `canon.validate` and `canon.check` are the rest. Those first two names are the
+  ones a lane probe calls, so a rename leaves the lane unprobed. The drift roots
+  come from `CANON_HOME` and `CANON_WORKSPACE`, never from a tool argument, so
+  the door is not a general file-read surface with a schema on top.
+- `src/canon/cli.py` and `[project.scripts]` give `canon mcp`, `canon check` and
+  `canon blocks`. Reconcile is absent on purpose: it rewrites instruction files
+  and raises durable gates.
+- `project-docs/MCP-DECISIONS.md` records D-68 the door reads and never writes
+  (with the byte-digest control behind that claim), D-69 the probe vocabulary,
+  D-70 the status/doctor split and how doctor can be false, D-71 the roots come
+  from the environment, D-72 the check folds the block load so a vacuous pass
+  fails, D-73 a bad file is reported not skipped, D-74 three read verbs, D-75 no
+  `blocks/` directory in this repository (an honest null).
+
 Later phases (verifier, migration legs, region installation, the global SOUL.md
 and GEMINI.md surfaces) aim at this same envelope. Each lands on its own branch.
 

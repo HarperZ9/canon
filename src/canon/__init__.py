@@ -15,6 +15,12 @@ from .canon_check import (
     canon_check,
     canon_check_exit_code,
 )
+from .blocks import (
+    ENV_BLOCKS_DIR,
+    BlockLoad,
+    default_blocks_dir,
+    load_blocks,
+)
 from .backends import (
     CAP_ARBITRARY_KIND,
     CAP_AUDIT_CHAIN,
@@ -116,6 +122,10 @@ __all__ = [
     "Temporal",
     "is_sha256",
     "validate_record",
+    "BlockLoad",
+    "load_blocks",
+    "default_blocks_dir",
+    "ENV_BLOCKS_DIR",
     "is_valid",
     "resolve_blocks",
     "is_current",

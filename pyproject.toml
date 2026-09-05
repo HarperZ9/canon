@@ -12,6 +12,9 @@ license = { text = "FSL-1.1-MIT" }
 authors = [{ name = "HarperZ9" }]
 dependencies = []
 
+[project.scripts]
+canon = "canon.cli:main"
+
 [project.optional-dependencies]
 dev = ["pytest>=8"]
 
