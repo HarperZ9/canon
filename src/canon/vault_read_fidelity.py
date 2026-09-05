@@ -127,7 +127,7 @@ def vault_symmetric_report(records: list[Record], *,
     try:
         plan_vault(
             records, vault=_MIRROR_ROOT, read_text=fs.read_text,
-            write_text=fs.write_text, list_dir=fs.list_dir)
+            write_text=fs.write_text, list_dir=fs.list_dir, path_check="lexical")
     except VaultError as exc:
         write_ok = False
         refusals.append(Refusal("", "write", str(exc)))

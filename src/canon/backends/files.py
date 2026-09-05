@@ -13,10 +13,11 @@ from __future__ import annotations
 from pathlib import Path
 from urllib.parse import quote
 
-from canon.schema import KINDS, Record
+from canon.schema import KINDS, SCOPES, Record
 
 from .base import (
     CAP_AUDIT_CHAIN,
+    InvalidRecord,
     flatten_for_drops,
     guard_put,
     record_key,
@@ -50,18 +51,32 @@ class FilesBackend:
         path.write_text(record.to_json(), encoding="utf-8")
 
     def get(self, key: str) -> Record | None:
-        path = self._path(key)
+        scope, rid = split_key(key)
+        requested_key = f"{scope}/{rid}"
+        path = self._root / scope / (quote(rid, safe="") + ".json")
         if not path.is_file():
             return None
-        return Record.from_json(path.read_text(encoding="utf-8"))
+        try:
+            rec = Record.from_json(path.read_text(encoding="utf-8"))
+        except (KeyError, TypeError, ValueError) as exc:
+            raise InvalidRecord("invalid record JSON") from exc
+        guard_put(self, rec)
+        if record_key(rec) != requested_key:
+            raise InvalidRecord("record key mismatch")
+        return rec
 
     def records(self) -> list[Record]:
         out: list[Record] = []
         if not self._root.is_dir():
             return out
-        for scope_dir in sorted(self._root.iterdir()):
+        for scope in SCOPES:
+            scope_dir = self._root / scope
             if not scope_dir.is_dir():
                 continue
             for f in sorted(scope_dir.glob("*.json")):
-                out.append(Record.from_json(f.read_text(encoding="utf-8")))
+                rec = Record.from_json(f.read_text(encoding="utf-8"))
+                guard_put(self, rec)
+                if rec.scope != scope or f.name != quote(rec.id, safe="") + ".json":
+                    raise InvalidRecord("record key mismatch")
+                out.append(rec)
         return out

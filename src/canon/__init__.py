@@ -10,6 +10,23 @@ defines.
 """
 from __future__ import annotations
 
+from .adapter import (
+    ADAPTER_SCHEMA,
+    AdapterDescriptor,
+    assert_requested_tier_allowed,
+    builtin_descriptors,
+    descriptor_for,
+    validate_adapter_descriptor,
+)
+from .atom import (
+    ATOM_SCHEMA,
+    CanonAtom,
+    atom_key,
+    atoms_from_records,
+    is_valid_atom,
+    load_atoms_jsonl,
+    validate_atom,
+)
 from .canon_check import (
     CanonCheckReport,
     canon_check,
@@ -25,6 +42,8 @@ from .backends import (
     DropError,
     FilesBackend,
     FlywheelBackend,
+    InvalidKey,
+    InvalidRecord,
     MemoryBackend,
     MnemeBackend,
     SqliteBackend,
@@ -32,8 +51,50 @@ from .backends import (
     capabilities_required,
     guard_put,
     record_key,
+    validate_put_record,
+)
+from .canonical_json import (
+    CanonicalJSONError,
+    canonical_json_bytes,
+    canonical_json_text,
+    canonical_sha256,
+    is_sha256_ref,
+    sha256_bytes,
+    sha256_text,
+)
+from .capsule import (
+    CAPSULE_SCHEMA,
+    Budget,
+    Capsule,
+    CapsuleBundle,
+    CapsuleCompileRequest,
+    CapsuleTarget,
+    Compatibility,
+    Integrity,
+    SourceState,
+    build_capsule,
+    capsule_bytes,
+    capsule_digest,
+    compile_capsule,
+    validate_capsule,
+)
+from .canonmd import (
+    CANON_MD_SECTIONS,
+    parse_canon_md_carrier,
+    render_canon_md,
+    verify_canon_md,
 )
 from .layering import LayeringError, is_current, resolve_blocks
+from .omission import OMISSION_SCHEMA, Omission, validate_omission
+from .readiness import (
+    READINESS_PROBE_SCHEMA,
+    READINESS_RESULT_SCHEMA,
+    ReadinessProbe,
+    ReadinessResult,
+    evaluate_readiness_response,
+    validate_readiness_probe,
+    validate_readiness_result,
+)
 from .schema import (
     ADR_STATUSES,
     EPISODIC_LAYERS,
@@ -54,6 +115,7 @@ from .schema import (
     Temporal,
     is_sha256,
 )
+from .transform import TRANSFORM_SCHEMA, TransformReceipt, validate_transform_receipt
 from .validator import is_valid, validate_record
 from .versions_migrate import (
     MigrationError,
@@ -95,6 +157,12 @@ from .versions import (
     pin_from_schema_field,
     pin_registry_scope,
 )
+from .witness import (
+    BOOTSTRAP_WITNESS_SCHEMA,
+    BootstrapCheck,
+    BootstrapWitness,
+    validate_bootstrap_witness,
+)
 
 __all__ = [
     "SCHEMA",
@@ -122,6 +190,8 @@ __all__ = [
     "LayeringError",
     "MemoryBackend",
     "BackendError",
+    "InvalidRecord",
+    "InvalidKey",
     "UnsupportedKind",
     "DropError",
     "FilesBackend",
@@ -175,4 +245,60 @@ __all__ = [
     "CanonCheckReport",
     "canon_check",
     "canon_check_exit_code",
+    "validate_put_record",
+    "canonical_json_text",
+    "canonical_json_bytes",
+    "sha256_bytes",
+    "sha256_text",
+    "canonical_sha256",
+    "is_sha256_ref",
+    "CanonicalJSONError",
+    "ATOM_SCHEMA",
+    "CanonAtom",
+    "atom_key",
+    "atoms_from_records",
+    "load_atoms_jsonl",
+    "validate_atom",
+    "is_valid_atom",
+    "OMISSION_SCHEMA",
+    "Omission",
+    "validate_omission",
+    "TRANSFORM_SCHEMA",
+    "TransformReceipt",
+    "validate_transform_receipt",
+    "ADAPTER_SCHEMA",
+    "AdapterDescriptor",
+    "builtin_descriptors",
+    "descriptor_for",
+    "assert_requested_tier_allowed",
+    "validate_adapter_descriptor",
+    "READINESS_PROBE_SCHEMA",
+    "READINESS_RESULT_SCHEMA",
+    "ReadinessProbe",
+    "ReadinessResult",
+    "evaluate_readiness_response",
+    "validate_readiness_probe",
+    "validate_readiness_result",
+    "BOOTSTRAP_WITNESS_SCHEMA",
+    "BootstrapCheck",
+    "BootstrapWitness",
+    "validate_bootstrap_witness",
+    "CAPSULE_SCHEMA",
+    "Capsule",
+    "CapsuleTarget",
+    "SourceState",
+    "Compatibility",
+    "Budget",
+    "Integrity",
+    "CapsuleCompileRequest",
+    "CapsuleBundle",
+    "build_capsule",
+    "compile_capsule",
+    "capsule_bytes",
+    "capsule_digest",
+    "validate_capsule",
+    "CANON_MD_SECTIONS",
+    "render_canon_md",
+    "parse_canon_md_carrier",
+    "verify_canon_md",
 ]

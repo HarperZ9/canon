@@ -1,29 +1,9 @@
 """vault_mirror.py -- R2: the whole-vault mirror orchestrator.
 
-Module 2 projects one record to one note. This is the write-many layer over that
-codec: it renders the whole pool into a vault (one note per record) plus a
-MEMORY.md hub that indexes them, and it owns the three guarantees a single-note
-codec cannot.
-
-Containment. Every write resolves to `{scope}/{derived}.md` or `MEMORY.md` under
-one injected vault root. The root is passed at call time and never stored, so
-this source carries no operator path. A traversal, an absolute escape, the root
-itself, or an ad-hoc path is refused before a byte moves (`is_vault_write_allowed`,
-mirroring registry.py's lexical allow-list, D-31).
-
-Ownership. A file already at a target path that does not parse as a canon note is
-off-limits and the whole plan fails closed (D-30) -- the mirror never clobbers a
-hand-authored file. A canon note whose on-disk name does not re-derive from its
-own content is a spoof and is refused, so a hostile filename cannot smuggle a
-record under a name the pool did not choose. A note whose visible body was
-hand-edited but whose `canon:` carrier is intact is overwritten wholesale (the
-carrier, not the body, is authoritative -- D-27).
-
-All-or-nothing. The whole set (notes + hub) is planned -- rendered, keyed,
-contained, classified against what is on disk -- before a single write commits.
-One record that render refuses aborts the plan with zero files written. A record
-dropped from the pool leaves its stale note reported as an orphan and never
-deleted (D-32); deletion is a human's call, not the mirror's.
+The mirror renders one note per record plus a MEMORY.md hub. It owns
+containment, ownership, and all-or-nothing planning: every legal vault target is
+checked before reads and rechecked before writes; foreign files are refused; and
+orphans are reported, never deleted.
 """
 from __future__ import annotations
 
@@ -35,6 +15,11 @@ from canon.backends.base import record_key
 # ascending, id tie-break, absent ordinal last. Reusing layering's key locks the
 # two orders together rather than letting them drift.
 from canon.layering import _sort_key
+from canon.path_policy import (
+    PathPolicyError,
+    assert_not_protected,
+    assert_operational_vault_path,
+)
 from canon.schema import (
     KIND_ADR_DECISION,
     KIND_EPISODIC_MEMORY,
@@ -105,6 +90,35 @@ def assert_under_vault_root(path: str, *, vault: str) -> None:
     """Raise VaultError unless `path` is a legal vault target under `vault`."""
     if not is_vault_write_allowed(path, vault=vault):
         raise VaultError(f"path is not an allowed vault target: {path!r}")
+
+
+def _checked_vault_path(path: str, *, vault: str, path_check: str = "operational") -> str:
+    """Contain `path` under `vault` and return the key the IO layer reads/writes.
+
+    'operational' (the default, a real on-disk vault) resolves the path under the
+    root on disk -- symlink, reparse point, and ADS are refused -- and refuses a
+    protected name. 'lexical' is for an injected non-existent root with
+    dict-backed IO (the symmetric read-fidelity harness): it keeps every
+    disk-free check -- lexical containment and the protected-name refusal -- and
+    skips only the on-disk resolve that a synthetic root cannot satisfy. Lexical
+    mode restores the write-leg contract the disk-free vault reader round-trip
+    was written against.
+    """
+    assert_under_vault_root(path, vault=vault)
+    if path_check == "lexical":
+        try:
+            assert_not_protected(path)
+        except PathPolicyError as exc:
+            raise VaultError(str(exc)) from exc
+        return os.path.normpath(path)
+    try:
+        return str(assert_operational_vault_path(path, vault=vault))
+    except PathPolicyError as exc:
+        raise VaultError(str(exc)) from exc
+
+
+def _checked_vault_root(vault: str, *, path_check: str = "operational") -> None:
+    _checked_vault_path(_abs(vault, _HUB_RELPATH), vault=vault, path_check=path_check)
 
 
 def _flatten_ws(text: str) -> str:
@@ -201,7 +215,7 @@ def _require_canon_at(text: str, relpath: str) -> Record:
     return record
 
 
-def _discover_orphans(targets, *, vault, read_text, list_dir):
+def _discover_orphans(targets, *, vault, read_text, list_dir, path_check="operational"):
     """Canon notes on disk under the mirror whose record_key is absent from the
     pool. A stray non-canon file that is not a target is left alone; a canon note
     whose name does not re-derive from its content is a spoof and is refused.
@@ -219,6 +233,7 @@ def _discover_orphans(targets, *, vault, read_text, list_dir):
         abs_path = _abs(vault, norm)
         if not is_vault_write_allowed(abs_path, vault=vault):
             continue
+        abs_path = _checked_vault_path(abs_path, vault=vault, path_check=path_check)
         content = read_text(abs_path)
         if content is None:
             continue
@@ -232,7 +247,7 @@ def _discover_orphans(targets, *, vault, read_text, list_dir):
     return orphans
 
 
-def _plan_notes(targets, *, vault, read_text):
+def _plan_notes(targets, *, vault, read_text, path_check="operational"):
     """Resolve, contain, and byte-compare every target note. A changed or new
     note is planned for write; a byte-identical one (after CRLF normalization) is
     reported unchanged and never rewritten."""
@@ -240,8 +255,7 @@ def _plan_notes(targets, *, vault, read_text):
     results: list[VaultResult] = []
     for relpath in sorted(targets):
         record, note = targets[relpath]
-        abs_path = _abs(vault, relpath)
-        assert_under_vault_root(abs_path, vault=vault)
+        abs_path = _checked_vault_path(_abs(vault, relpath), vault=vault, path_check=path_check)
         existing = read_text(abs_path)
         key = record_key(record)
         if existing is not None:
@@ -254,7 +268,7 @@ def _plan_notes(targets, *, vault, read_text):
     return planned, results
 
 
-def _plan_hub(records, *, vault, read_text):
+def _plan_hub(records, *, vault, read_text, path_check="operational"):
     """Plan the hub write, refusing to clobber a foreign MEMORY.md.
 
     An existing MEMORY.md that does not open with the generated head is a
@@ -263,8 +277,7 @@ def _plan_hub(records, *, vault, read_text):
     canon-owned hub is overwritten when it differs and skipped when it matches.
     """
     hub = render_hub(records)
-    abs_path = _abs(vault, _HUB_RELPATH)
-    assert_under_vault_root(abs_path, vault=vault)
+    abs_path = _checked_vault_path(_abs(vault, _HUB_RELPATH), vault=vault, path_check=path_check)
     existing = read_text(abs_path)
     if existing is not None:
         if not _normalize(existing).startswith(_HUB_HEAD):
@@ -275,7 +288,8 @@ def _plan_hub(records, *, vault, read_text):
     return (abs_path, hub), VaultResult(abs_path, "written", None, hub)
 
 
-def plan_vault(records, *, vault, read_text, write_text, list_dir):
+def plan_vault(records, *, vault, read_text, write_text, list_dir,
+               path_check="operational"):
     """Mirror the whole pool into the vault under `vault`, plan-then-commit.
 
     Every note and the hub are rendered, keyed, contained, and classified against
@@ -284,17 +298,33 @@ def plan_vault(records, *, vault, read_text, write_text, list_dir):
     containment violation -- aborts with zero writes. Orphans are reported, never
     deleted. IO is injected: `read_text` returns None for an absent file,
     `list_dir` yields the POSIX relpaths present under the mirror.
+
+    `path_check` selects how each vault target is contained: 'operational' (the
+    default) resolves it under the root on disk; 'lexical' keeps the disk-free
+    containment and protected-name checks but skips the on-disk resolve, for a
+    caller that injects a synthetic non-existent root and dict-backed IO. An
+    unknown value is a wiring fault (D-87 house rule).
     """
+    if path_check not in ("operational", "lexical"):
+        raise ValueError(
+            f"unknown path_check {path_check!r}; expected 'operational' or 'lexical'")
+    _checked_vault_root(vault, path_check=path_check)
     targets = _render_targets(records)
     orphans = _discover_orphans(
-        targets, vault=vault, read_text=read_text, list_dir=list_dir)
-    planned, results = _plan_notes(targets, vault=vault, read_text=read_text)
-    hub_write, hub_result = _plan_hub(records, vault=vault, read_text=read_text)
+        targets, vault=vault, read_text=read_text, list_dir=list_dir,
+        path_check=path_check)
+    planned, results = _plan_notes(
+        targets, vault=vault, read_text=read_text, path_check=path_check)
+    hub_write, hub_result = _plan_hub(
+        records, vault=vault, read_text=read_text, path_check=path_check)
     results.append(hub_result)
     if hub_write is not None:
         planned.append(hub_write)
     for relpath, record in orphans:
         results.append(VaultResult(_abs(vault, relpath), "orphan", record_key(record), None))
+    _checked_vault_root(vault, path_check=path_check)
     for abs_path, content in planned:
-        write_text(abs_path, content)
+        _checked_vault_path(abs_path, vault=vault, path_check=path_check)
+    for abs_path, content in planned:
+        write_text(_checked_vault_path(abs_path, vault=vault, path_check=path_check), content)
     return results
