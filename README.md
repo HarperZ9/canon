@@ -45,7 +45,7 @@ in advance. Anything else fails the gate rather than logging a warning.
 
 ## What canon carries
 
-![A table of twelve rows: what canon carries, how many of it there are, and where each number is read from. Five record kinds share one envelope. Two scopes layer, workspace over global. Four surfaces sit on the write allow-list: a global and a workspace file for Claude Code, an AGENTS.md for Codex, and a workspace SOUL.md for Hermes. Four storage adapters implement the backend protocol, and five capability tokens describe what each one can carry. Sixteen schema pins name the seams that carry a version. The aggregate check folds four legs, and four gate functions share the same zero or one exit code. Thirty-four source modules hold five thousand five hundred and sixty-two lines, and thirty-five test files hold six hundred and seventy-six tests. Two surfaces named in the roadmap are absent from the catalog, a global SOUL.md and a GEMINI.md, so canon does not render them.](docs/art/record-table.svg)
+![A table of twelve rows: what canon carries, how many of it there are, and where each number is read from. Five record kinds share one envelope. Two scopes layer, workspace over global. Four surfaces sit on the write allow-list: a global and a workspace file for Claude Code, an AGENTS.md for Codex, and a workspace SOUL.md for Hermes. Four storage adapters implement the backend protocol, and five capability tokens describe what each one can carry. Sixteen schema pins name the seams that carry a version. The aggregate check folds four legs, and four gate functions share the same zero or one exit code. Thirty-seven source modules hold five thousand nine hundred and eighty-six lines, and thirty-eight test files hold seven hundred and eighteen tests. Two surfaces named in the roadmap are absent from the catalog, a global SOUL.md and a GEMINI.md, so canon does not render them.](docs/art/record-table.svg)
 
 Every count is asserted against the module that defines it in
 `tests/test_repo_art.py`.
@@ -83,11 +83,36 @@ whether the memories behind a synthesized persona still resolve. V4 separates a
 mechanical fast-forward from a conflict, writes the fast-forwards, and raises a
 durable gate for anything a human should adjudicate.
 
+A harness reaches all of this over MCP. `canon mcp` serves six read-only tools:
+identity, a readiness diagnostic, the authored record set, the render for a
+scope, the validator, and the aggregate check. Nothing on that server writes a
+file. Reconcile stays a library call, because rewriting your instruction files
+and raising a gate is an action with a person behind it.
+
 Installing a region into a fresh file, the first migrator on the version seam,
 and the global SOUL.md and GEMINI.md surfaces are later phases. Everything
 shipped is proven by a full test suite and aims at the one envelope.
 
 ## Run it
+
+Serve the record set to a harness:
+
+```bash
+canon mcp
+```
+
+Ask canon what it believes, with no transport in the way:
+
+```bash
+canon check
+canon blocks
+```
+
+`canon check` exits non-zero when a wired leg fails or the block pool is not the
+authored set, so a build can key on it. Point it at your records with
+`CANON_BLOCKS_DIR`, and at your files with `CANON_HOME` and `CANON_WORKSPACE`.
+
+Run the suite:
 
 ```bash
 python -m pytest
@@ -108,11 +133,12 @@ src/canon/
   drift.py, writing_gate.py              the surface drift check, the injected prose gate
   persona_thesis.py, canon_check.py      the persona basis adapter, the aggregate check
   reconcile*.py                          the fast-forward decision and its durable gate
+  blocks.py, local_mcp.py, cli.py        the authored-block loader, the MCP door, the CLI
 tests/                                   round-trip, validator, layering, backend,
                                          fidelity, surface, orchestration, vault,
                                          drift, reconcile, and artwork proofs
 docs/art/                                the drawings above and the spec they render from
-project-docs/                            the F0, F1, R0, R1, R2, V2, V3, and V4 decisions
+project-docs/                            the F0, F1, R0, R1, R2, V2, V3, V4, MCP decisions
 ```
 
 See `project-docs/` for the schema reference, the layering derivation, the
