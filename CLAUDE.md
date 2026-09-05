@@ -202,6 +202,49 @@ crucible persona verdict from V3, not a self-report:
   (disclosed boundary), plus the recorded audit (0 critical, 1 warning folded, 2
   info disclosed).
 
+The handoff runtime is the continuity-capsule pillar's deterministic local spine.
+It sits above the record and render bands and turns a resolved set into a portable
+capsule, then runs a guided bootstrap that ends in a witnessed release-to-work. Its
+scope stops at that spine: the host adapters, the desktop, browser, and IDE
+surfaces, and a public release are later phases.
+- `src/canon/atom.py` — `canon.atom/v1` (`CanonAtom`), the typed continuity unit a
+  record projects into: active goal, permission, prohibition, constraint, frontier,
+  conflict, and unknown, plus the transform and omission receipts that keep every
+  compression visible.
+- `src/canon/capsule_types.py`, `capsule_build.py`, `capsule_rules.py`,
+  `capsule_validation.py` — the capsule. `build_capsule` compiles records and atoms
+  under a profile, target, and budget into `canon.capsule/v1`; `capsule_bytes` and
+  `Capsule.from_dict` are a lossless canonical-JSON round-trip, so the capsule bytes
+  alone rebuild the full set and the generated CANON.md in any environment, standard
+  library only.
+- `src/canon/source_state.py`, `source_state_cache.py`, `transform.py`,
+  `omission.py` — the source-state digest that binds a capsule to its inputs, the
+  reuse cache keyed on that digest, and the typed transform and omission receipts.
+- `src/canon/readiness.py`, `witness.py`, `bootstrap_witness_store.py` —
+  `evaluate_readiness_response` scores the critical goals, permissions,
+  prohibitions, and frontier; `BootstrapWitness` records the run, and its validator
+  refuses a witness that claims an enforced release the run did not observe
+  (`host_enforcement_observed`); `write_bootstrap_witness` appends to a path-clean,
+  digest-named store, idempotent by run id.
+- `src/canon/bootstrap.py`, `bootstrap_runtime.py`, `bootstrap_sources.py`,
+  `bootstrap_validation.py` — the fail-closed state machine (detect entry, resolve
+  layers, collect source state, preflight, compile or reuse, present, readiness
+  probe, witness, release) on `BOOTSTRAP_COMPILER_CONTRACT`. `bootstrap_sources`
+  backs the doctor that checks an adapter target against its source state. A start
+  stays guided or advisory until a host exposes a gate that can block first work;
+  the witness never asserts host-level blocking it did not see.
+- `src/canon/cli*.py` — the command surface (`init`, `compile`, `preview`,
+  `doctor`, `export`, `rescue`, `undo`, `bootstrap`) reaches this band. The suite
+  proves the sequence end to end, from the sources through readiness and the cache
+  to the witness and release, and against a forged cache that cannot hide a missing
+  critical id, a cached capsule that must match its current sources, a planted
+  secret quarantined before any witness or export, and a run that makes no network,
+  subprocess, or provider call.
+- `project-docs/CANON-CONTINUITY-CAPSULE-DESIGN.md`,
+  `SPEC-CANON-PILLAR-20260830.md`, and `audits/2026-08-30/` — the approved
+  architecture, the pillar objective and its support tiers, and the audit lanes
+  behind them.
+
 Later phases (verifier, migration legs, region installation, the global SOUL.md
 and GEMINI.md surfaces) aim at this same envelope. Each lands on its own branch.
 

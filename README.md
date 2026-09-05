@@ -83,6 +83,23 @@ whether the memories behind a synthesized persona still resolve. V4 separates a
 mechanical fast-forward from a conflict, writes the fast-forwards, and raises a
 durable gate for anything a human should adjudicate.
 
+A handoff runtime sits on top of these bands. It compiles the resolved record
+and atom set into a portable capsule, a canonical-JSON manifest whose bytes
+rebuild the full set and the generated CANON.md in any environment, standard
+library only. A guided bootstrap runs a fail-closed sequence: detect the entry,
+resolve the layers, collect source state, preflight, compile or reuse the
+capsule, present the context, probe readiness, write a witness, and release to
+work. A doctor checks an adapter target and its source state before any of that.
+The suite proves the sequence end to end, from the sources through readiness and
+the reuse cache to the witness and release, and holds it against a forged cache
+that cannot hide a missing critical id, a cached capsule that must still match
+its current sources, a planted secret quarantined before any witness or export,
+and a run that makes no network, subprocess, or provider call. Host-level
+blocking is the honest null here: the witness records enforcement as observed,
+so a start stays guided or advisory until a host exposes a gate that can block
+first work. The host adapters, the desktop, browser, and IDE surfaces, and a
+public release are not built yet.
+
 Installing a region into a fresh file, the first migrator on the version seam,
 and the global SOUL.md and GEMINI.md surfaces are later phases. Everything
 shipped is proven by a full test suite and aims at the one envelope.
@@ -105,7 +122,9 @@ python -m canon init
 ```
 
 `init` previews the local state canon owns and writes nothing until you pass
-`--apply`.
+`--apply`. `doctor` and `preview` check a target and a capsule the same way,
+writing nothing; `bootstrap` runs the guided sequence to a witnessed release.
+Pass `--help` to any command for its arguments.
 
 ## Layout
 
