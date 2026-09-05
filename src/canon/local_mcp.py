@@ -26,7 +26,9 @@ from canon.surface import render_surface
 from canon.validator import validate_record
 
 PROTOCOL = "2025-06-18"
-__version__ = "0.1.0"
+# The version of record is the one in pyproject.toml. Kept equal by a test, so
+# a harness reading serverInfo and a lane reading install metadata agree.
+__version__ = "0.0.0"
 
 ENV_HOME = "CANON_HOME"
 ENV_WORKSPACE = "CANON_WORKSPACE"

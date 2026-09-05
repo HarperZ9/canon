@@ -18,6 +18,7 @@ import io
 import json
 
 from canon.blocks import ENV_BLOCKS_DIR
+from canon import local_mcp
 from canon.local_mcp import ENV_HOME, ENV_WORKSPACE, PROTOCOL, TOOLS, handle, serve
 from canon.schema import KIND_PERSONALITY_BLOCK, Record
 
@@ -217,3 +218,19 @@ def test_no_tool_on_this_server_writes_anything(tmp_path, monkeypatch):
     _call("canon.blocks", {"full": True})
     _call("canon.validate", {"record": _block("b1").to_dict()})
     assert _digest_tree(tmp_path) == before
+
+
+def test_the_served_version_is_the_packaged_version():
+    """One number. A harness reads serverInfo, a lane reads install metadata.
+
+    If those disagree, a lane roster reports a version the server never claimed
+    and the mismatch looks like a stale install rather than a typo here.
+    """
+    from pathlib import Path
+
+    pyproject = (Path(__file__).resolve().parents[1] / "pyproject.toml"
+                 ).read_text(encoding="utf-8")
+    declared = next(line.split("=", 1)[1].strip().strip('"')
+                    for line in pyproject.splitlines()
+                    if line.startswith("version"))
+    assert local_mcp.__version__ == declared

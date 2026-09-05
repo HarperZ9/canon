@@ -87,7 +87,10 @@ set. The check verb and the check tool call the same function, so a build gate
 and a harness question cannot disagree about what canon believes.
 
 `[project.scripts] canon = "canon.cli:main"` declares the entry point. The
-version stays at 0.0.0: publishing is a separate decision.
+version stays at 0.0.0: publishing is a separate decision. The server serves that
+same number, and a test holds the two equal. A harness reads it from serverInfo
+and a lane roster reads it from install metadata, so a second hand-typed number
+here would show up over there as a stale install rather than as the typo it is.
 
 ## D-75 The block directory is resolved, and this repository ships none (honest null).
 
