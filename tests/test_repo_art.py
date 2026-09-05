@@ -220,14 +220,14 @@ def test_four_gate_functions_share_one_exit_code():
 
 
 def test_the_source_tree_is_the_size_the_card_claims():
-    assert CARD["source modules"]["value"] == "34 files"
-    assert CARD["source lines"]["value"] == "5,562 lines"
+    assert CARD["source modules"]["value"] == "102 files"
+    assert CARD["source lines"]["value"] == "18,359 lines"
     modules = sorted((ROOT / "src" / "canon").rglob("*.py"))
-    assert len(modules) == 34
+    assert len(modules) == 102
     lines = sum(
         len(path.read_text(encoding="utf-8").splitlines()) for path in modules
     )
-    assert lines == 5562
+    assert lines == 18359
 
 
 def test_the_roadmap_names_two_surfaces_the_catalog_does_not_carry():
@@ -256,8 +256,8 @@ def test_the_suite_carries_the_number_of_tests_the_card_claims():
     )
     assert proc.returncode == 0, proc.stdout[-2000:]
     per_file = re.findall(r"^tests/\S+\.py: (\d+)$", proc.stdout, re.MULTILINE)
-    assert len(per_file) == 35
-    assert CARD["python tests"]["value"] == f"{sum(int(n) for n in per_file)} passing"
+    assert len(per_file) == 67
+    assert CARD["python tests"]["value"] == f"{sum(int(n) for n in per_file):,} cases"
 
 
 def test_the_note_counts_the_functions_behind_those_cases():
