@@ -89,11 +89,23 @@ shipped is proven by a full test suite and aims at the one envelope.
 
 ## Run it
 
+Standard library only. Python 3.11 or newer, no runtime dependencies.
+
 ```bash
 python -m pytest
 ```
 
-No runtime dependencies. Python 3.11 or newer.
+The same records drive a command surface. Install the package, then ask canon
+what it would do to a workspace:
+
+```bash
+pip install -e .
+python -m canon --help
+python -m canon init
+```
+
+`init` previews the local state canon owns and writes nothing until you pass
+`--apply`.
 
 ## Layout
 
@@ -108,6 +120,8 @@ src/canon/
   drift.py, writing_gate.py              the surface drift check, the injected prose gate
   persona_thesis.py, canon_check.py      the persona basis adapter, the aggregate check
   reconcile*.py                          the fast-forward decision and its durable gate
+  cli*.py, __main__.py                   the command surface, python -m canon
+  bootstrap*.py, capsule*.py             a portable handoff capsule and its adapters
 tests/                                   round-trip, validator, layering, backend,
                                          fidelity, surface, orchestration, vault,
                                          drift, reconcile, and artwork proofs
