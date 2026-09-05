@@ -77,7 +77,7 @@
         { "key": "schema pins", "value": "sixteen seams", "note": "SEAM_PINS in versions.py. Each pin names a seam, its version, and the decision record behind it, so a shape change is a version change." },
         { "key": "check legs", "value": "four of them", "note": "canon_check folds surface drift, the vault round-trip, the vault read symmetry, and the persona assessment. An unwired leg reports nothing." },
         { "key": "gate exit codes", "value": "four functions", "note": "drift, reconcile, vault read and the aggregate check each return zero on a clean run and one otherwise, so a build gates on all four the same way." },
-        { "key": "source modules", "value": "102 files", "note": "Python modules under src/canon, spanning the record, the four backends, the render and verify bands, and the CLI." },
+        { "key": "source modules", "value": "102 files", "note": "Python modules under src/canon, spanning the record, the four backends, the render and verify bands, the CLI, and the capsule handoff runtime." },
         { "key": "source lines", "value": "18,372 lines", "note": "Counted across those modules. No runtime dependencies: the record, the codecs and every gate are standard library only." },
         { "key": "python tests", "value": "1,643 cases", "note": "pytest over sixty-seven files: 1175 test functions plus their parametrized cases, covering the record, the backends and every number here." },
         { "key": "surfaces not rendered", "value": "two named", "note": "A global SOUL.md and a GEMINI.md are named in the README as later phases and are absent from the write allow-list, so canon does not write them.", "tone": "drift" }

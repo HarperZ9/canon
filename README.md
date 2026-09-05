@@ -6,8 +6,8 @@ and every tool.
 ![canon: one memory record, rendered into every tool's own file. Own one region of the file. Leave every byte outside it alone.](docs/art/canon-header.svg)
 
 You keep the same working relationship whether you open Claude Code, Claude CLI,
-ChatGPT, Codex, or a web surface: the same authored voice, the same accumulated
-memory, the same decisions. Today that lives in a dozen files with a dozen
+ChatGPT, Codex, or a web surface: your authored voice, your accumulated memory,
+and the decisions behind them. Today that lives in a dozen files with a dozen
 shapes (`CLAUDE.md`, `AGENTS.md`, `SOUL.md`, `GEMINI.md`) plus per-tool memory
 stores that do not talk to each other. canon gives all of them one typed record
 to draw from and write back to, and renders each tool's file from that record.
@@ -24,17 +24,17 @@ to draw from and write back to, and renders each tool's file from that record.
 - **Deterministic by construction.** Ordering uses a clock-free ordinal, so a
   rebuild from the same records is byte-identical. The wall clock is kept only
   as a non-authoritative convenience.
-- **An assembly, not a rewrite.** canon aims at proven engines rather than
-  replacing them: a memory fact-engine, an authored-block store, and a
-  cross-provider transport. It adds the one record they share and the renderer
-  that projects each surface.
+- **An assembly over proven engines.** canon aims at three proven engines: a
+  memory fact-engine, an authored-block store, and a cross-provider transport.
+  It adds the one record they share and the renderer that projects each surface.
 
 ## How one record becomes the file each tool reads
 
 ![Eight stages taking one record to the file a tool reads: record, validate, layer, resolve, render, region, allow-list, write. Every entry is one envelope in one of five kinds: an authored personality block, an episodic memory, a synthesized persona, a decision record, and a reference to an external research artifact. The validator checks every field and refuses a record it cannot vouch for. A workspace block overrides a global block carrying the same id, and the resolve step keeps current entries only, ordered by a clock-free ordinal so a rebuild is byte-identical. The block set is rendered to text and spliced into the span between the canon begin and end markers, and every byte outside that span is preserved. The write allow-list holds four surfaces: a global and a workspace file for Claude Code, an AGENTS.md for Codex, and a workspace SOUL.md for Hermes. A path outside that list is refused, and so is a file with no canon region. Three outcomes: written inside the markers canon owns, a surface that drifted and needs a human, and a file canon declines to write at all.](docs/art/surface-lane.svg)
 
-canon writes four paths and no others, and inside those four it rewrites only
-the span between its own markers. A file with no canon region is left alone.
+When canon renders your files it writes four paths and no others, and inside
+those four it rewrites only the span between its own markers. A file with no
+canon region is left alone.
 
 ## How a rendered file is checked back against the record
 
