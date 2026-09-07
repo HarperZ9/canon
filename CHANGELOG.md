@@ -2,7 +2,7 @@
 
 ## 0.1.0 — 2026-09-07
 
-First GitHub release candidate for Canon.
+First GitHub release for Canon.
 
 - Keeps the existing read-only MCP surface: `canon.status`, `canon.doctor`,
   `canon.blocks`, `canon.render`, `canon.validate`, and `canon.check`.
@@ -23,5 +23,8 @@ Limits:
   targets remain guided until their hosts provide stronger startup evidence.
 - Bundle export proves the command's publication boundary, not immutability
   after the command returns.
-- This release candidate is prepared for GitHub release review only. No PyPI
-  publication claim is made.
+- New bundle creation currently requires the supported Windows native backend.
+  Linux and macOS refuse new bundle creation without writing. Preview and stdout
+  exports remain available there.
+- Release downloads are distributed through GitHub. No PyPI publication claim
+  is made.

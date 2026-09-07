@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import json
 import ctypes
+import os
 from pathlib import Path
 
 
@@ -136,9 +137,16 @@ def test_export_canon_markdown_stdout_carries_source_hashes_without_mutation(tmp
 def test_out_bundle_write_creates_expected_artifacts_and_is_idempotent(tmp_path: Path) -> None:
     workspace = tmp_path / "work"
     _write_inputs(workspace)
+    before = _tree(workspace)
 
     code, stdout, stderr = _run(["--json", "export", *_base_args(workspace), "--format", "bundle", "--out", "bundle"])
 
+    if os.name != "nt":
+        assert code == 4
+        assert stderr == ""
+        assert json.loads(stdout)["failure_code"] == "unsafe_path"
+        assert _tree(workspace) == before
+        return
     assert code == 0
     assert stderr == ""
     payload = json.loads(stdout)
@@ -166,6 +174,7 @@ def test_bundle_write_rejects_stage_drift_without_false_success(
 
     workspace = tmp_path / "work"
     _write_inputs(workspace)
+    before = _tree(workspace)
     real_rename = cli_publish._rename_stage
     attempted: dict[str, bool] = {}
 
@@ -179,6 +188,13 @@ def test_bundle_write_rejects_stage_drift_without_false_success(
 
     code, stdout, stderr = _run(["--json", "export", *_base_args(workspace), "--format", "bundle", "--out", "bundle"])
 
+    if os.name != "nt":
+        assert attempted == {}
+        assert code == 4
+        assert stderr == ""
+        assert json.loads(stdout)["failure_code"] == "unsafe_path"
+        assert _tree(workspace) == before
+        return
     assert attempted == {"ran": True}
     assert code == 4
     assert stderr == ""
@@ -216,6 +232,7 @@ def test_bundle_rename_failure_cleans_stage_without_false_success(
 
     workspace = tmp_path / "work"
     _write_inputs(workspace)
+    before = _tree(workspace)
 
     def fail_rename(_parent, _stage, _target_name: str) -> None:
         raise OSError(5, "synthetic rename failure")
@@ -224,6 +241,12 @@ def test_bundle_rename_failure_cleans_stage_without_false_success(
 
     code, stdout, stderr = _run(["--json", "export", *_base_args(workspace), "--format", "bundle", "--out", "bundle"])
 
+    if os.name != "nt":
+        assert code == 4
+        assert stderr == ""
+        assert json.loads(stdout)["failure_code"] == "unsafe_path"
+        assert _tree(workspace) == before
+        return
     assert code == 8
     assert stderr == ""
     assert json.loads(stdout)["failure_code"] == "io_error"

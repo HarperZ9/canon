@@ -141,9 +141,11 @@ canon --json export --workspace . --records records.jsonl --atoms atoms.jsonl --
 
 The `codex-cli` and `claude-code` targets are native-advisory surfaces. App and
 web targets remain guided until their hosts provide stronger startup evidence.
-Bundle output uses the platform's confined writer or fails closed; on Windows
-the final directory rename is parent-handle-relative and leaf-only. That proves
-the export boundary, not immutability after the command returns.
+Preview and stdout exports work across supported Python platforms. Creating a
+new bundle currently requires Windows with the confined native writer. On Linux
+and macOS, new bundle creation returns `unsafe_path` without writing; use stdout
+export there. The Windows final directory rename is parent-handle-relative and
+leaf-only. This bounds publication, not immutability after the command returns.
 
 Run the suite:
 
