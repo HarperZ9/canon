@@ -1,0 +1,4 @@
+include CHANGELOG.md
+recursive-include docs/art *.json *.svg
+recursive-include project-docs *.md
+recursive-include tests/fixtures *
