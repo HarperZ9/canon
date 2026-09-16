@@ -32,6 +32,15 @@ Every query response includes coverage fields and a `does_not_prove` list.
 mean the topic was never discussed. Pending or unextracted attachments are
 returned separately so the caller can see the coverage gap.
 
+Callers may opt in to `include_related` with a bounded `related_limit`. This adds
+a `related_events` sidecar built only from explicit one-hop `canon_event_ref`
+source references on same-workspace and same-project event records. The ranked
+`hits` array is unchanged. Incoming edges show later events that cite a primary
+hit; outgoing edges show primary-hit events that cite another captured event. The
+sidecar preserves contradictory history and reports coverage/truncation fields;
+it does not infer truth, currentness, freshness, supersession, or semantic
+agreement.
+
 ## Client capture hook
 
 `canon.client_capture` adapts a `UserPromptSubmit` hook into a context event. It
@@ -87,7 +96,7 @@ the extracted text, and any interpretation as separate fields.
 - Historical completeness is unknown unless all relevant clients have been
   configured to capture into the same database.
 - Supersession and freshness checks are not implemented in the context query
-  result.
+  result, including for opt-in related-event sidecars.
 - `container-id` is descriptive metadata. It does not prove full-container
   capture and does not authorize a client.
 - The hook captures prompt events only; it does not provide universal native

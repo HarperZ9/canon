@@ -110,10 +110,11 @@ class ContextStore:
         return result, store_id
 
     def query(self, workspace_id, project_id, query, top_k=5, include_pending=True,
-              expected_store_id=None):
+              expected_store_id=None, include_related=False, related_limit=5):
         workspace, project = scope(workspace_id, project_id)
         records, store_id = self._records(workspace, project, expected_store_id)
-        result = search(records, workspace, project, query, top_k, include_pending)
+        result = search(records, workspace, project, query, top_k, include_pending,
+                        include_related=include_related, related_limit=related_limit)
         result["store_id"] = store_id
         return result
 

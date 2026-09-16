@@ -5,6 +5,7 @@ import re
 from urllib.parse import urlsplit, urlunsplit
 
 from .context_records import LIMITS, required_text
+from .context_related import related_events
 
 _ARXIV_ID = re.compile(r"(?<![\w.])(\d{4}\.\d{4,5})(v\d+)?(?!\w)", re.IGNORECASE)
 _COMPOUND_ID = re.compile(r"(?<!\w)([a-z0-9]+(?:[._:-][a-z0-9]+){1,})(?!\w)", re.IGNORECASE)
@@ -27,12 +28,17 @@ def pending_sources(records):
     return pending
 
 
-def search(records, workspace, project, query, top_k, include_pending):
+def search(records, workspace, project, query, top_k, include_pending,
+           include_related=False, related_limit=5):
     required_text(query, "query", 200_000)
     if type(top_k) is not int or not 0 <= top_k <= 20:
         raise ValueError("top_k must be an integer between 0 and 20")
     if type(include_pending) is not bool:
         raise ValueError("include_pending must be boolean")
+    if type(include_related) is not bool:
+        raise ValueError("include_related must be boolean")
+    if type(related_limit) is not int or not 0 <= related_limit <= 20:
+        raise ValueError("related_limit must be an integer between 0 and 20")
     query_identifiers = _query_identifiers(query)
     tokens = _keyword_tokens(query)
     matches = []
@@ -51,23 +57,52 @@ def search(records, workspace, project, query, top_k, include_pending):
     hits = [hit(rec, text, score, workspace, project)
             for _identifier_score, _keyword_score, score, rec, text in matches[:top_k]]
     pending = pending_sources(records)
-    status = "found_in_searched_sources" if matches else ("pending_extraction" if pending else "not_found_in_searched_sources")
-    return {"schema": "canon.context-query/v1", "status": status, "hits": hits,
+    result = _base_result(workspace, project, _query_status(matches, pending), hits, pending,
+                          include_pending, records, matches, query_identifiers,
+                          identifier_matches, malformed_url_count)
+    if include_related:
+        related, coverage = related_events(records, hits, workspace, project, related_limit)
+        result["related_events"] = related
+        result["coverage"].update(coverage)
+        result["does_not_prove"] = result["does_not_prove"] + [
+            "related source references do not prove truth, currentness, or supersession"]
+    return result
+
+
+def _query_status(matches, pending):
+    if matches:
+        return "found_in_searched_sources"
+    return "pending_extraction" if pending else "not_found_in_searched_sources"
+
+
+def _base_result(workspace, project, result_status, hits, pending, include_pending,
+                 records, matches, query_identifiers, identifier_matches,
+                 malformed_url_count):
+    return {"schema": "canon.context-query/v1", "status": result_status, "hits": hits,
             "pending_extraction": pending[:20] if include_pending else [],
-            "coverage": {"workspace_id": workspace, "project_id": project,
-                         "records_searched": len(records), "matching_records": len(matches),
-                         "hits_omitted": max(0, len(matches) - len(hits)),
-                         "pending_count": len(pending), "pending_returned": min(20, len(pending)) if include_pending else 0,
-                         "method": "deterministic_identifier_keyword_overlap",
-                         "identifier_query_count": len(query_identifiers),
-                         "identifier_matching_records": identifier_matches,
-                         "ranking": "identifier_overlap_then_keyword_overlap_then_record_id",
-                         "explicit_version_policy": "exact version identifiers rank only exact versions; keyword fallback may still return other versions",
-                         "url_normalization": "scheme_host_lowercase_path_query_preserved",
-                         "malformed_url_count": malformed_url_count,
-                         "historical_completeness": "unknown",
-                         "source_freshness": "not_checked", "supersession_resolution": "not_implemented"},
+            "coverage": _coverage(workspace, project, records, matches, hits, pending,
+                                  include_pending, query_identifiers,
+                                  identifier_matches, malformed_url_count),
             "does_not_prove": list(LIMITS)}
+
+
+def _coverage(workspace, project, records, matches, hits, pending, include_pending,
+              query_identifiers, identifier_matches, malformed_url_count):
+    return {"workspace_id": workspace, "project_id": project,
+            "records_searched": len(records), "matching_records": len(matches),
+            "hits_omitted": max(0, len(matches) - len(hits)),
+            "pending_count": len(pending),
+            "pending_returned": min(20, len(pending)) if include_pending else 0,
+            "method": "deterministic_identifier_keyword_overlap",
+            "identifier_query_count": len(query_identifiers),
+            "identifier_matching_records": identifier_matches,
+            "ranking": "identifier_overlap_then_keyword_overlap_then_record_id",
+            "explicit_version_policy": "exact version identifiers rank only exact versions; keyword fallback may still return other versions",
+            "url_normalization": "scheme_host_lowercase_path_query_preserved",
+            "malformed_url_count": malformed_url_count,
+            "historical_completeness": "unknown",
+            "source_freshness": "not_checked",
+            "supersession_resolution": "not_implemented"}
 
 
 def hit(rec, text, score, workspace, project):
