@@ -4,11 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "canon"
-version = "0.0.0"
-description = "A provider-neutral memory-bank and personality container."
+version = "0.1.0"
+description = "A provider-neutral memory-bank, personality container, and continuity capsule CLI."
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "FSL-1.1-MIT" }
+license = "LicenseRef-FSL-1.1-MIT"
+license-files = ["LICENSE"]
 authors = [{ name = "HarperZ9" }]
 dependencies = []
 

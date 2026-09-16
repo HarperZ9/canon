@@ -1,0 +1,8 @@
+include CHANGELOG.md
+recursive-include docs/art *.json *.svg
+# Ship format specifications and implementation decisions, not historical audits.
+include project-docs/F*.md
+include project-docs/R*.md
+include project-docs/V*.md
+include project-docs/M*.md
+recursive-include tests/fixtures *

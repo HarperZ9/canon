@@ -45,7 +45,7 @@ in advance. Anything else fails the gate rather than logging a warning.
 
 ## What canon carries
 
-![A table of twelve rows: what canon carries, how many of it there are, and where each number is read from. Five record kinds share one envelope. Two scopes layer, workspace over global. Four surfaces sit on the write allow-list: a global and a workspace file for Claude Code, an AGENTS.md for Codex, and a workspace SOUL.md for Hermes. Four storage adapters implement the backend protocol, and five capability tokens describe what each one can carry. Sixteen schema pins name the seams that carry a version. The aggregate check folds four legs, and four gate functions share the same zero or one exit code. 43 source modules hold 6,754 lines, and 41 test files hold 746 tests. Two surfaces named in the roadmap are absent from the catalog, a global SOUL.md and a GEMINI.md, so canon does not render them.](docs/art/record-table.svg)
+![A table of twelve rows: what canon carries, how many of it there are, and where each number is read from. Five record kinds share one envelope. Two scopes layer, workspace over global. Four surfaces sit on the write allow-list: a global and a workspace file for Claude Code, an AGENTS.md for Codex, and a workspace SOUL.md for Hermes. Four storage adapters implement the backend protocol, and five capability tokens describe what each one can carry. Sixteen schema pins name the seams that carry a version. The aggregate check folds four legs, and four gate functions share the same zero or one exit code. 90 source modules hold 16,182 lines, and 42 test files hold 764 tests. Two surfaces named in the roadmap are absent from the catalog, a global SOUL.md and a GEMINI.md, so canon does not render them.](docs/art/record-table.svg)
 
 Every count is asserted against the module that defines it in
 `tests/test_repo_art.py`.
@@ -89,11 +89,29 @@ scope, the validator, and the aggregate check. Nothing on that server writes a
 file. Reconcile stays a library call, because rewriting your instruction files
 and raising a gate is an action with a person behind it.
 
+The CLI can also compile a provider-neutral continuity capsule from two explicit
+inputs: `records.jsonl` and `atoms.jsonl`. Preview reports artifact names,
+target tier, readiness probe data, and source-state hashes without writing.
+Export writes the same capsule as Canon Markdown, capsule JSON, readiness JSON,
+or a three-file bundle. The capsule records omitted state as typed atoms or
+transform omissions and says what the export does not prove, including host
+enforcement. It does not import provider auth, private databases, ChatGPT web
+state, or Claude web state.
+
 Installing a region into a fresh file, the first migrator on the version seam,
 and the global SOUL.md and GEMINI.md surfaces are later phases. Everything
 shipped is proven by a full test suite and aims at the one envelope.
 
 ## Run it
+
+Canon 0.1.0 is prepared as a GitHub release candidate. Install from a reviewed
+GitHub release asset after publication, or from a local wheel during review:
+
+```bash
+python -m pip install canon-0.1.0-py3-none-any.whl
+```
+
+No PyPI package ownership or publication is claimed here.
 
 Serve the record set to a harness:
 
@@ -111,6 +129,23 @@ canon blocks
 `canon check` exits non-zero when a wired leg fails or the block pool is not the
 authored set, so a build can key on it. Point it at your records with
 `CANON_BLOCKS_DIR`, and at your files with `CANON_HOME` and `CANON_WORKSPACE`.
+
+Preview and export a continuity capsule from explicit local inputs:
+
+```bash
+canon --json preview --workspace . --records records.jsonl --atoms atoms.jsonl --target codex-cli
+canon export --workspace . --records records.jsonl --atoms atoms.jsonl --target codex-cli --format canon-md
+canon export --workspace . --records records.jsonl --atoms atoms.jsonl --target codex-cli --format capsule-json
+canon --json export --workspace . --records records.jsonl --atoms atoms.jsonl --target codex-cli --format bundle --out bundle
+```
+
+The `codex-cli` and `claude-code` targets are native-advisory surfaces. App and
+web targets remain guided until their hosts provide stronger startup evidence.
+Preview and stdout exports work across supported Python platforms. Creating a
+new bundle currently requires Windows with the confined native writer. On Linux
+and macOS, new bundle creation returns `unsafe_path` without writing; use stdout
+export there. The Windows final directory rename is parent-handle-relative and
+leaf-only. This bounds publication, not immutability after the command returns.
 
 Run the suite:
 
@@ -134,9 +169,12 @@ src/canon/
   persona_thesis.py, canon_check.py      the persona basis adapter, the aggregate check
   reconcile*.py                          the fast-forward decision and its durable gate
   blocks.py, local_mcp.py, cli.py        the authored-block loader, the MCP door, the CLI
+  capsule*.py, atom.py, adapter.py       the continuity capsule, atom and target contract
+  cli_compile.py, cli_export.py          preview, stdout export and bundle export
+  cli_artifacts.py, cli_publish.py       source hashes and confined artifact publishing
 tests/                                   round-trip, validator, layering, backend,
                                          fidelity, surface, orchestration, vault,
-                                         drift, reconcile, and artwork proofs
+                                         drift, reconcile, continuity, and artwork proofs
 docs/art/                                the drawings above and the spec they render from
 project-docs/                            the F0, F1, R0, R1, R2, V2, V3, V4, MCP decisions
 ```

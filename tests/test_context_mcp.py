@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import json
 import sqlite3
+from pathlib import Path
 
 from canon import context_mcp
 from canon.context_mcp import ENV_CONTEXT_DB, handle, serve
@@ -137,5 +138,10 @@ def test_serve_round_trips_context_stdio(monkeypatch, tmp_path) -> None:
     assert _payload(replies[1]["result"])["status"] == "stored"
 
 
-def test_module_version_matches_local_mcp_version() -> None:
-    assert context_mcp.__version__ == "0.0.0"
+def test_module_version_matches_packaged_version() -> None:
+    pyproject = (Path(__file__).resolve().parents[1] / "pyproject.toml"
+                 ).read_text(encoding="utf-8")
+    declared = next(line.split("=", 1)[1].strip().strip('"')
+                    for line in pyproject.splitlines()
+                    if line.startswith("version"))
+    assert context_mcp.__version__ == declared

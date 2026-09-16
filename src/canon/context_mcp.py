@@ -8,7 +8,7 @@ from pathlib import Path
 
 from .context_store import ContextStore
 
-__version__ = "0.0.0"
+__version__ = "0.1.0"
 ENV_CONTEXT_DB = "CANON_CONTEXT_DB"
 MAX_LINE = 2_000_000
 _SHAPES = {
