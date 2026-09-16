@@ -2,8 +2,15 @@
 from __future__ import annotations
 
 import re
+from urllib.parse import urlsplit, urlunsplit
 
 from .context_records import LIMITS, required_text
+
+_ARXIV_ID = re.compile(r"(?<![\w.])(\d{4}\.\d{4,5})(v\d+)?(?!\w)", re.IGNORECASE)
+_COMPOUND_ID = re.compile(r"(?<!\w)([a-z0-9]+(?:[._:-][a-z0-9]+){1,})(?!\w)", re.IGNORECASE)
+_URL = re.compile(r"https?://[^\s<>)\"']+", re.IGNORECASE)
+_TRAILING_URL_PUNCTUATION = ".,;:!?)]}\"'"
+_IDENTIFIER_SCORE_STEP = 10_000
 
 
 def pending_sources(records):
@@ -26,16 +33,23 @@ def search(records, workspace, project, query, top_k, include_pending):
         raise ValueError("top_k must be an integer between 0 and 20")
     if type(include_pending) is not bool:
         raise ValueError("include_pending must be boolean")
-    tokens = set(re.findall(r"\w+", query.casefold()))
+    query_identifiers = _query_identifiers(query)
+    tokens = _keyword_tokens(query)
     matches = []
+    identifier_matches = 0
+    malformed_url_count = _malformed_url_count(query)
     for rec in records:
         body = str(rec.data["text"])
-        words = set(re.findall(r"\w+", body.casefold()))
-        score = len(tokens & words)
+        malformed_url_count += _malformed_url_count(body)
+        identifier_score = len(query_identifiers & _body_identifiers(body))
+        keyword_score = len(tokens & _keyword_tokens(body))
+        score = identifier_score * _IDENTIFIER_SCORE_STEP + keyword_score
         if score:
-            matches.append((score, rec, body))
-    matches.sort(key=lambda row: (-row[0], row[1].id))
-    hits = [hit(rec, text, score, workspace, project) for score, rec, text in matches[:top_k]]
+            identifier_matches += 1 if identifier_score else 0
+            matches.append((identifier_score, keyword_score, score, rec, body))
+    matches.sort(key=lambda row: (-row[0], -row[1], row[3].id))
+    hits = [hit(rec, text, score, workspace, project)
+            for _identifier_score, _keyword_score, score, rec, text in matches[:top_k]]
     pending = pending_sources(records)
     status = "found_in_searched_sources" if matches else ("pending_extraction" if pending else "not_found_in_searched_sources")
     return {"schema": "canon.context-query/v1", "status": status, "hits": hits,
@@ -44,7 +58,14 @@ def search(records, workspace, project, query, top_k, include_pending):
                          "records_searched": len(records), "matching_records": len(matches),
                          "hits_omitted": max(0, len(matches) - len(hits)),
                          "pending_count": len(pending), "pending_returned": min(20, len(pending)) if include_pending else 0,
-                         "method": "deterministic_keyword_overlap", "historical_completeness": "unknown",
+                         "method": "deterministic_identifier_keyword_overlap",
+                         "identifier_query_count": len(query_identifiers),
+                         "identifier_matching_records": identifier_matches,
+                         "ranking": "identifier_overlap_then_keyword_overlap_then_record_id",
+                         "explicit_version_policy": "exact version identifiers rank only exact versions; keyword fallback may still return other versions",
+                         "url_normalization": "scheme_host_lowercase_path_query_preserved",
+                         "malformed_url_count": malformed_url_count,
+                         "historical_completeness": "unknown",
                          "source_freshness": "not_checked", "supersession_resolution": "not_implemented"},
             "does_not_prove": list(LIMITS)}
 
@@ -59,3 +80,83 @@ def hit(rec, text, score, workspace, project):
                          "source_app": rec.provenance.harness,
                          "native_id": rec.provenance.native_id,
                          "session_id": rec.provenance.session_id}}
+
+
+def _query_identifiers(text):
+    return _identifiers(text, include_version_base=False)
+
+
+def _body_identifiers(text):
+    return _identifiers(text, include_version_base=True)
+
+
+def _identifiers(text, include_version_base):
+    terms = set()
+    for match in _URL.finditer(text):
+        normalized = _normalize_url(match.group(0))
+        if normalized is not None:
+            terms.add(f"url:{normalized}")
+    for match in _ARXIV_ID.finditer(text):
+        base = match.group(1).casefold()
+        version = match.group(2).casefold() if match.group(2) else None
+        if version:
+            terms.add(f"arxiv-version:{base}{version}")
+            if include_version_base:
+                terms.add(f"arxiv-base:{base}")
+        else:
+            terms.add(f"arxiv-base:{base}")
+    for match in _COMPOUND_ID.finditer(text):
+        token = match.group(1).strip("._:-").casefold()
+        if any(ch.isdigit() for ch in token) and not _is_arxiv_id(token):
+            terms.add(f"compound:{token}")
+    return terms
+
+
+def _normalize_url(raw_url):
+    cleaned = raw_url.rstrip(_TRAILING_URL_PUNCTUATION)
+    try:
+        parts = urlsplit(cleaned)
+    except ValueError:
+        return None
+    if not parts.scheme or not parts.netloc:
+        return None
+    return urlunsplit((parts.scheme.casefold(), _normalize_netloc(parts.netloc),
+                       parts.path, parts.query, parts.fragment))
+
+
+def _normalize_netloc(netloc):
+    auth, separator, hostport = netloc.rpartition("@")
+    prefix = auth + separator if separator else ""
+    if hostport.startswith("["):
+        host, close, port = hostport.partition("]")
+        return prefix + host.casefold() + close + port
+    host, colon, port = hostport.partition(":")
+    return prefix + host.casefold() + colon + port
+
+
+def _is_arxiv_id(token):
+    return re.fullmatch(r"\d{4}\.\d{4,5}(?:v\d+)?", token) is not None
+
+
+def _keyword_tokens(text):
+    chars = list(text)
+    for start, end in _identifier_spans(text):
+        for index in range(start, end):
+            chars[index] = " "
+    return set(re.findall(r"\w+", "".join(chars).casefold()))
+
+
+def _identifier_spans(text):
+    spans = [match.span() for match in _URL.finditer(text)
+             if _normalize_url(match.group(0)) is not None]
+    spans.extend(match.span() for match in _ARXIV_ID.finditer(text))
+    for match in _COMPOUND_ID.finditer(text):
+        token = match.group(1).strip("._:-").casefold()
+        if any(ch.isdigit() for ch in token) and not _is_arxiv_id(token):
+            spans.append(match.span())
+    return spans
+
+
+def _malformed_url_count(text):
+    return sum(1 for match in _URL.finditer(text)
+               if _normalize_url(match.group(0)) is None)
