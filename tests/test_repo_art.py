@@ -219,15 +219,18 @@ def test_four_gate_functions_share_one_exit_code():
     assert stages["Verdict"] == "One exit code, zero or one."
 
 
-def test_the_source_tree_is_the_size_the_card_claims():
-    assert CARD["source modules"]["value"] == "37 files"
-    assert CARD["source lines"]["value"] == "5,986 lines"
+def _source_module_stats() -> tuple[int, int]:
     modules = sorted((ROOT / "src" / "canon").rglob("*.py"))
-    assert len(modules) == 37
     lines = sum(
         len(path.read_text(encoding="utf-8").splitlines()) for path in modules
     )
-    assert lines == 5986
+    return len(modules), lines
+
+
+def test_the_source_tree_is_the_size_the_card_claims():
+    modules, lines = _source_module_stats()
+    assert CARD["source modules"]["value"] == f"{modules} files"
+    assert CARD["source lines"]["value"] == f"{lines:,} lines"
 
 
 def test_the_roadmap_names_two_surfaces_the_catalog_does_not_carry():
@@ -256,7 +259,8 @@ def test_the_suite_carries_the_number_of_tests_the_card_claims():
     )
     assert proc.returncode == 0, proc.stdout[-2000:]
     per_file = re.findall(r"^tests/\S+\.py: (\d+)$", proc.stdout, re.MULTILINE)
-    assert len(per_file) == 38
+    test_files = sorted((ROOT / "tests").glob("test_*.py"))
+    assert len(per_file) == len(test_files)
     assert CARD["python tests"]["value"] == f"{sum(int(n) for n in per_file)} passing"
 
 
@@ -273,4 +277,6 @@ def test_the_note_counts_the_functions_behind_those_cases():
                 and node.name.startswith("test_")
             ]
         )
+    test_file_count = len(sorted((ROOT / "tests").glob("test_*.py")))
+    assert f"pytest over {test_file_count} files" in CARD["python tests"]["note"]
     assert f"{found} test functions" in CARD["python tests"]["note"]
