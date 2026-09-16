@@ -6,7 +6,11 @@ import os
 import sys
 from pathlib import Path
 
-from .context_store import ContextStore
+from .context_store import (
+    ContextIntegrityError,
+    ContextStore,
+    ContextStoreIdentityError,
+)
 
 __version__ = "0.1.0"
 ENV_CONTEXT_DB = "CANON_CONTEXT_DB"
@@ -14,13 +18,20 @@ MAX_LINE = 2_000_000
 _SHAPES = {
     "health": ({}, []),
     "ingest": ({"workspace_id": {"type": "string"}, "project_id": {"type": "string"},
-                "event": {"type": "object"}}, ["workspace_id", "project_id", "event"]),
+                "event": {"type": "object"}, "expected_store_id": {"type": "string"}},
+               ["workspace_id", "project_id", "event"]),
     "query": ({"workspace_id": {"type": "string"}, "project_id": {"type": "string"},
-               "query": {"type": "string"}, "top_k": {"type": "integer", "minimum": 0, "maximum": 20},
-               "include_pending": {"type": "boolean"}}, ["workspace_id", "project_id", "query"]),
+                "query": {"type": "string"}, "top_k": {"type": "integer", "minimum": 0, "maximum": 20},
+                "include_pending": {"type": "boolean"}, "expected_store_id": {"type": "string"}},
+               ["workspace_id", "project_id", "query"]),
     "get": ({"workspace_id": {"type": "string"}, "project_id": {"type": "string"},
-             "record_id": {"type": "string"}}, ["workspace_id", "project_id", "record_id"]),
+             "record_id": {"type": "string"}, "expected_store_id": {"type": "string"}},
+            ["workspace_id", "project_id", "record_id"]),
 }
+
+
+class ContextMcpInputError(ValueError):
+    """A bounded MCP argument error that is safe to return to the caller."""
 
 
 def tools():
@@ -40,22 +51,39 @@ def _store():
 
 def call(name, args):
     if not isinstance(name, str) or not name.startswith("canon.context."):
-        raise ValueError("unknown context tool")
+        raise ContextMcpInputError("unknown context tool")
     operation = name.removeprefix("canon.context.")
     if operation not in _SHAPES or not isinstance(args, dict):
-        raise ValueError("unknown tool or invalid arguments")
+        raise ContextMcpInputError("unknown tool or invalid arguments")
     properties, required = _SHAPES[operation]
     if set(args) - set(properties) or set(required) - set(args):
-        raise ValueError(f"expected arguments {list(properties)}; required {required}")
+        raise ContextMcpInputError(
+            f"expected arguments {list(properties)}; required {required}")
     if operation == "health":
         try:
-            audit = _store().verify_chain()
+            store = _store()
+            store_id = store.identity()
+            audit = store.verify_chain()
             return {"ok": audit["ok"], "configured": True, "audit": audit,
+                    "store_id": store_id,
+                    "server": "canon-context", "storage": "Canon SQLite canonical records"}
+        except ContextStoreIdentityError as exc:
+            return {"ok": False, "configured": True, "reason": str(exc),
                     "server": "canon-context", "storage": "Canon SQLite canonical records"}
         except (ValueError, OSError):
             return {"ok": False, "configured": False, "reason": "explicit context database unavailable"}
     store = _store()
-    return store.ingest(args) if operation == "ingest" else getattr(store, operation)(**args)
+    return _call_store(store, operation, args)
+
+
+def _call_store(store, operation, args):
+    expected = args.get("expected_store_id")
+    clean = {key: value for key, value in args.items() if key != "expected_store_id"}
+    if operation == "ingest":
+        return store.ingest(clean, expected_store_id=expected)
+    if operation == "query":
+        return store.query(expected_store_id=expected, **clean)
+    return store.get(expected_store_id=expected, **clean)
 
 
 def handle(request):
@@ -72,9 +100,19 @@ def handle(request):
             params = request.get("params", {})
             value = call(params.get("name"), params.get("arguments", {}))
             result = {"content": [{"type": "text", "text": json.dumps(value)}], "isError": False}
-        except Exception as exc:
-            message = str(exc) if isinstance(exc, ValueError) else "context service unavailable"
-            result = {"content": [{"type": "text", "text": message}], "isError": True}
+        except ContextMcpInputError as exc:
+            result = {"content": [{"type": "text", "text": str(exc)}], "isError": True}
+        except ContextStoreIdentityError as exc:
+            result = {"content": [{"type": "text", "text": str(exc)}], "isError": True}
+        except ContextIntegrityError:
+            result = {"content": [{"type": "text", "text": "context store integrity failed"}],
+                      "isError": True}
+        except ValueError:
+            result = {"content": [{"type": "text", "text": "context request invalid"}],
+                      "isError": True}
+        except Exception:
+            result = {"content": [{"type": "text", "text": "context service unavailable"}],
+                      "isError": True}
     elif method == "ping":
         result = {}
     else:

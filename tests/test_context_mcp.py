@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import sqlite3
@@ -41,6 +42,35 @@ def _ingest_args() -> dict:
     }
 
 
+def _insert_hash_consistent_bad_record(db) -> None:
+    key = "workspace/context-event-corrupt"
+    envelope = json.dumps({
+        "canon_schema": "API_SECRET_ABC123",
+        "kind": "episodic-memory",
+        "id": "context-event-corrupt",
+        "scope": "workspace",
+        "data": {"workspace_id": "cdev", "project_id": "canon",
+                 "event_record_id": "context-event-corrupt",
+                 "text": "corrupt secret payload"},
+        "provenance": {"harness": "codex", "source_hash": "a" * 64},
+    }, sort_keys=True)
+    digest = hashlib.sha256(envelope.encode()).hexdigest()
+    chain = hashlib.sha256(("0" * 64 + key + digest).encode()).hexdigest()
+    con = sqlite3.connect(str(db))
+    con.execute(
+        "INSERT INTO records(key,scope,id,kind,envelope,sha256)"
+        " VALUES(?,?,?,?,?,?)",
+        (key, "workspace", "context-event-corrupt", "episodic-memory",
+         envelope, digest),
+    )
+    con.execute(
+        "INSERT INTO audit(key,sha256,prev_hash,chain_hash) VALUES(?,?,?,?)",
+        (key, digest, "0" * 64, chain),
+    )
+    con.commit()
+    con.close()
+
+
 def test_context_mcp_lists_only_the_context_tools() -> None:
     listed = handle({"id": 1, "method": "tools/list"})["result"]["tools"]
     assert [tool["name"] for tool in listed] == [
@@ -80,6 +110,97 @@ def test_ingest_query_and_get_use_the_configured_database(monkeypatch, tmp_path)
     })
     assert got["status"] == "found_in_searched_sources"
     assert got["record"]["data"]["attachments"][0]["ref"] == "C:/private/image.png"
+
+
+def test_context_mcp_exposes_and_checks_store_identity(monkeypatch, tmp_path) -> None:
+    db = tmp_path / "context.sqlite"
+    monkeypatch.setenv(ENV_CONTEXT_DB, str(db))
+    health = _tool("canon.context.health")
+    store_id = health["store_id"]
+
+    ingest = _tool("canon.context.ingest", {
+        **_ingest_args(),
+        "expected_store_id": store_id,
+    })
+    query = _tool("canon.context.query", {
+        "workspace_id": "cdev",
+        "project_id": "canon",
+        "query": "MCP facade",
+        "expected_store_id": store_id,
+    })
+    got = _tool("canon.context.get", {
+        "workspace_id": "cdev",
+        "project_id": "canon",
+        "record_id": ingest["event_record_id"],
+        "expected_store_id": store_id,
+    })
+
+    assert store_id.startswith("ctxstore_")
+    assert ingest["store_id"] == store_id
+    assert query["store_id"] == store_id
+    assert got["store_id"] == store_id
+
+
+def test_context_mcp_store_identity_errors_are_sanitized(monkeypatch, tmp_path) -> None:
+    db = tmp_path / "context.sqlite"
+    monkeypatch.setenv(ENV_CONTEXT_DB, str(db))
+    _tool("canon.context.health")
+
+    bad = _call("canon.context.ingest", {
+        **_ingest_args(),
+        "expected_store_id": "ctxstore_" + "f" * 32,
+    })
+    malformed = _call("canon.context.query", {
+        "workspace_id": "cdev",
+        "project_id": "canon",
+        "query": "MCP facade",
+        "expected_store_id": "../context.sqlite",
+    })
+
+    assert bad["isError"] is True
+    assert bad["content"][0]["text"] == "context store identity mismatch"
+    assert "ctxstore_" not in bad["content"][0]["text"]
+    assert malformed["isError"] is True
+    assert malformed["content"][0]["text"] == "expected_store_id is invalid"
+
+
+def test_context_mcp_health_refuses_missing_established_identity(monkeypatch, tmp_path) -> None:
+    db = tmp_path / "context.sqlite"
+    monkeypatch.setenv(ENV_CONTEXT_DB, str(db))
+    store_id = _tool("canon.context.health")["store_id"]
+    _tool("canon.context.ingest", {**_ingest_args(), "expected_store_id": store_id})
+    con = sqlite3.connect(str(db))
+    con.execute("DROP TABLE context_store_meta")
+    con.commit()
+    con.close()
+
+    health = _tool("canon.context.health")
+
+    assert health["ok"] is False
+    assert health["configured"] is True
+    assert health["reason"] == "context store identity invalid"
+    assert "store_id" not in health
+
+
+def test_context_mcp_sanitizes_corrupt_hash_consistent_records(monkeypatch, tmp_path) -> None:
+    db = tmp_path / "context.sqlite"
+    monkeypatch.setenv(ENV_CONTEXT_DB, str(db))
+    store_id = _tool("canon.context.health")["store_id"]
+    _insert_hash_consistent_bad_record(db)
+    health = _tool("canon.context.health")
+
+    result = _call("canon.context.query", {
+        "workspace_id": "cdev",
+        "project_id": "canon",
+        "query": "secret",
+        "expected_store_id": store_id,
+    })
+
+    assert health["ok"] is False
+    assert "API_SECRET_ABC123" not in json.dumps(health)
+    assert result["isError"] is True
+    assert result["content"][0]["text"] == "context store integrity failed"
+    assert "API_SECRET_ABC123" not in result["content"][0]["text"]
 
 
 def test_mcp_does_not_read_attachment_paths(monkeypatch, tmp_path) -> None:
