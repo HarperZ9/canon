@@ -6,10 +6,12 @@ record someone just wrote looks exactly like a clean load.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
 from canon.blocks import ENV_BLOCKS_DIR, default_blocks_dir, load_blocks
+from canon.layering import resolve_blocks
 from canon.schema import (
     KIND_EPISODIC_MEMORY,
     KIND_PERSONALITY_BLOCK,
@@ -17,6 +19,8 @@ from canon.schema import (
     Record,
     Temporal,
 )
+from canon.textblock import render_region
+from canon.validator import validate_record
 
 
 def _block(id_: str, *, scope: str = "global", ord_: int = 1) -> Record:
@@ -139,6 +143,26 @@ def test_an_unset_env_variable_falls_back_to_the_checkout(monkeypatch):
     # This checkout may or may not carry a blocks/ directory; both are honest
     # answers, and neither is a path this loader invented.
     assert found is None or found.endswith("blocks")
+
+
+def test_the_checkout_block_set_is_valid_public_clean_and_renderable(monkeypatch):
+    monkeypatch.delenv(ENV_BLOCKS_DIR, raising=False)
+    directory = default_blocks_dir()
+    assert directory is not None and directory.endswith("blocks")
+    root = Path(directory)
+    load = load_blocks()
+
+    assert load.ok and [rec.id for rec in load.records] == [
+        "evidence-insight-and-useful-work"]
+    for file in root.iterdir():
+        if file.is_file():
+            assert "—" not in file.read_text(encoding="utf-8")
+    for rec in load.records:
+        assert validate_record(rec) == []
+        assert rec.to_dict() == json.loads((root / f"{rec.id}.json").read_text("utf-8"))
+        resolved = resolve_blocks(load.records, rec.scope)
+        assert rec in resolved
+        assert rec.data["title"] in render_region(list(resolved), rec.scope)
 
 
 def test_the_loader_reads_and_never_writes(tmp_path):
