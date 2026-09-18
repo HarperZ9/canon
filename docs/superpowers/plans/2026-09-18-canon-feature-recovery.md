@@ -54,6 +54,8 @@ Contract: replay claims bind capsule hash, nonce, and expiration into a stable k
 
 Current-main overlap: no current module. This is a small dependency for import review and can be ported independently before import-review.
 
+Status here: ported as the second recovery chunk. The red case was the branch replay test suite failing collection because `canon.replay` was absent; after the port it passes focused replay tests. This adds no command surface and does not touch MCP/context capture.
+
 ### Retention
 
 Branch-only source: `src/canon/retention.py`, `src/canon/retention_receipts.py`, and `src/canon/retention_safety.py`.
