@@ -64,6 +64,8 @@ Contract: retention planning validates policy shape and identifiers, derives tom
 
 Current-main overlap: current omission and transform receipt modules exist, but there is no retention planner. This should land as a library contract before it is composed into import review.
 
+Status here: ported as the third recovery chunk. The red case was the branch retention test suite failing collection because `canon.retention` was absent; after the port it passes focused retention tests. This adds no command surface and performs no deletion.
+
 ### Concurrency/run locks
 
 Branch-only source: `src/canon/concurrency*.py` except the shared `concurrency_windows_api.py`, which already exists on current main.
