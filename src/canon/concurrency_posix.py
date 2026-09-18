@@ -5,8 +5,9 @@ import os
 import stat
 from pathlib import Path
 
-_LOCK_FLAGS = os.O_CREAT | os.O_EXCL | os.O_WRONLY
+_LOCK_FLAGS = os.O_CREAT | os.O_EXCL | os.O_RDWR
 _MAX_TOKEN_BYTES = 4096
+_HAS_DIR_FD_LOCKS = os.open in os.supports_dir_fd and os.unlink in os.supports_dir_fd
 
 
 class LockWriteError(OSError):
@@ -14,7 +15,7 @@ class LockWriteError(OSError):
 
 
 def supported() -> bool:
-    return os.open in os.supports_dir_fd and os.unlink in os.supports_dir_fd and hasattr(os, "pread") and all(
+    return _HAS_DIR_FD_LOCKS and hasattr(os, "pread") and all(
         hasattr(os, name) for name in ("O_DIRECTORY", "O_NOFOLLOW")
     )
 

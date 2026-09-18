@@ -14,6 +14,7 @@ import pytest
 import canon.concurrency_capability as concurrency_capability
 import canon.concurrency_lock_backend as concurrency_lock_backend
 import canon.concurrency_lock as concurrency_lock
+import canon.concurrency_posix as concurrency_posix
 import canon.concurrency_windows as concurrency_windows
 from canon.concurrency import (
     LockError,
@@ -294,6 +295,23 @@ def test_acquire_refuses_when_stable_parent_primitive_unavailable_before_create(
 
     assert not called
     assert not (tmp_path / ".canon-locks" / "workspace.lock").exists()
+
+
+def test_posix_lock_descriptor_remains_readable_for_release(tmp_path: Path) -> None:
+    if os.name == "nt" or not concurrency_posix.supported():
+        pytest.skip("POSIX descriptor readability regression")
+    lock_dir = tmp_path / ".canon-locks"
+    lock_dir.mkdir()
+    dir_fd = concurrency_posix.open_directory(lock_dir)
+    file_fd = -1
+    try:
+        file_fd = concurrency_posix.create_lock_file(dir_fd, "workspace.lock", "token")
+        assert concurrency_posix.read_token(file_fd) == "token"
+    finally:
+        if file_fd >= 0:
+            concurrency_posix.close_fd(file_fd)
+        concurrency_posix.delete_lock_file(dir_fd, "workspace.lock")
+        concurrency_posix.close_fd(dir_fd)
 
 
 def test_windows_conflict_uses_stable_parent_handle_not_full_path_open(
