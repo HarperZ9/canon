@@ -46,6 +46,8 @@ Contract: imported atoms are default-denied unless trust, disclosure, locality, 
 
 Current-main overlap: current schema and atom validation exist, but there is no import-review policy surface. This is a library contract and should land before any import command surface.
 
+Status here: ported as the fourth recovery chunk. The red case was the branch import policy and review suites failing collection because `canon.import_policy` and `canon.import_review` were absent; after the port they pass focused import tests. This adds no command surface and keeps import activation default-denied unless all checks pass.
+
 ### Replay
 
 Branch-only source: `src/canon/replay.py`.
