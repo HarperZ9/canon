@@ -22,6 +22,7 @@ COMMANDS = (
     "init",
     "compile",
     "preview",
+    "doctor",
     "export",
     "undo",
     "bootstrap",
@@ -88,6 +89,10 @@ def _run_parsed(
         from .cli_compile import run_compile_command
 
         return run_compile_command(parsed, stdin=stdin, stdout=stdout, stderr=stderr, color=color)
+    if parsed.command == "doctor":
+        from .doctor import run_doctor_command
+
+        return run_doctor_command(parsed, stdin=stdin, stdout=stdout, stderr=stderr, color=color)
     if parsed.command == "export":
         from .cli_export import run_export_command
 
