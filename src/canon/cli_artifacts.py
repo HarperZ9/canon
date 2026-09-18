@@ -8,6 +8,7 @@ from pathlib import Path
 from .canonical_json import sha256_bytes
 from .cli_publish import PublishError, publish_new_bundle
 from .path_policy import PathPolicyError, assert_not_protected, is_reparse_point, resolve_under_root
+from .source_safe_read import SafeSourceReadError, read_regular_under_root
 from .source_state import SourceStateItem
 
 ARTIFACT_NAMES = ("canon.capsule.json", "CANON.md", "readiness-probe.json")
@@ -64,8 +65,12 @@ def read_source_file(raw: object, *, workspace: WorkspaceRoot) -> SourceBytes:
             raise ArtifactError("source_unreachable") from exc
         raise ArtifactError("unsafe_path") from exc
     _assert_workspace_stable(workspace)
-    data = _read_regular_bytes(resolved)
-    return SourceBytes(_relative_text(resolved, workspace.path), data)
+    relative = _relative_text(resolved, workspace.path)
+    try:
+        data = read_regular_under_root(workspace.path, workspace.stat_key, relative, max_bytes=MAX_SOURCE_BYTES)
+    except SafeSourceReadError as exc:
+        raise ArtifactError(exc.code) from exc
+    return SourceBytes(relative, data)
 
 
 def publish_artifacts(raw_out: object, *, workspace: WorkspaceRoot, artifacts: dict[str, bytes]) -> str:
