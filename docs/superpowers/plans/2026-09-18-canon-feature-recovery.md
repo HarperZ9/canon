@@ -80,6 +80,8 @@ Contract: acquire and release named run locks under `.canon-locks` through stabl
 
 Current-main overlap: current main has the low-level Windows API helper because safe publish already uses it, but no run-lock abstraction. This is the largest recovery chunk and should be ported only with its focused tests and without changing current MCP/context behavior.
 
+Status here: ported as the seventh recovery chunk. The red case was the branch concurrency suite failing collection because lock modules were absent; after the port it passes focused race/control tests while reusing current-main `concurrency_windows_api.py` and not touching MCP/context capture.
+
 ## Dependency order for recovery
 
 1. Source-safe source reads, because doctor and rescue use the same explicit source ingestion path.
