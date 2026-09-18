@@ -40,6 +40,8 @@ Contract: `canon rescue` builds a deterministic rescue bundle from explicit loca
 
 Current-main overlap: current `export` already has stdout, bundle, region, undo, and safe publish behavior. Rescue should reuse current compile/export helpers and the source-safe read port, not copy stale export behavior over current main.
 
+Status here: ported as the sixth recovery chunk. The red run showed rescue absent while one branch export expectation was stale against current Windows safe publish; the port adds rescue command wiring and helper modules, keeps current export behavior, and adapts the stale test to the current safe-publish contract. Focused export/rescue tests pass.
+
 ### Import review
 
 Branch-only source: `src/canon/import_policy.py`, `src/canon/import_review.py`, and `src/canon/import_review_safety.py`.
