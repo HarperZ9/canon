@@ -30,6 +30,8 @@ Contract: `canon doctor` validates target descriptors, workspace/source reachabi
 
 Current-main overlap: the MCP `canon.doctor` tool is a block-loader readiness report. That is not the same contract as the branch CLI doctor, so a port must either add a distinct CLI path or explicitly reconcile naming with the MCP tool.
 
+Status here: ported as the fifth recovery chunk. Current main already had parser arguments for `doctor` but omitted it from `COMMANDS` and dispatch, so the red run returned usage errors or lacked `canon.doctor`. After the port, CLI doctor diagnostics pass focused tests while the read-only MCP `canon.doctor` tool remains unchanged.
+
 ### Rescue handoff artifacts
 
 Branch-only source: `src/canon/cli_rescue.py`, `src/canon/rescue.py`, `src/canon/rescue_artifacts.py`, and `src/canon/rescue_output.py`.
