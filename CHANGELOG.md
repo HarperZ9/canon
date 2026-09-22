@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.0 - 2026-09-22
+
+- Publishes to PyPI as `flywheel-canon`. The bare name `canon` belongs to an
+  unrelated project, so the distribution carries the prefix while the console
+  script stays `canon`.
+- Adds an OIDC trusted-publishing release workflow with tag/version, artifact
+  digest, clean-venv entry-point resolution, and sdist-rebuild gates.
+- Adds run-lock concurrency control, and fixes POSIX run-lock descriptor release.
+- Adds doctor diagnostics, retention planning, replay checks, rescue handoff, and
+  an import review policy.
+- Hardens Canon source reads.
+
 ## 0.1.0 — 2026-09-07
 
 First GitHub release for Canon.
