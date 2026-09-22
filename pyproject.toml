@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "canon"
+name = "flywheel-canon"
 version = "0.1.0"
 description = "A provider-neutral memory-bank, personality container, and continuity capsule CLI."
 readme = "README.md"
