@@ -27,6 +27,7 @@ COMMANDS = (
     "rescue",
     "undo",
     "bootstrap",
+    "workspace",
 )
 
 
@@ -102,6 +103,10 @@ def _run_parsed(
         from .cli_export import run_undo_command
 
         return run_undo_command(parsed, stdout=stdout, stderr=stderr, color=color)
+    if parsed.command == "workspace":
+        from .cli_workspace import run_workspace_command
+
+        return run_workspace_command(parsed, stdout=stdout, stderr=stderr, environ=environ, color=color)
     if parsed.command == "rescue":
         from .cli_rescue import run_rescue_command
 

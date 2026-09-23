@@ -83,6 +83,10 @@ def _add_command_args(command: str, parser: argparse.ArgumentParser) -> None:
         _add_rescue_args(parser)
     elif command == "undo":
         _add_undo_args(parser)
+    elif command == "workspace":
+        from .cli_workspace_parser import add_workspace_args
+
+        add_workspace_args(parser)
 
 
 def _add_init_args(parser: argparse.ArgumentParser) -> None:

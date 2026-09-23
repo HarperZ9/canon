@@ -227,6 +227,32 @@ that door and still writes nothing:
   fails, D-73 a bad file is reported not skipped, D-74 three read verbs, D-75 no
   `blocks/` directory in this repository (an honest null).
 
+W1 is the workspace band: per-project state that survives a change of model or
+tool. It keeps the record envelope unchanged and binds records to a project one
+level up, in the stored row:
+- `src/canon/workspace/identity.py` derives a `prj_` id from the normalized
+  remote URL (credentials, port, scheme and `.git` dropped, host lowercased,
+  path case kept) or from the root path when there is no remote. A `.git` in the
+  home directory or a filesystem root claims only itself.
+- `src/canon/workspace/rows.py` is the `canon.project-row/v1` row that wraps an
+  unchanged record with its `project_id`, `state` (accepted or proposed),
+  `origin` and `promoted_from`.
+- `src/canon/workspace/store.py` is one store per project under a root
+  (`~/.canon/store`, `CANON_STORE`, `--store`). A read refuses a whole file when
+  any row names another project; writes are sorted, atomic and under the run
+  lock. `put` refuses a global record.
+- `src/canon/workspace/pool.py` assembles what a render may read: global rows,
+  this project's accepted rows, and named projects' rows, each tagged.
+  `src/canon/workspace/moves.py` holds `promote` and `adopt`, the only two
+  cross-boundary moves, both logged with a reason.
+- `src/canon/cli_workspace*.py` add `canon workspace id|list|promote|adopt`.
+- `project-docs/W1-WORKSPACE.md` is the spec (identity, collisions, renames,
+  store layout, isolation); `project-docs/W1-DECISIONS.md` records D-101 the
+  binding lives in the row, D-102 remote-keyed identity that splits on doubt,
+  D-103 the ceiling directories, D-104 isolation checked on read, D-105 named
+  foreign reads never merge by id, D-106 global by promotion only, D-107 the
+  store outside the repository, D-108 adoption answers a rename.
+
 Later phases (verifier, migration legs, region installation, the global SOUL.md
 and GEMINI.md surfaces) aim at this same envelope. Each lands on its own branch.
 

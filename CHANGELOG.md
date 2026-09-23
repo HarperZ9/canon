@@ -1,5 +1,30 @@
 # Changelog
 
+## Unreleased
+
+Canon starts to carry a project's working state between models and tools.
+
+- Adds a stable project identity (`canon workspace id`). A project with a
+  remote is keyed on the normalized remote URL, so two clones or a moved
+  checkout stay one project; a project with no remote is keyed on its path.
+  Credentials in a remote URL never reach the key. A `.git` in the home
+  directory or a filesystem root claims only itself, so a dotfiles repository
+  does not merge every project below it.
+- Adds a per-project record store (default `~/.canon/store`, or
+  `CANON_STORE`). Each stored row names its project, and reading a file that
+  holds another project's row fails instead of mixing the two. Another
+  project's records are readable only when named.
+- New records are workspace records. `canon workspace promote` is the only way
+  into global scope, and `canon workspace adopt` is the only way to copy another
+  project's records in; both need a reason and both are logged.
+
+Limits:
+
+- The identity reader does not follow git `include` directives or `insteadOf`
+  rewrites.
+- Renaming a remote, or moving a project that has no remote, changes its id.
+  The old records are kept and can be adopted; nothing merges them on its own.
+
 ## 0.2.0 - 2026-09-22
 
 - Publishes to PyPI as `flywheel-canon`. The bare name `canon` belongs to an

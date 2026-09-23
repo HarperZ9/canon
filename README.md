@@ -29,6 +29,32 @@ to draw from and write back to, and renders each tool's file from that record.
   cross-provider transport. It adds the one record they share and the renderer
   that projects each surface.
 
+## Moving a project between models
+
+Switching a repository from one agent to another usually means explaining the
+project again, and memory tools that key on a user rather than a project show
+one repository's history inside another. canon keeps a project's working state
+as records bound to that project and renders it for whichever tool comes next.
+
+- **One project, one store.** `canon workspace id` derives a stable id from the
+  repository's remote, or from its path when there is no remote. Every stored
+  row names its project, and a read that finds another project's row fails
+  instead of mixing the two.
+- **Global only on purpose.** New records belong to the project.
+  `canon workspace promote` is the only way to make one global, and
+  `canon workspace adopt` is the only way to copy another project's records in.
+  Both need a reason and both are logged.
+
+```bash
+canon workspace id
+canon workspace list
+canon workspace promote house-style --reason "applies to every project"
+```
+
+The store lives in `~/.canon/store` unless `CANON_STORE` or `--store` says
+otherwise. `project-docs/W1-WORKSPACE.md` covers the identity rules, including
+what happens when a remote is renamed or a project with no remote moves.
+
 ## How one record becomes the file each tool reads
 
 ![Eight stages taking one record to the file a tool reads: record, validate, layer, resolve, render, region, allow-list, write. Every entry is one envelope in one of five kinds: an authored personality block, an episodic memory, a synthesized persona, a decision record, and a reference to an external research artifact. The validator checks every field and refuses a record it cannot vouch for. A workspace block overrides a global block carrying the same id, and the resolve step keeps current entries only, ordered by a clock-free ordinal so a rebuild is byte-identical. The block set is rendered to text and spliced into the span between the canon begin and end markers, and every byte outside that span is preserved. The write allow-list holds four surfaces: a global and a workspace file for Claude Code, an AGENTS.md for Codex, and a workspace SOUL.md for Hermes. A path outside that list is refused, and so is a file with no canon region. Three outcomes: written inside the markers canon owns, a surface that drifted and needs a human, and a file canon declines to write at all.](docs/art/surface-lane.svg)
@@ -45,7 +71,7 @@ in advance. Anything else fails the gate rather than logging a warning.
 
 ## What canon carries
 
-![A table of twelve rows: what canon carries, how many of it there are, and where each number is read from. Five record kinds share one envelope. Two scopes layer, workspace over global. Four surfaces sit on the write allow-list: a global and a workspace file for Claude Code, an AGENTS.md for Codex, and a workspace SOUL.md for Hermes. Four storage adapters implement the backend protocol, and five capability tokens describe what each one can carry. Sixteen schema pins name the seams that carry a version. The aggregate check folds four legs, and four gate functions share the same zero or one exit code. 111 source modules hold 19,731 lines, and 53 test files hold 1061 tests. Two surfaces named in the roadmap are absent from the catalog, a global SOUL.md and a GEMINI.md, so canon does not render them.](docs/art/record-table.svg)
+![A table of twelve rows: what canon carries, how many of it there are, and where each number is read from. Five record kinds share one envelope. Two scopes layer, workspace over global. Four surfaces sit on the write allow-list: a global and a workspace file for Claude Code, an AGENTS.md for Codex, and a workspace SOUL.md for Hermes. Four storage adapters implement the backend protocol, and five capability tokens describe what each one can carry. Sixteen schema pins name the seams that carry a version. The aggregate check folds four legs, and four gate functions share the same zero or one exit code. 121 source modules hold 20,856 lines, and 56 test files hold 1106 tests. Two surfaces named in the roadmap are absent from the catalog, a global SOUL.md and a GEMINI.md, so canon does not render them.](docs/art/record-table.svg)
 
 Every count is asserted against the module that defines it in
 `tests/test_repo_art.py`.
@@ -172,11 +198,13 @@ src/canon/
   capsule*.py, atom.py, adapter.py       the continuity capsule, atom and target contract
   cli_compile.py, cli_export.py          preview, stdout export and bundle export
   cli_artifacts.py, cli_publish.py       source hashes and confined artifact publishing
+  workspace/                             project identity, the per-project store, isolation
+  cli_workspace*.py                      the workspace commands
 tests/                                   round-trip, validator, layering, backend,
                                          fidelity, surface, orchestration, vault,
                                          drift, reconcile, continuity, and artwork proofs
 docs/art/                                the drawings above and the spec they render from
-project-docs/                            the F0, F1, R0, R1, R2, V2, V3, V4, MCP decisions
+project-docs/                            the F0, F1, R0, R1, R2, V2, V3, V4, MCP, W1 decisions
 ```
 
 See `project-docs/` for the schema reference, the layering derivation, the

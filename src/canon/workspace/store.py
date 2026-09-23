@@ -1,0 +1,235 @@
+"""store.py -- one record store per project, and the rule that keeps them apart.
+
+Layout under a store root (default `~/.canon/store`, or `CANON_STORE`):
+
+    projects/<project_id>/records.jsonl    accepted rows for that project
+    projects/<project_id>/proposed.jsonl   proposed rows awaiting a decision
+    projects/<project_id>/log.jsonl        every write, promotion and decision
+    projects/<project_id>/project.json     the path-clean identity
+    global/records.jsonl                   rows promoted to global scope
+    global/log.jsonl                       every promotion into global
+
+Isolation is enforced on read, not assumed from the directory name. Every row
+names its project, and reading a file refuses the whole file when any row names
+a different project: a misfiled row is corruption, so it is reported rather than
+filtered out. Another project's records are reachable only through
+`pool.visible_records(..., include_projects=...)`, which reads that project's
+own file and tags every record with the project it came from.
+
+New records land in `workspace` scope for the store's project. The store refuses
+a `global` record on `put`; `moves.promote` is the only way into global scope,
+and it writes a log entry in both the project log and the global log.
+
+Writers take the run lock for the project (and for global during a promotion),
+so two processes cannot interleave a read-modify-write on one file.
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+from contextlib import contextmanager
+from dataclasses import replace
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Iterator, Mapping
+
+from canon.concurrency import acquire_run_lock, release_run_lock
+from canon.schema import SCOPE_WORKSPACE, Record
+from canon.workspace.identity import ProjectIdentity, is_project_id
+from canon.workspace.rows import (
+    STATE_ACCEPTED,
+    STATE_PROPOSED,
+    ProjectRow,
+    decode_rows,
+    encode_rows,
+)
+
+STORE_ENV = "CANON_STORE"
+LOG_SCHEMA = "canon.project-log/v1"
+RECORDS_FILE = "records.jsonl"
+PROPOSED_FILE = "proposed.jsonl"
+LOG_FILE = "log.jsonl"
+PROJECT_FILE = "project.json"
+
+
+class IsolationError(Exception):
+    """A read would mix projects: a file holds a row bound to another project,
+    or a caller asked for another project's records without declaring it."""
+
+
+class StoreError(Exception):
+    """The store cannot complete a write: an unknown record, a global record
+    offered to `put`, or a project directory that names another project."""
+
+
+def default_store_root(environ: Mapping[str, str]) -> Path:
+    configured = environ.get(STORE_ENV)
+    return Path(configured) if configured else Path.home() / ".canon" / "store"
+
+
+def _sha256(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+class ProjectStore:
+    """The store for one project. Construct it with a ProjectIdentity to write;
+    a bare project id gives a store that can read but never writes the
+    identity manifest."""
+
+    def __init__(self, root: str | Path, project: ProjectIdentity | str,
+                 *, clock=_utc_now) -> None:
+        self.root = Path(root)
+        self.identity = project if isinstance(project, ProjectIdentity) else None
+        pid = project.project_id if self.identity else project
+        if not is_project_id(pid):
+            raise StoreError(f"not a project id: {pid!r}")
+        self.project_id: str = pid
+        self.clock = clock
+
+    # ---- paths ------------------------------------------------------------
+
+    def project_dir(self) -> Path:
+        return self.root / "projects" / self.project_id
+
+    def global_dir(self) -> Path:
+        return self.root / "global"
+
+    # ---- reads ------------------------------------------------------------
+
+    def rows(self, state: str = STATE_ACCEPTED) -> list[ProjectRow]:
+        name = RECORDS_FILE if state == STATE_ACCEPTED else PROPOSED_FILE
+        return read_bound(self.project_dir() / name, self.project_id,
+                           label=f"projects/{self.project_id}/{name}")
+
+    def records(self) -> list[Record]:
+        return [row.record for row in self.rows(STATE_ACCEPTED)]
+
+    def proposals(self) -> list[ProjectRow]:
+        return self.rows(STATE_PROPOSED)
+
+    def global_rows(self) -> list[ProjectRow]:
+        return read_bound(self.global_dir() / RECORDS_FILE, None,
+                           label=f"global/{RECORDS_FILE}")
+
+    def log_entries(self) -> list[dict]:
+        path = self.project_dir() / LOG_FILE
+        if not path.is_file():
+            return []
+        return [json.loads(line) for line in
+                path.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+    def next_ord(self) -> int:
+        ords = [r.record.provenance.create_ord
+                for r in self.rows(STATE_ACCEPTED) + self.rows(STATE_PROPOSED)]
+        known = [o for o in ords if isinstance(o, int)]
+        return (max(known) + 1) if known else 1
+
+    # ---- writes -----------------------------------------------------------
+
+    def put(self, record: Record, *, state: str = STATE_ACCEPTED,
+            origin: dict | None = None, action: str = "put") -> ProjectRow:
+        """Store `record` for this project, replacing any row with the same
+        (scope, id) in the same state file. A global record is refused."""
+        if record.scope != SCOPE_WORKSPACE:
+            raise StoreError(
+                f"record {record.id!r} has scope {record.scope!r}; new records "
+                "are workspace records, and promote is the only way to global")
+        row = ProjectRow(self.project_id, state, record, origin, None)
+        with self.locked():
+            self.ensure_manifest()
+            self.replace_row(row)
+            self.log(action, record, {"state": state})
+        return row
+
+    def decide(self, record_id: str, *, accept: bool, reason: str) -> ProjectRow:
+        """Accept a proposed row (move it to the accepted file) or reject it
+        (drop it from the proposed file). Both are logged."""
+        with self.locked():
+            proposed = self.rows(STATE_PROPOSED)
+            match = [r for r in proposed if r.record.id == record_id]
+            if not match:
+                raise StoreError(f"no proposed record with id {record_id!r}")
+            row = match[0]
+            rest = [r for r in proposed if r is not row]
+            write_atomic(self.project_dir() / PROPOSED_FILE, encode_rows(rest))
+            if accept:
+                row = replace(row, state=STATE_ACCEPTED)
+                self.replace_row(row)
+            action = "accept" if accept else "reject"
+            self.log(action, row.record, {"reason": reason, "origin": row.origin})
+        return row
+
+    # ---- helpers ----------------------------------------------------------
+
+    @contextmanager
+    def locked(self) -> Iterator[None]:
+        with run_lock(self.root, f"canon-project-{self.project_id}"):
+            yield
+
+    def replace_row(self, row: ProjectRow) -> None:
+        name = RECORDS_FILE if row.state == STATE_ACCEPTED else PROPOSED_FILE
+        current = [r for r in self.rows(row.state) if r.key != row.key]
+        write_atomic(self.project_dir() / name, encode_rows(current + [row]))
+
+    def ensure_manifest(self) -> None:
+        path = self.project_dir() / PROJECT_FILE
+        if path.is_file():
+            stored = json.loads(path.read_text(encoding="utf-8"))
+            if stored.get("project_id") != self.project_id:
+                raise StoreError("project directory names another project")
+            return
+        if self.identity is None:
+            raise StoreError("a store opened by id alone does not write")
+        write_atomic(path, json.dumps(self.identity.to_public(),
+                                       sort_keys=True, indent=2) + "\n")
+
+    def log(self, action: str, record: Record, detail: dict) -> None:
+        append_log(self.project_dir() / LOG_FILE, action, record,
+                    {**detail, "project_id": self.project_id}, self.clock())
+
+
+def read_bound(path: Path, expected: str | None, *, label: str) -> list[ProjectRow]:
+    """Read a row file and refuse it whole if any row names another project."""
+    if not path.is_file():
+        return []
+    rows = decode_rows(path.read_text(encoding="utf-8"), source=label)
+    foreign = sorted({str(r.project_id) for r in rows if r.project_id != expected})
+    if foreign:
+        raise IsolationError(
+            f"{label} holds rows bound to {foreign}, not {expected!r}; refusing "
+            "the file rather than mixing projects")
+    return rows
+
+
+def write_atomic(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f"{path.name}.tmp-{os.getpid()}")
+    tmp.write_bytes(text.encode("utf-8"))
+    os.replace(tmp, path)
+
+
+def append_log(path: Path, action: str, record: Record, detail: dict,
+                when: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    existing = path.read_text(encoding="utf-8") if path.is_file() else ""
+    seq = sum(1 for line in existing.splitlines() if line.strip()) + 1
+    entry = {"schema": LOG_SCHEMA, "seq": seq, "action": action,
+             "record_key": f"{record.scope}/{record.id}", "record_kind": record.kind,
+             "record_sha256": _sha256(record.to_json()), "time": when, **detail}
+    with path.open("a", encoding="utf-8", newline="\n") as handle:
+        handle.write(json.dumps(entry, sort_keys=True, ensure_ascii=False) + "\n")
+
+
+@contextmanager
+def run_lock(root: Path, name: str) -> Iterator[None]:
+    root.mkdir(parents=True, exist_ok=True)
+    lock = acquire_run_lock(root, name)
+    try:
+        yield
+    finally:
+        release_run_lock(lock)
