@@ -50,6 +50,21 @@ _SEGMENT_WORDS = ("key", "token", "secret", "password", "passwd", "pwd", "pass",
 # npm_lifecycle_event) is a name, unless it is as long as a real token.
 _RANDOM_TAIL = r"(?:[A-Za-z0-9]{30,}|(?=[A-Za-z0-9]*[A-Z0-9])[A-Za-z0-9]{8,})(?![A-Za-z0-9_])"
 _VALUE = r"(\"[^\"\n]{4,}\"|'[^'\n]{4,}'|<[^<>\n]*>|[^\s\"'`,;(){}\[\]]{4,})"
+# Every pattern runs in time linear in its input. A name is read whole
+# (atomic or possessive) and a lookahead asks whether it holds a secret word,
+# because a word between two optional runs of the same characters backtracks
+# once per split of a long name. A match starts where a name starts, never
+# inside a dotted or underscored run, and a URL scheme and a URL password
+# have a length cap, so a long run of text is scanned once, not once per
+# character.
+_NAME_START = r"(?<![A-Za-z0-9])(?<![A-Za-z0-9][_.\-])"
+_SCHEME = r"\b[a-zA-Z][a-zA-Z0-9+.\-]{0,255}://"
+
+
+def _segment_name(words: tuple[str, ...]) -> str:
+    """A captured name of `[_.-]`-joined segments, one of which is in `words`."""
+    return (r"(?=(?:[a-z0-9]+[_.\-])*(?:" + "|".join(words) + r")(?![a-z0-9]))"
+            r"((?>[a-z0-9]+(?:[_.\-][a-z0-9]+)*))")
 
 
 def beyond_markers(value: str) -> str:
@@ -66,8 +81,10 @@ def _prose_colon(match: re.Match[str], group: int) -> bool:
     head = match.string[match.start():match.start(group)]
     if "=" in head or ":" not in head or re.search(r"[_.\-]", head.split(":")[0]):
         return False
-    line_start = match.string.rfind("\n", 0, match.start()) + 1
-    if not match.string[line_start:match.start()].strip(" \t-*#>"):
+    # Only the last 256 characters before the name decide whether it starts
+    # its line, so a long line with many names is not re-read once per name.
+    window = match.string[max(0, match.start() - 256):match.start()]
+    if not window.rsplit("\n", 1)[-1].strip(" \t-*#>"):
         return False
     value = match.group(group).strip("\"'")
     return value.isalpha() and len(value) < 12
@@ -158,10 +175,9 @@ RULES: tuple[tuple[str, re.Pattern[str], int, Check], ...] = (
      cookie_value_is_secret),
     ("api-key-header", _p(r"(?i)\b(?:x-api-key|api-key|x-auth-token)\s*[:=]\s*[\"']?([^\s\"',;]{8,})"),
      1, None),
-    ("connection-string", _p(r"\b[a-zA-Z][a-zA-Z0-9+.\-]*://[^\s:/@\"']*:(?!\d+(?:/|$))([^\s@\"']+)@"),
+    ("connection-string", _p(_SCHEME + r"[^\s:/@\"']*:(?!\d+(?:/|$))([^\s@\"']{1,512})@"),
      1, None),
-    ("connection-string", _p(r"\b[a-zA-Z][a-zA-Z0-9+.\-]*://([^\s:/@\"']+)@"), 1,
-     userinfo_is_secret),
+    ("connection-string", _p(_SCHEME + r"([^\s:/@\"']+)@"), 1, userinfo_is_secret),
     ("url-credential", _p(
         r"(?i)[?&](?:access_token|token|api_key|apikey|key|secret|sig|signature|password|auth|"
         r"code|client_secret|x-amz-signature|x-amz-credential|x-amz-security-token)="
@@ -170,15 +186,15 @@ RULES: tuple[tuple[str, re.Pattern[str], int, Check], ...] = (
      1, None),
     ("npmrc-token", _p(r":_(?:authToken|auth|password)=([^\s\"']{8,})"), 1, None),
     ("json-secret", _p(
-        r"(?i)\\?\"[a-z0-9_\-]*(?:api[_-]?key|token|secret|password|passwd|credential)"
-        r"[a-z0-9_\-]*\\?\"\s*:\s*\\?\"([^\"\\\n]{4,})\\?\""), 1, data_value_is_secret),
+        r"(?i)\\?\"(?=[a-z0-9_\-]*(?:api[_-]?key|token|secret|password|passwd|credential))"
+        r"[a-z0-9_\-]*+\\?\"\s*:\s*\\?\"([^\"\\\n]{4,})\\?\""), 1, data_value_is_secret),
     ("password-field", _p(
-        r"(?i)(?<![A-Za-z0-9])(?:[a-z0-9]+[_.\-])*(?:password|passwd|pwd|pass|passphrase)"
+        r"(?i)" + _NAME_START + r"(?:[a-z0-9]+[_.\-])*(?:password|passwd|pwd|pass|passphrase)"
         r"\s*[:=]\s*" + _VALUE), 1, value_is_secret),
     ("env-assignment", _p(
-        r"\b(?:[A-Z][A-Z0-9_]*)?" + _SECRET_WORD + r"[A-Z0-9_]*\s*[=:]\s*"
+        r"\b(?=[A-Z0-9_]*" + _SECRET_WORD + r")[A-Z][A-Z0-9_]*+\s*[=:]\s*"
         r"(\"[^\"\n]{4,}\"|'[^'\n]{4,}'|<[^<>\n]*>|[^\s\"']{4,})"), 1, value_is_secret),
     ("env-assignment", _p(
-        r"(?i)(?<![A-Za-z0-9_.\-])(?<!\$\{)((?:[a-z0-9]+[_.\-])*(?:" + "|".join(_SEGMENT_WORDS) +
-        r")(?:[_.\-][a-z0-9]+)*)\s*[=:]\s*" + _VALUE), 2, value_is_secret),
+        r"(?i)(?<![A-Za-z0-9_.\-])(?<!\$\{)" + _segment_name(_SEGMENT_WORDS) +
+        r"\s*[=:]\s*" + _VALUE), 2, value_is_secret),
 )

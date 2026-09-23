@@ -40,6 +40,7 @@ as the last check before a store write and a render.
 from __future__ import annotations
 
 import re
+from bisect import bisect_left
 from dataclasses import dataclass
 
 from canon.workspace.scrub_rules import (
@@ -58,16 +59,29 @@ class ScrubResult:
     hits: dict[str, int]
 
 
-def _cuts_a_marker(text: str, start: int, end: int) -> bool:
-    """True when the span starts or ends inside an earlier rule's marker, so a
-    rule never re-reads the text of `[REDACTED:code]` as a secret."""
-    return any(m.start() < start < m.end() or m.start() < end < m.end()
-               for m in MARKER_RE.finditer(text))
+class _Markers:
+    """The earlier rules' markers in one text, read once per rule pass, so a
+    text with many redactions is not re-scanned once per match."""
+
+    def __init__(self, text: str) -> None:
+        spans = [m.span() for m in MARKER_RE.finditer(text)]
+        self.starts = [s for s, _ in spans]
+        self.ends = [e for _, e in spans]
+
+    def inside(self, pos: int) -> bool:
+        i = bisect_left(self.starts, pos) - 1  # the last marker starting before pos
+        return i >= 0 and pos < self.ends[i]
+
+    def cut(self, start: int, end: int) -> bool:
+        """True when the span starts or ends inside an earlier rule's marker,
+        so a rule never re-reads the text of `[REDACTED:code]` as a secret."""
+        return self.inside(start) or self.inside(end)
 
 
-def _secret_span(match: re.Match[str], group: int, check: Check) -> tuple[int, int] | None:
+def _secret_span(match: re.Match[str], group: int, check: Check,
+                 markers: _Markers) -> tuple[int, int] | None:
     value = match.group(group)
-    if not value or _cuts_a_marker(match.string, *match.span(group)):
+    if not value or markers.cut(*match.span(group)):
         return None
     if not beyond_markers(value):
         return None
@@ -86,8 +100,9 @@ def scrub(text: str) -> ScrubResult:
     for code, pattern, group, check in RULES:
         out: list[str] = []
         last = 0
+        markers = _Markers(text)
         for match in pattern.finditer(text):
-            span = _secret_span(match, group, check)
+            span = _secret_span(match, group, check, markers)
             if span is None or span[0] < last:
                 continue
             out.append(text[last:span[0]])
@@ -103,8 +118,9 @@ def scrub(text: str) -> ScrubResult:
 def find_secrets(text: str) -> list[str]:
     """The codes of every rule that still matches `text`, sorted."""
     found = set()
+    markers = _Markers(text)
     for code, pattern, group, check in RULES:
-        if any(_secret_span(m, group, check) for m in pattern.finditer(text)):
+        if any(_secret_span(m, group, check, markers) for m in pattern.finditer(text)):
             found.add(code)
     return sorted(found)
 

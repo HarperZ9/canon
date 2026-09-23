@@ -466,7 +466,9 @@ take the same name and shape rules. A one-word name followed by a colon
 inside a sentence ("Refresh token: handle expiry") is prose unless its value
 has a digit, a symbol or twelve letters. Each match becomes
 `[REDACTED:<rule>]`. The report counts the hits by rule; it never stores the
-value or a digest of it. Two more checks sit behind the scrubber: the store refuses any record that still matches
+value or a digest of it. Every rule runs in time linear in its input, so a long
+or hostile line cannot stall an import or a store write. Two more checks sit
+behind the scrubber: the store refuses any record that still matches
 (`secret_quarantine`), and a brief or an instruction region that would carry a
 match is refused before it is written. The control test plants a canary for
 each rule in both fixtures and asserts none reaches the store files, the

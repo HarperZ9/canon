@@ -510,3 +510,24 @@ setting.
 there, falling back to `~/.codex` under `--home` only when it is unset, which
 is the order Codex uses. The refusal says the limit is
 `project_doc_max_bytes`, where the number came from, and where to raise it.
+
+## D-140 The scrubber runs in time linear in its input
+
+D-136 added a path pattern with a nested quantifier, `(?:[\w.~@+-]+[\\/]?)*`.
+A value after a secret-named key that started like a path and failed later
+(`KEY_FILE=/home/runner/work/repository_name/keys.pem:ro`, a `?query`, a `//`)
+took time that doubled with each character. The call is on the import path,
+the store write and the store backstop, none of which has a timeout, so
+`canon workspace task` with that text never returned. Four rules also ran in
+time quadratic in a long name run (`a.a.a...` of 40,000 characters took 32
+seconds), and every match re-scanned the text for earlier redactions.
+
+The path pattern now requires a separator after each segment it repeats,
+which accepts the same strings and cannot split a segment two ways. A name is
+read whole and a lookahead asks whether it holds a secret word, a match
+starts only where a name starts, a URL scheme is capped at 256 characters and
+a URL password at 512, and a rule pass reads the earlier markers once. A
+fuzz run of 160,000 generated texts gave the same output before and after,
+except for the exponential cases. `tests/test_workspace_scrub_time.py` runs
+the reported inputs and seven long runs in a child process under a timeout,
+so a regression fails the suite instead of hanging it.

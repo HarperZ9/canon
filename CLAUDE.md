@@ -332,7 +332,8 @@ level up, in the stored row:
   value after a secret-named key is judged by its shape, D-137 a markdown
   brief says on the command line what it left out, D-138 a URL user part is
   redacted by its shape, not by a length floor, D-139 the Codex budget is
-  read where Codex reads its config (`CODEX_HOME`, else `~/.codex`).
+  read where Codex reads its config (`CODEX_HOME`, else `~/.codex`), D-140
+  the scrubber runs in time linear in its input.
 
 Later phases (verifier, migration legs, region installation into an existing
 file, the global SOUL.md and the global GEMINI.md surfaces) aim at this same
