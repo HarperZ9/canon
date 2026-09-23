@@ -96,12 +96,16 @@ def assert_writable(path: str, *, home: str, workspace: str) -> None:
 def assert_no_link(path: str, root: str) -> None:
     """Raise SurfaceError when `path`, or a directory between it and `root`,
     is a symlink, junction or other reparse point. The allow-list check is
-    lexical; a link would carry the write outside the root. A root that does
-    not exist on disk (injected IO in a test) has nothing to follow."""
+    lexical; a link would carry the write outside the root. Only the part below
+    the root is checked, so a root that sits behind a link itself is fine. A
+    root that does not exist on disk (injected IO in a test) has nothing to
+    follow."""
     if not os.path.isdir(root):
         return
+    real = os.path.realpath(root)
     try:
-        resolve_under_root(path, root=root, reject_reparse=True)
+        resolve_under_root(os.path.join(real, os.path.relpath(path, root)), root=real,
+                           reject_reparse=True)
     except PathPolicyError as exc:
         raise SurfaceError(f"path runs through a link: {exc}") from exc
 

@@ -152,3 +152,18 @@ def test_a_file_with_no_region_is_told_the_two_lines_to_add(project):
     message = json.loads(out)["message"]
     assert code == EX_CONFLICT
     assert "<!-- canon:begin scope=workspace -->" in message and "<!-- canon:end -->" in message
+
+
+def test_a_switch_refused_by_a_held_lock_leaves_no_receipt(project):
+    from canon.concurrency import acquire_run_lock, release_run_lock
+
+    tmp_path, repo, store, args = project
+    receipt = tmp_path / "r.json"
+    lock = acquire_run_lock(store.root, f"canon-project-{store.project_id}")
+    try:
+        code, out, _ = _switch(args, "codex", "--create", "--receipt", str(receipt))
+    finally:
+        release_run_lock(lock)
+    assert _failure(out) == "store_busy" and not receipt.exists()
+    assert _switch(args, "codex", "--create", "--receipt", str(receipt))[0] == EX_OK
+    assert json.loads(receipt.read_text(encoding="utf-8"))["schema"] == "canon.handoff-receipt/v1"

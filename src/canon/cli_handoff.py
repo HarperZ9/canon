@@ -18,7 +18,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import TextIO
 
-from .cli_files import instruction_writer, read_text, write_new_files
+from .cli_files import check_new_files, instruction_writer, read_text, write_new_files
 from .cli_workspace_common import (
     CommandFailure,
     Output,
@@ -134,10 +134,11 @@ def _switch(parsed, ctx: WorkspaceContext, out: Output, environ) -> int:
                        budget_lines=parsed.budget_lines, declared=declared,
                        receipt_hint=hint)
     overwritten = _refuse_pending_edits(ctx, plan, parsed.dry_run)
-    if parsed.receipt:
-        write_new_files([(parsed.receipt, _receipt_text(plan.receipt))])
+    receipt = [(parsed.receipt, _receipt_text(plan.receipt))] if parsed.receipt else []
+    check_new_files([path for path, _ in receipt])
     if not parsed.dry_run:
         _commit(ctx, plan, target)
+    write_new_files(receipt)
     rel = plan.surface.relative_path if plan.surface else None
     lines = [f"{target.display}: {_status_words(plan.status, parsed.dry_run, rel)}",
              f"brief: {len(plan.brief.included)} records, "

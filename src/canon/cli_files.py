@@ -52,15 +52,21 @@ def instruction_writer(root: str, *, create: bool):
     return write
 
 
-def write_new_files(pairs: list[tuple[str, str]]) -> None:
-    """Write each (path, text) as a new file, or none of them. Every
-    destination is checked first (it must not exist and its folder must), and
-    a file already written is removed when a later one fails."""
-    for path, _ in pairs:
+def check_new_files(paths: list[str]) -> None:
+    """Refuse before anything is written when a destination exists or its
+    folder does not."""
+    for path in paths:
         if os.path.lexists(path):
             raise CommandFailure("conflict", f"{path} already exists; not overwritten")
         if not Path(path).parent.is_dir():
             raise CommandFailure("io_error", f"the folder for {path} does not exist")
+
+
+def write_new_files(pairs: list[tuple[str, str]]) -> None:
+    """Write each (path, text) as a new file, or none of them. Every
+    destination is checked first (it must not exist and its folder must), and
+    a file already written is removed when a later one fails."""
+    check_new_files([path for path, _ in pairs])
     written: list[str] = []
     try:
         for path, text in pairs:
