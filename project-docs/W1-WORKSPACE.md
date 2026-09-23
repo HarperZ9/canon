@@ -291,8 +291,8 @@ until it is accepted.
 
 | source | file | what is read | confirmed against |
 |---|---|---|---|
-| Claude Code | a session `.jsonl` | `user` and `assistant` entries (`message.content` as text or blocks), `summary`, `sessionId`, `cwd`, `gitBranch`, `TodoWrite` inputs, `Edit`/`Write`/`MultiEdit`/`NotebookEdit` file paths | two public parsers of the format and Anthropic's note that the format is internal and changes between versions |
-| Codex CLI | a rollout `.jsonl` (Codex 0.32 or later) | `session_meta` (id, cwd, `git.repository_url`, `git.branch`), `response_item` messages (`input_text`, `output_text`), `update_plan` calls, file names in `apply_patch` | the openai/codex source |
+| Claude Code | a session `.jsonl` | `user` and `assistant` entries (`message.content` as text or blocks) on the live branch (`uuid`, `parentUuid`, `logicalParentUuid`), a `summary` whose `leafUuid` names an entry of the file, an `ai-title` with this file's `sessionId`, `sessionId`, `cwd`, `gitBranch`, `TodoWrite` inputs, the `TaskCreate`/`TaskUpdate` task list (numbers bound from "Task #N created successfully"), `Edit`/`Write`/`MultiEdit`/`NotebookEdit` file paths | two public parsers of the format and Anthropic's note that the format is internal and changes between versions |
+| Codex CLI | a rollout `.jsonl` (Codex 0.32 or later) | `session_meta` (the thread `id`, which wins over the root `session_id` a sub-agent shares, cwd, `git.repository_url`, `git.branch`), `turn_context` cwd, `response_item` messages (`input_text`, `output_text`), `update_plan` calls, file names in `apply_patch` resolved against the session cwd, `event_msg` `thread_rolled_back` | the openai/codex source |
 
 Both formats were read from public sources on 2026-09-23, and the test fixtures
 in `tests/fixtures/transcripts/` follow them. Neither is a stable public
@@ -305,16 +305,41 @@ Fixed patterns, not a model, so the same file always gives the same proposals:
 
 | rule | reads | proposes |
 |---|---|---|
-| `plan-tool` | the last `TodoWrite` (Claude Code) or `update_plan` (Codex) call | a work item per pending or in-progress step |
+| `plan-tool` | the last `TodoWrite` call or the task list `TaskCreate`/`TaskUpdate` built (Claude Code), or the last `update_plan` call (Codex) | a work item per pending or in-progress step |
 | `todo-marker` | `TODO: ...` or an unchecked `- [ ] ...` in a message | an open work item |
 | `decision-phrase` | "we decided to X (because Y)", "we went with X" | a decision with status `proposed` |
 | `failed-phrase` | "I tried X but Y", "X did not work (because Y)" | a decision with status `rejected` and X as a rejected alternative with Y as its reason |
-| `session-summary` | Claude Code's summary line | the focus goal |
+| `session-summary` | Claude Code's own summary line, else its own `ai-title` | the focus goal |
 | `first-prompt` | the first line of the first user prompt, when there is no summary | the focus goal |
 
 The focus proposal carries the session's branch and up to ten edited files as
-areas, as paths inside the project; an edited path outside the project is
-dropped and counted.
+areas, as paths inside the project; an edited path outside the project, or
+inside a nested repository under it, is dropped and counted.
+
+User-role text the host wrote itself is never mined. For Claude Code that is a
+slash command and its local output, bash-mode input and output, a compaction
+summary (`isCompactSummary`, or text that opens with "This session is being
+continued"), and `system-reminder`, `ide_selection` and `ide_opened_file`
+blocks inside a message, which are cut out before the rules run. For Codex it
+is every marker in `contextual_user_message.rs` that has a marker string:
+environment context, user instructions, `AGENTS.md` instructions, a user shell
+command and its output (counted as tool output), a skill, a sub-agent notice,
+an aborted-turn notice, and internal or goal context. Codex's hook prompt
+fragment has no marker canon knows; it is not dropped (an honest gap).
+
+A Codex `thread_rolled_back {num_turns}` discards every candidate, plan and
+edit gathered since the start of the last `num_turns` user turns. A Claude Code
+branch the person rewound away from is not mined: the live branch runs from the
+last main-thread entry back to the root, and an entry off it is dropped when
+its branch starts with a typed prompt. A branch that starts with a tool result
+is kept, so a fork the tool machinery makes is never taken for a rewind.
+
+A proposal id digests the importer, the session (the Codex thread id), the
+line, the rule and an index. When an accepted record already holds that id
+and came from another source file, the id is minted again with the file name
+in its key, so two files that share a session id never replace each other.
+A session id that is not an id shape, or looks like a secret, is dropped and
+counted instead of stored.
 
 ### Declared loss
 
@@ -322,18 +347,25 @@ Each importer names every category of content it drops, and the report counts
 every one, including the zero counts. Common categories: text that matched no
 rule, a repeated candidate, plan calls before the last, completed plan steps,
 paths outside the project, a truncated last line, a candidate that failed
-validation, images, tool calls and tool output. Claude Code adds thinking
-blocks, sidechain entries, `isMeta` messages, message metadata and the entry
-types that carry no conversation. Codex adds session state, `event_msg` lines,
-reasoning, injected environment context, developer and system messages, and the
-response items it does not read.
+validation, images, tool calls and tool output, and a session id that is not
+an id. Claude Code adds thinking blocks, sidechain entries, `isMeta` messages,
+message metadata, the entry types that carry no conversation (among them
+`agent-setting` and `pr-link`), local commands, compaction summaries, injected
+blocks, abandoned branches, and summaries that describe another session or
+were replaced. Codex adds session state (including a `configuration_update`
+item), `event_msg` lines other than a rollback, reasoning, the user-role text
+Codex writes itself, developer and system messages, rolled-back candidates, and
+the response items it does not read (including `compaction_summary` and
+`ghost_snapshot` from older rollouts).
 
 Content no category covers (an entry type, content block or message role the
 importer has not seen) is an undeclared loss and refuses the import with
-`undeclared_loss`, naming the label and the lines. `--drop-type <label>`
-declares that drop for one run, and the report lists it under the drops the
-person declared. A malformed last line is a declared truncation; a malformed
-line anywhere else refuses the import.
+`undeclared_loss`, naming the label and the lines and printing the flag to add.
+`--drop-type <label>` declares that drop for one run; the bare type name
+(`--drop-type brand-new-entry` for `entry type 'brand-new-entry'`) works too,
+and the report lists it under the drops the person declared. A malformed last
+line with no newline after it is a declared truncation; a malformed line that
+ends in a newline, anywhere in the file, is corruption and refuses the import.
 
 ### Secrets
 
@@ -371,11 +403,16 @@ finds the canaries.
 ### Project check
 
 A Codex rollout names its repository in `git.repository_url`; a Claude Code
-session names its working directory in `cwd`. When the source names a
-different project than the one being imported into, the import is refused with
-`isolation_refused` unless `--accept-foreign-source` is given, and the report
-records the check either way. A source that names neither is recorded as
-`unverified`.
+session names its working directory in `cwd`. A working directory is compared
+by project identity, not by path prefix: a nested repository or a submodule
+inside this checkout is another project, and a sibling worktree outside it is
+this one. The identity of a working directory is derived without writing a
+nonce into it; a directory that no longer exists falls back to containment,
+with a `.git` entry between it and the root counting as another project. When
+the source names a different project than the one being imported into, the
+import is refused with `isolation_refused` unless `--accept-foreign-source` is
+given, and the report records the check either way. A source that names
+neither is recorded as `unverified`.
 
 ### Provenance
 

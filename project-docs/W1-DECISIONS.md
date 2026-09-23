@@ -346,3 +346,26 @@ string is now scrubbed whole before extraction, and the prefix rules take short
 minimums so a cut token is still caught. A placeholder test that matched a
 prefix skipped `$2b$12$...` and a value that joined an earlier redaction to
 more text; placeholders are now matched against the whole value.
+
+## D-132 The importers read the host's own text as the host's, and compare projects by identity
+
+Both hosts put text in the user role that the person never typed: Claude Code's
+slash commands, local command output, bash-mode output and compaction
+summaries, and Codex's shell command output, skills and sub-agent notices. The
+importers mined it as typed text, so a `cat NOTES.md` became a decision. Each
+now drops that text by its marker under a named category. A rolled-back Codex
+turn and a rewound Claude Code branch are dropped the same way, and a Claude
+Code summary is used only when it describes this file, since a summary line
+routinely describes another session. The Claude Code task tools that replaced
+TodoWrite are read as the plan.
+
+The project check compared paths, so a session from a nested repository passed
+as this project and a session from a sibling worktree was refused. It now
+compares project identities, derived without writing anything into the other
+repository. A Codex sub-agent's rollout shares the root's `session_id`, so ids
+now key on the thread id, and an accepted record from another file is never
+replaced by a new proposal with the same id.
+
+A malformed last line was always read as a truncation. A writer appends a line
+and its newline together, so only an unterminated last line is a truncation;
+a malformed line that ends in a newline is corruption and refuses.

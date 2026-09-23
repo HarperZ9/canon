@@ -50,7 +50,11 @@ and the version is unchanged.
   `reject` needs a reason and is remembered. `accept` refuses a proposal whose
   record changed after the proposal was made, unless `--force` is given.
 - Each importer declares what it drops and counts it; content it has not seen
-  refuses the import unless declared with `--drop-type`. A source that names a
+  refuses the import unless declared with `--drop-type` (the label or the bare
+  type name). Text the host wrote in the user role (slash commands, shell
+  output, compaction summaries, skills, sub-agent notices), rolled-back Codex
+  turns and rewound Claude Code branches are not mined, and the Claude Code
+  task tools are read as the plan. A source that names a
   different repository or working directory is refused unless
   `--accept-foreign-source` is given.
 - Adds a secret scrubber in front of every import. It scrubs each source string

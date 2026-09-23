@@ -101,7 +101,8 @@ still looks like one.
 Each importer lists what it drops (thinking blocks, tool output, system
 entries and more) and counts it in its report. A session with content the
 importer has not seen is refused until you declare that drop with
-`--drop-type`, so a change in a tool's format cannot lose data quietly. A
+`--drop-type`, so a change in a tool's format cannot lose data quietly. The
+refusal prints the flag to add, for example `--drop-type brand-new-entry`. A
 session that names a different repository is refused unless you pass
 `--accept-foreign-source`.
 

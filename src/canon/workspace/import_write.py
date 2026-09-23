@@ -10,6 +10,7 @@ rejected before with the same content, is reported and not written again.
 from __future__ import annotations
 
 import hashlib
+import shlex
 
 from canon.schema import Record
 from canon.workspace import authoring
@@ -20,6 +21,7 @@ from canon.workspace.import_common import (
     Extraction,
     ImportRefused,
     Source,
+    bare_label,
     proposal_id,
     project_check,
     read_jsonl,
@@ -45,10 +47,26 @@ def _refuse_early(identity: ProjectIdentity, extraction: Extraction,
     if undeclared:
         where = "; ".join(f"{label} at lines {lines[:5]}"
                           for label, lines in sorted(undeclared.items()))
+        flags = " ".join(sorted({f"--drop-type {shlex.quote(bare_label(label))}"
+                                 for label in undeclared}))
         raise ImportRefused(
             "undeclared_loss", f"the importer does not know what it would drop: {where}. "
-            "Declare each with --drop-type LABEL to import without it")
+            f"To import without it, run the import again with {flags}")
     return check
+
+
+def _record_id(importer: str, key: str, cand, index: int, source: Source,
+               accepted: dict) -> str:
+    """The proposal id, minted again with the source file in its key when an
+    accepted record already holds the id but came from another file, so two
+    sessions that share a session id never replace each other's records."""
+    rid = proposal_id(importer, key, cand, index)
+    prior = accepted.get(rid)
+    native = prior.provenance.native_id if prior is not None else None
+    if rid == authoring.FOCUS_ID or native is None or \
+            native.startswith(f"{importer}:{source.name}:"):
+        return rid
+    return proposal_id(importer, f"{key}\n{source.name}", cand, index)
 
 
 def build_proposals(store: ProjectStore, extraction: Extraction, source: Source, *,
@@ -58,6 +76,7 @@ def build_proposals(store: ProjectStore, extraction: Extraction, source: Source,
     raw = {n: line for n, _obj, line in source.lines}
     slots: dict[tuple[int, str], int] = {}
     ordinal = store.next_ord()
+    accepted, _ = seen_before(store)
     out: list[tuple[Record, dict]] = []
     for cand in extraction.candidates:
         index = slots.get((cand.line, cand.rule), 0)
@@ -65,8 +84,8 @@ def build_proposals(store: ProjectStore, extraction: Extraction, source: Source,
         data = scrub_value(cand.data, hits)
         try:
             record = authoring.build(
-                cand.kind, proposal_id(importer, key, cand, index), data, ordinal,
-                harness=importer, source_hash=_sha(raw.get(cand.line, "")),
+                cand.kind, _record_id(importer, key, cand, index, source, accepted), data,
+                ordinal, harness=importer, source_hash=_sha(raw.get(cand.line, "")),
                 native_id=f"{importer}:{source.name}:{cand.line}",
                 session_id=extraction.session_id)
         except authoring.AuthoringError:

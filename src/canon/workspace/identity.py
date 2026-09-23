@@ -201,9 +201,12 @@ def _digest_id(method: str, key: str) -> str:
 
 
 def derive_identity(workspace: str | Path, *, remote_url: str | None = None,
-                    ceilings: frozenset[Path] | None = None) -> ProjectIdentity:
+                    ceilings: frozenset[Path] | None = None,
+                    write_nonce: bool = True) -> ProjectIdentity:
     """Derive the identity of the project containing `workspace`. Pass
-    `remote_url` to override the remote read from the git config."""
+    `remote_url` to override the remote read from the git config, and
+    `write_nonce=False` to derive another repository's identity without
+    writing its nonce (it then falls back to its path key)."""
     start = Path(workspace).resolve()
     if not start.is_dir():
         raise ProjectIdentityError("workspace is not a directory")
@@ -213,11 +216,12 @@ def derive_identity(workspace: str | Path, *, remote_url: str | None = None,
         url = remote_url if remote_url is not None else read_remote_url(root)
     except GitConfigError as exc:
         raise ProjectIdentityError(str(exc)) from exc
-    method, key, label = _derive_key(root, name, url)
+    method, key, label = _derive_key(root, name, url, write_nonce)
     return ProjectIdentity(_digest_id(method, key), method, key, label, root)
 
 
-def _derive_key(root: Path, name: str | None, url: str | None) -> tuple[str, str, str]:
+def _derive_key(root: Path, name: str | None, url: str | None,
+                write_nonce: bool) -> tuple[str, str, str]:
     if name:
         return METHOD_CONFIG, "project:" + name, name
     label = root.name or "project"
@@ -227,7 +231,7 @@ def _derive_key(root: Path, name: str | None, url: str | None) -> tuple[str, str
             # A path remote names a local directory; keep the path out of the key.
             return METHOD_REMOTE, "local-sha256:" + _sha256(key), label
         return METHOD_REMOTE, key, key
-    nonce = project_nonce(root)
+    nonce = project_nonce(root, create=write_nonce)
     if nonce:
         return METHOD_PATH, "nonce-sha256:" + _sha256(nonce), label
     return METHOD_PATH, "path-sha256:" + _sha256(os.path.normcase(str(root))), label

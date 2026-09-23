@@ -7,14 +7,15 @@ rules hold for every importer:
    drops. Every line it reads is either used or counted under one of those
    categories. Content that fits no category (an entry type the importer has
    never seen) is an undeclared loss and refuses the import, unless the person
-   running it declares that drop by name with `--drop-type`, which the report
-   records.
+   running it declares that drop with `--drop-type`, by its label or by the
+   bare type name, which the report records.
 2. Scrubbing. Every source string is scrubbed whole before any extraction rule
    reads it, so a length cap or a line break cannot cut a secret below the
    length its rule needs. Every candidate is scrubbed again after extraction,
    and the store refuses anything that still matches.
 3. Project check. When the source names its repository or working directory,
-   it must be this project, or the person must say `--accept-foreign-source`.
+   it must be this project, or the person must say `--accept-foreign-source`
+   (`import_project.py`).
 4. Proposals only. Imported records are written as proposed rows with an origin
    naming the source file, its digest, the line and the rule. Nothing renders
    until someone accepts it. A proposal already accepted, or rejected before, is
@@ -23,10 +24,8 @@ rules hold for every importer:
 from __future__ import annotations
 
 import hashlib
-import json
-import os
+import re
 from dataclasses import dataclass, field
-from pathlib import Path
 
 from canon.versions import PIN_IMPORT_REPORT
 from canon.workspace import authoring
@@ -37,17 +36,16 @@ from canon.workspace.extract import (
     plan_candidates,
     text_candidates,
 )
-from canon.workspace.scrub import merge_hits, scrub
-from canon.workspace.identity import (
-    METHOD_REMOTE,
-    ProjectIdentity,
-    ProjectIdentityError,
-    normalize_remote,
-)
+from canon.workspace.identity import ProjectIdentity
+from canon.workspace.import_project import project_check, relative_area  # noqa: F401
+from canon.workspace.import_source import ImportRefused, Source, read_jsonl  # noqa: F401
+from canon.workspace.scrub import find_secrets, merge_hits, scrub
 
 REPORT_SCHEMA = PIN_IMPORT_REPORT.kind_tag
 _SHORT = {"work-item": "task", "adr-decision": "decision",
           "environment-constraint": "constraint"}
+_ID_SHAPE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+_QUOTED = re.compile(r"'([^']*)'")
 DOES_NOT_PROVE = (
     "Proposals come from fixed text patterns. They are candidates for a person to "
     "accept or reject, not facts about the project.",
@@ -61,57 +59,16 @@ COMMON_DROPS = {
     "unmatched-text": "a message text block that matched no extraction rule",
     "duplicate-candidate": "a candidate already proposed from an earlier line",
     "superseded-plan": "a plan tool call before the last one",
-    "closed-plan-step": "a completed or empty plan step",
-    "outside-area": "an edited file path outside the project root",
-    "truncated-tail": "a final line cut off while the session was being written",
+    "closed-plan-step": "a completed, deleted or empty plan step",
+    "outside-area": "an edited file path outside the project root or in a nested repository",
+    "truncated-tail": "an unterminated final line cut off while the session was being written",
     "invalid-candidate": "a candidate that did not validate after scrubbing",
     "image": "an image or audio content part",
-    "tool-call": "a tool call other than the plan tool and file edits; its input is not stored",
+    "tool-call": "a tool call other than the plan tools and file edits; its input is not stored",
     "tool-output": "a tool result; its text is not stored",
+    "session-id": "a session id that is not an id shape or looks like a secret; it is not stored",
 }
 MAX_AREAS = 10
-
-
-class ImportRefused(Exception):
-    def __init__(self, code: str, message: str) -> None:
-        super().__init__(message)
-        self.code = code
-
-
-@dataclass(frozen=True, slots=True)
-class Source:
-    name: str
-    sha256: str
-    lines: tuple[tuple[int, dict, str], ...]
-    line_count: int
-    truncated_tail: bool
-
-
-def read_jsonl(path: str | Path) -> Source:
-    """Parse a JSONL session file. A malformed last line is a declared,
-    reported truncation (a session still being written); a malformed line
-    anywhere else refuses the import."""
-    raw = Path(path).read_bytes()
-    try:
-        text = raw.decode("utf-8")
-    except UnicodeDecodeError as exc:
-        raise ImportRefused("unsupported_format", "the source is not UTF-8") from exc
-    physical = text.split("\n")
-    numbered = [(n, line) for n, line in enumerate(physical, start=1) if line.strip()]
-    parsed, truncated = [], False
-    for index, (n, line) in enumerate(numbered):
-        try:
-            obj = json.loads(line)
-        except json.JSONDecodeError as exc:
-            if index == len(numbered) - 1:
-                truncated = True
-                continue
-            raise ImportRefused("unsupported_format", f"line {n} is not JSON") from exc
-        if not isinstance(obj, dict):
-            raise ImportRefused("unsupported_format", f"line {n} is not a JSON object")
-        parsed.append((n, obj, line))
-    return Source(Path(path).name, hashlib.sha256(raw).hexdigest(), tuple(parsed),
-                  len(numbered), truncated)
 
 
 class Ledger:
@@ -131,10 +88,28 @@ class Ledger:
         self.counts[category] += n
 
     def unknown(self, label: str, line: int) -> None:
-        if label in self.user_drops:
+        if label in self.user_drops or bare_label(label) in self.user_drops:
             self.user_counts[label] = self.user_counts.get(label, 0) + 1
         else:
             self.undeclared.setdefault(label, []).append(line)
+
+
+def bare_label(label: str) -> str:
+    """The type name inside a label such as `entry type 'x'`, which
+    `--drop-type` also accepts on its own."""
+    match = _QUOTED.search(label)
+    return match.group(1) if match else label
+
+
+def accept_session_id(value: object, ledger: Ledger) -> str | None:
+    """A session id the store may keep: an id shape that looks like no secret.
+    Anything else is dropped and counted, never stored."""
+    if not isinstance(value, str):
+        return None
+    if _ID_SHAPE.match(value) and not find_secrets(value):
+        return value
+    ledger.drop("session-id")
+    return None
 
 
 @dataclass
@@ -145,39 +120,6 @@ class Extraction:
     repository_url: str | None = None
     cwds: list[str] = field(default_factory=list)
     hits: dict[str, int] = field(default_factory=dict)
-
-
-def project_check(identity: ProjectIdentity, extraction: Extraction) -> dict:
-    """Whether the source says it belongs to this project. The report names
-    the check and never a local path."""
-    url = extraction.repository_url
-    if url and identity.method == METHOD_REMOTE:
-        try:
-            key = normalize_remote(url)
-        except ProjectIdentityError:
-            key = None
-        if key and not key.startswith("local:"):
-            status = "match" if key == identity.key else "mismatch"
-            return {"status": status, "by": "repository_url", "source_key": key}
-    if extraction.cwds:
-        root = os.path.normcase(os.path.normpath(str(identity.root)))
-        inside = all(_inside(os.path.normcase(os.path.normpath(c)), root)
-                     for c in extraction.cwds)
-        return {"status": "match" if inside else "mismatch", "by": "working_directory"}
-    return {"status": "unverified", "by": "none"}
-
-
-def _inside(path: str, root: str) -> bool:
-    return path == root or path.startswith(root.rstrip("\\/") + os.sep)
-
-
-def relative_area(path: str, identity: ProjectIdentity) -> str | None:
-    """A file path as a path inside the project, or None when it is outside."""
-    root = os.path.normcase(os.path.normpath(str(identity.root)))
-    target = os.path.normpath(path if os.path.isabs(path) else os.path.join(root, path))
-    if not _inside(os.path.normcase(target), root) or os.path.normcase(target) == root:
-        return None
-    return os.path.relpath(target, str(identity.root)).replace("\\", "/")
 
 
 def proposal_id(importer: str, key: str, cand: Candidate, index: int) -> str:
@@ -192,7 +134,8 @@ def proposal_id(importer: str, key: str, cand: Candidate, index: int) -> str:
 class Collector:
     """Gathers what the rules find while an importer walks a session, then
     orders it: focus first, then the last plan's open steps, then text
-    candidates in source order."""
+    candidates in source order. `start_turn` and `roll_back` let an importer
+    discard the turns a session rolled back."""
 
     identity: ProjectIdentity
     ledger: Ledger
@@ -204,6 +147,7 @@ class Collector:
     first_prompt: tuple | None = None
     branch: str | None = None
     hits: dict = field(default_factory=dict)
+    turns: list = field(default_factory=list)
 
     def clean(self, text: str) -> str:
         """`text` scrubbed whole, its hits counted for the report."""
@@ -229,6 +173,26 @@ class Collector:
 
     def add_edit(self, path: str) -> None:
         self.edits[path] = self.edits.get(path, 0) + 1
+
+    def start_turn(self) -> None:
+        self.turns.append((len(self.text), len(self.plans), dict(self.edits),
+                           set(self.seen.keys), self.seen.duplicates, self.first_prompt))
+
+    def roll_back(self, turns: int) -> int:
+        """Discard everything gathered since the start of the last `turns`
+        user turns. Returns how many candidates, plans and edits went."""
+        if turns <= 0 or not self.turns:
+            return 0
+        mark = self.turns[max(0, len(self.turns) - turns)]
+        del self.turns[max(0, len(self.turns) - turns):]
+        n_text, n_plans, edits, keys, duplicates, first = mark
+        gone = (len(self.text) - n_text) + (len(self.plans) - n_plans) + \
+            sum(self.edits.values()) - sum(edits.values())
+        del self.text[n_text:]
+        del self.plans[n_plans:]
+        self.edits, self.seen.keys, self.seen.duplicates = edits, keys, duplicates
+        self.first_prompt = first
+        return gone
 
     def _areas(self) -> list:
         ranked = sorted(self.edits.items(), key=lambda kv: (-kv[1], kv[0]))

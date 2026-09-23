@@ -99,8 +99,6 @@ def read_remote_url(root: Path) -> str | None:
     return remotes[name]
 
 
-
-
 def _config_text(root: Path) -> str | None:
     if not (root / ".git").exists():
         return None
@@ -129,14 +127,17 @@ def read_project_name(root: Path) -> str | None:
     return name
 
 
-def project_nonce(root: Path) -> str | None:
+def project_nonce(root: Path, *, create: bool = True) -> str | None:
     """The repository's canon nonce, written on first use into the shared git
-    directory. None when there is no git directory or it cannot be written."""
+    directory. None when there is no git directory, it cannot be written, or
+    `create` is False and no nonce exists yet."""
     if not (root / ".git").exists():
         return None
     try:
         path = _config_path(root).parent / NONCE_FILE
         if not path.is_file():
+            if not create:
+                return None
             try:
                 with open(path, "x", encoding="utf-8", newline="\n") as handle:
                     handle.write(secrets.token_hex(16) + "\n")

@@ -270,9 +270,10 @@ level up, in the stored row:
   `scrub_rules.py` and counts hits (no values, no digests); importers scrub each
   source string whole before extraction; the store refuses a record that still
   matches (`SecretRefused`), and `brief.refuse_secrets` guards the brief and the
-  switch region. `extract.py` holds the fixed text rules; `import_common.py` the
-  JSONL reader, the declared-loss `Ledger`, the project check and the
-  `Collector`; `import_claude.py` and `import_codex.py` the two importers with
+  switch region. `extract.py` holds the fixed text rules; `import_source.py` the
+  JSONL reader; `import_project.py` the identity-based project check;
+  `import_common.py` the declared-loss `Ledger` and the `Collector` (with
+  turn rollback); `import_claude_chain.py` the live branch and the task list; `import_claude.py` and `import_codex.py` the two importers with
   their `DECLARED_DROPS`; `import_write.py` turns candidates into scrubbed,
   proposed rows with an origin and a `canon.import-report/v1` report.
   `src/canon/cli_import.py` adds `canon workspace import|accept|reject`.
@@ -317,7 +318,9 @@ level up, in the stored row:
   D-129 promote refuses a global id clash and accept refuses a stale base,
   D-130 a non-default port splits, a nonce keys a repository with no remote,
   and a new checkout is announced, D-131 the scrubber covers the everyday
-  forms, scrubs before extraction, and anchors placeholders.
+  forms, scrubs before extraction, and anchors placeholders, D-132 the
+  importers read what the host wrote as the host's and compare projects by
+  identity.
 
 Later phases (verifier, migration legs, region installation into an existing
 file, the global SOUL.md and the global GEMINI.md surfaces) aim at this same
