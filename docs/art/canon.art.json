@@ -16,8 +16,8 @@
       "file": "surface-lane.svg",
       "kicker": "a tool file is somebody's working file first, and canon is a guest in it",
       "title": "How one record becomes the file each of your tools reads",
-      "footnote": "The allow-list and the region are the two rules that make this safe to run against a file you already care about. canon writes four paths and refuses every other one, and inside those four it rewrites only the span between its own markers. A file with no canon region is left exactly as it was, which means opting in is a thing you do to a file rather than a thing canon does to you.",
-      "alt": "Eight stages taking one record to the file a tool reads: record, validate, layer, resolve, render, region, allow-list, write. Every entry is one envelope in one of eight kinds: an authored personality block, an episodic memory, a synthesized persona, a decision record, a reference to an external research artifact, and three workspace-state kinds for a project's focus, its work items and its environment constraints. The validator checks every field and refuses a record it cannot vouch for. A workspace block overrides a global block carrying the same id, and the resolve step keeps current entries only, ordered by a clock-free ordinal so a rebuild is byte-identical. The block set is rendered to text and spliced into the span between the canon begin and end markers, and every byte outside that span is preserved. The write allow-list holds four surfaces: a global and a workspace file for Claude Code, an AGENTS.md for Codex, and a workspace SOUL.md for Hermes. A path outside that list is refused, and so is a file with no canon region. Three outcomes: written inside the markers canon owns, a surface that drifted and needs a human, and a file canon declines to write at all.",
+      "footnote": "The allow-list and the region are the two rules that make this safe to run against a file you already care about. canon writes seven paths and refuses every other one, and inside those seven it rewrites only the span between its own markers. A file with no canon region is left exactly as it was, which means opting in is a thing you do to a file rather than a thing canon does to you.",
+      "alt": "Eight stages taking one record to the file a tool reads: record, validate, layer, resolve, render, region, allow-list, write. Every entry is one envelope in one of eight kinds: an authored personality block, an episodic memory, a synthesized persona, a decision record, a reference to an external research artifact, and three workspace-state kinds for a project's focus, its work items and its environment constraints. The validator checks every field and refuses a record it cannot vouch for. A workspace block overrides a global block carrying the same id, and the resolve step keeps current entries only, ordered by a clock-free ordinal so a rebuild is byte-identical. The block set is rendered to text and spliced into the span between the canon begin and end markers, and every byte outside that span is preserved. The write allow-list holds seven surfaces: a global and a workspace file for Claude Code, an AGENTS.md for Codex, a workspace SOUL.md for Hermes, a GEMINI.md for Gemini CLI, the repository instructions file for GitHub Copilot, and one canon-owned Cursor rule. A path outside that list is refused, and so is a file with no canon region. Three outcomes: written inside the markers canon owns, a surface that drifted and needs a human, and a file canon declines to write at all.",
       "stages": [
         {
           "title": "Record",
@@ -45,7 +45,7 @@
         },
         {
           "title": "Allow-list",
-          "note": "Four surfaces. Every other path refused."
+          "note": "Seven surfaces. Every other path refused."
         },
         {
           "title": "Write",
@@ -164,8 +164,8 @@
         "how many",
         "where the number comes from"
       ],
-      "alt": "A table of twelve rows: what canon carries, how many of it there are, and where each number is read from. Eight record kinds share one envelope: five under the v1 record tag and three workspace-state kinds under their own tag. Two scopes layer, workspace over global. Four surfaces sit on the write allow-list: a global and a workspace file for Claude Code, an AGENTS.md for Codex, and a workspace SOUL.md for Hermes. Four storage adapters implement the backend protocol, and five capability tokens describe what each one can carry. Twenty-one schema pins name the seams that carry a version. The aggregate check folds four legs, and four gate functions share the same zero or one exit code. 138 source modules hold 23,167 lines, and 61 test files hold 1198 tests. Two surfaces named in the roadmap are absent from the catalog, a global SOUL.md and a GEMINI.md, so canon does not render them.",
-      "footnote": "Every count here was read from the module that defines it rather than typed in. The marked row is the honest null: the README names a global SOUL.md and a GEMINI.md as later phases, and the write allow-list does not carry them, so those two files are ones canon will not touch today.",
+      "alt": "A table of twelve rows: what canon carries, how many of it there are, and where each number is read from. Eight record kinds share one envelope: five under the v1 record tag and three workspace-state kinds under their own tag. Two scopes layer, workspace over global. Seven surfaces sit on the write allow-list: a global and a workspace file for Claude Code, an AGENTS.md for Codex, a workspace SOUL.md for Hermes, a GEMINI.md, the Copilot instructions file, and one Cursor rule. Four storage adapters implement the backend protocol, and five capability tokens describe what each one can carry. Twenty-one schema pins name the seams that carry a version. The aggregate check folds four legs, and four gate functions share the same zero or one exit code. 140 source modules hold 23,456 lines, and 62 test files hold 1222 tests. Two surfaces named in the roadmap are absent from the catalog, a global SOUL.md and a global GEMINI.md, so canon does not render them.",
+      "footnote": "Every count here was read from the module that defines it rather than typed in. The marked row is the honest null: the README names a global SOUL.md and a global GEMINI.md as later phases, and the write allow-list does not carry them, so those two files are ones canon will not touch today.",
       "fields": [
         {
           "key": "record kinds",
@@ -179,8 +179,8 @@
         },
         {
           "key": "rendered surfaces",
-          "value": "four files",
-          "note": "SURFACE_CATALOG in registry.py: a global and a workspace file for Claude Code, an AGENTS.md for Codex, and a workspace SOUL.md for Hermes."
+          "value": "seven files",
+          "note": "SURFACE_CATALOG in registry.py: CLAUDE.md twice, AGENTS.md, SOUL.md, GEMINI.md, the Copilot file and a Cursor rule."
         },
         {
           "key": "storage adapters",
@@ -209,23 +209,23 @@
         },
         {
           "key": "source modules",
-          "value": "138 files",
+          "value": "140 files",
           "note": "Python modules under src/canon, including backends, transport, MCP, context capture/query and continuity export/bootstrap seams."
         },
         {
           "key": "source lines",
-          "value": "23,167 lines",
+          "value": "23,456 lines",
           "note": "Counted across those modules. No runtime dependencies: the record, codecs, context capture/query, continuity CLI and gates are standard library only."
         },
         {
           "key": "python tests",
-          "value": "1198 passing",
-          "note": "pytest over 61 files: 918 test functions plus their parametrized cases, covering records, backends, MCP, context, continuity export and every number here."
+          "value": "1222 passing",
+          "note": "pytest over 62 files: 929 test functions plus their parametrized cases, covering records, backends, MCP, context, continuity export and every number here."
         },
         {
           "key": "surfaces not rendered",
           "value": "two named",
-          "note": "A global SOUL.md and a GEMINI.md are named in the README as later phases and are absent from the write allow-list, so canon does not write them.",
+          "note": "A global SOUL.md and a global GEMINI.md are named in the README as later phases and are absent from the write allow-list, so canon does not write them.",
           "tone": "drift"
         }
       ]

@@ -138,6 +138,7 @@ _SUBCOMMANDS = (
     ("set-status", "change a work item's status", _set_status_args),
     ("decide", "record a decision and the alternatives dropped", _decide_args),
     ("constraint", "record a constraint or an environment quirk", _constraint_args),
+    ("targets", "list the handoff targets, their files, budgets and downgrades", _no_args),
     ("import", "propose records from a Claude Code or Codex session", _import_args),
     ("accept", "accept a proposed record", _decide_proposal_args),
     ("reject", "reject a proposed record (logged)", _decide_proposal_args),

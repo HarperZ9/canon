@@ -79,6 +79,10 @@ canon switch --to codex --create
 
 Targets: `claude-code`, `codex`, `gemini-cli`, `cursor`, `copilot`, and
 `markdown` for a brief to paste into a chat app or a local model.
+`canon workspace targets` prints each target's file, its budget, and what it
+cannot express: none of these files can load a block for some files only, so a
+block scoped with `applies_to` is written always-on with an `Applies to:` line,
+and that downgrade is declared rather than silent.
 
 - **Import what the last session knew.** `canon workspace import` reads a
   Claude Code session or a Codex rollout and proposes the focus, the open
@@ -106,9 +110,9 @@ what happens when a remote is renamed or a project with no remote moves.
 
 ## How one record becomes the file each tool reads
 
-![Eight stages taking one record to the file a tool reads: record, validate, layer, resolve, render, region, allow-list, write. Every entry is one envelope in one of eight kinds: an authored personality block, an episodic memory, a synthesized persona, a decision record, a reference to an external research artifact, and three workspace-state kinds for a project's focus, its work items and its environment constraints. The validator checks every field and refuses a record it cannot vouch for. A workspace block overrides a global block carrying the same id, and the resolve step keeps current entries only, ordered by a clock-free ordinal so a rebuild is byte-identical. The block set is rendered to text and spliced into the span between the canon begin and end markers, and every byte outside that span is preserved. The write allow-list holds four surfaces: a global and a workspace file for Claude Code, an AGENTS.md for Codex, and a workspace SOUL.md for Hermes. A path outside that list is refused, and so is a file with no canon region. Three outcomes: written inside the markers canon owns, a surface that drifted and needs a human, and a file canon declines to write at all.](docs/art/surface-lane.svg)
+![Eight stages taking one record to the file a tool reads: record, validate, layer, resolve, render, region, allow-list, write. Every entry is one envelope in one of eight kinds: an authored personality block, an episodic memory, a synthesized persona, a decision record, a reference to an external research artifact, and three workspace-state kinds for a project's focus, its work items and its environment constraints. The validator checks every field and refuses a record it cannot vouch for. A workspace block overrides a global block carrying the same id, and the resolve step keeps current entries only, ordered by a clock-free ordinal so a rebuild is byte-identical. The block set is rendered to text and spliced into the span between the canon begin and end markers, and every byte outside that span is preserved. The write allow-list holds seven surfaces: a global and a workspace file for Claude Code, an AGENTS.md for Codex, a workspace SOUL.md for Hermes, a GEMINI.md for Gemini CLI, the repository instructions file for GitHub Copilot, and one canon-owned Cursor rule. A path outside that list is refused, and so is a file with no canon region. Three outcomes: written inside the markers canon owns, a surface that drifted and needs a human, and a file canon declines to write at all.](docs/art/surface-lane.svg)
 
-canon writes four paths and no others, and inside those four it rewrites only
+canon writes seven paths and no others, and inside those seven it rewrites only
 the span between its own markers. A file with no canon region is left alone.
 
 ## How a rendered file is checked back against the record
@@ -120,7 +124,7 @@ in advance. Anything else fails the gate rather than logging a warning.
 
 ## What canon carries
 
-![A table of twelve rows: what canon carries, how many of it there are, and where each number is read from. Eight record kinds share one envelope: five under the v1 record tag and three workspace-state kinds under their own tag. Two scopes layer, workspace over global. Four surfaces sit on the write allow-list: a global and a workspace file for Claude Code, an AGENTS.md for Codex, and a workspace SOUL.md for Hermes. Four storage adapters implement the backend protocol, and five capability tokens describe what each one can carry. Twenty-one schema pins name the seams that carry a version. The aggregate check folds four legs, and four gate functions share the same zero or one exit code. 138 source modules hold 23,167 lines, and 61 test files hold 1198 tests. Two surfaces named in the roadmap are absent from the catalog, a global SOUL.md and a GEMINI.md, so canon does not render them.](docs/art/record-table.svg)
+![A table of twelve rows: what canon carries, how many of it there are, and where each number is read from. Eight record kinds share one envelope: five under the v1 record tag and three workspace-state kinds under their own tag. Two scopes layer, workspace over global. Seven surfaces sit on the write allow-list: a global and a workspace file for Claude Code, an AGENTS.md for Codex, a workspace SOUL.md for Hermes, a GEMINI.md, the Copilot instructions file, and one Cursor rule. Four storage adapters implement the backend protocol, and five capability tokens describe what each one can carry. Twenty-one schema pins name the seams that carry a version. The aggregate check folds four legs, and four gate functions share the same zero or one exit code. 140 source modules hold 23,456 lines, and 62 test files hold 1222 tests. Two surfaces named in the roadmap are absent from the catalog, a global SOUL.md and a global GEMINI.md, so canon does not render them.](docs/art/record-table.svg)
 
 Every count is asserted against the module that defines it in
 `tests/test_repo_art.py`.
@@ -173,8 +177,8 @@ transform omissions and says what the export does not prove, including host
 enforcement. It does not import provider auth, private databases, ChatGPT web
 state, or Claude web state.
 
-Installing a region into a fresh file, the first migrator on the version seam,
-and the global SOUL.md and GEMINI.md surfaces are later phases. Everything
+Installing a region into an existing file, the first migrator on the version seam,
+and the global SOUL.md and the global GEMINI.md surfaces are later phases. Everything
 shipped is proven by a full test suite and aims at the one envelope.
 
 ## Run it

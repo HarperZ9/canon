@@ -160,6 +160,56 @@ brief reaches it without a paste. The write follows the canon rules:
 
 A target with no instruction surface (`markdown`) prints the brief alone.
 
+## Targets and declared downgrades
+
+W1 adds three surfaces to the write allow-list, each by exact path:
+
+| harness | file | why this path |
+|---|---|---|
+| `gemini-cli` | `GEMINI.md` | Gemini CLI loads a project-root `GEMINI.md` (its global file is not on the list yet) |
+| `copilot` | `.github/copilot-instructions.md` | Copilot's repository-wide instructions file; plain Markdown |
+| `cursor` | `.cursor/rules/canon.mdc` | one canon-owned rule; canon writes no other file under `.cursor/rules` |
+
+Each is a lone workspace surface, so it renders the full merged block set, the
+same rule `AGENTS.md` follows. `canon switch --create` makes the Cursor rule
+with YAML frontmatter (`alwaysApply: true`), because Cursor loads a rule on
+every request only with that setting.
+
+A personality block may carry `applies_to`, a list of glob patterns naming the
+files it is meant for. No surface on the allow-list can load one block for some
+files and not others, so each target declares what it does instead:
+
+| feature | targets | what happens |
+|---|---|---|
+| `activation.glob` | all five | the block is written always-on; the patterns stay in the block's sentinel and reach the model as an `Applies to:` line, which is advice rather than a rule |
+| `text.at-import` | `claude-code`, `gemini-cli` | a line with an `@path` token is read by the host as a file import, so the same text means more there than in `AGENTS.md` |
+
+`canon.workspace.target_fidelity.target_roundtrip` renders a block set into a
+new host file for a target, runs the R0 round-trip verdict on it, checks the
+host's own requirement (the Cursor frontmatter), and classifies every feature a
+block asked for that the target handles differently. A difference the target
+did not declare fails the verdict. `canon switch` lists each difference as a
+warning, and `canon workspace targets` prints the table.
+
+### Region grammar v1
+
+The scope rides in the region grammar as an optional `applies` attribute on
+the block sentinel, the authoritative copy, followed by a generated
+`Applies to:` line:
+
+```
+<!-- canon:block id="react" applies="src/**/*.tsx|src/**/*.ts" -->
+## React rules
+Applies to: src/**/*.tsx, src/**/*.ts
+Use function components and hooks.
+```
+
+On ingest the line must match the attribute and is removed; an edited line is a
+refusal. A pattern may not contain `"`, `<`, `>` or `|`. A region with no
+scoped block is byte-identical to the v0 grammar, and a block's source hash
+changes only when it has a scope. The `textblock-grammar` pin moves to
+`canon.textblock/v1`.
+
 ## Importers
 
 `canon workspace import --from claude-code|codex <file>` reads one session file
@@ -323,6 +373,7 @@ canon workspace import --from codex rollout.jsonl [--dry-run] [--drop-type LABEL
 canon workspace accept <id> | reject <id> --reason "not a real task"
 canon handoff --to codex [--receipt brief.receipt.json] [--out BRIEF.md]
 canon switch --to claude-code [--dry-run] [--create]
+canon workspace targets                  # files, budgets and declared downgrades
 ```
 
 Every command takes `--workspace` (default `.`), `--store`, and `--remote` to

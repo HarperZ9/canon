@@ -24,6 +24,9 @@ from .cli_workspace_author import AUTHOR_HANDLERS
 from .workspace.describe import summary
 from .workspace.moves import adopt, promote
 from .workspace.rows import STATE_ACCEPTED, STATE_PROPOSED
+from .workspace.switch import workspace_surface
+from .workspace.target_fidelity import DECLARED_DOWNGRADES
+from .workspace.targets import TARGETS
 
 
 def run_workspace_command(parsed: argparse.Namespace, *, stdout: TextIO,
@@ -87,11 +90,30 @@ def _adopt(parsed, ctx: WorkspaceContext, out: Output, command: str) -> int:
                 data=data, text="\n".join(lines))
 
 
+def _targets(parsed, ctx: WorkspaceContext, out: Output, command: str) -> int:
+    rows = []
+    for target in TARGETS:
+        surface = workspace_surface(target)
+        rows.append({"name": target.name, "file": surface.relative_path if surface else None,
+                     "brief_bytes": target.brief_bytes, "brief_lines": target.brief_lines,
+                     "file_bytes_limit": target.file_bytes_limit,
+                     "file_lines_advice": target.file_lines_advice, "basis": target.basis,
+                     "downgrades": DECLARED_DOWNGRADES.get(target.name, {})})
+    lines = []
+    for row in rows:
+        lines.append(f"{row['name']}: {row['file'] or 'no file (paste the brief)'}; "
+                     f"brief {row['brief_bytes']} bytes, {row['brief_lines']} lines")
+        lines += [f"  declared {k}: {v}" for k, v in row["downgrades"].items()]
+    return emit(out, command=command, message=f"{len(rows)} targets",
+                data={"targets": rows}, text="\n".join(lines))
+
+
 _HANDLERS = {
     "id": _identity,
     "list": _list,
     "promote": _promote,
     "adopt": _adopt,
+    "targets": _targets,
     **AUTHOR_HANDLERS,
     **IMPORT_HANDLERS,
 }

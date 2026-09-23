@@ -51,6 +51,19 @@ Canon starts to carry a project's working state between models and tools.
   secret-named assignments are replaced with `[REDACTED:<rule>]`. The store
   also refuses any record that still matches, including one typed by hand, and
   a brief or instruction region that would carry one is refused.
+- Adds three surfaces to the write allow-list: `GEMINI.md`,
+  `.github/copilot-instructions.md`, and one canon-owned Cursor rule,
+  `.cursor/rules/canon.mdc` (created with `alwaysApply: true` frontmatter).
+  The allow-list is now seven exact paths.
+- Personality blocks may carry `applies_to` glob patterns. No surface can load
+  a block for some files only, so each target declares the downgrade: the block
+  is written always-on with an `Applies to:` line the model reads as advice.
+  Claude Code and Gemini CLI also declare that an `@path` line is a file import
+  there. A per-target round-trip verdict fails on any difference a target did
+  not declare; `canon workspace targets` prints the table.
+- The region grammar moves to `canon.textblock/v1` for the optional `applies`
+  attribute. A region with no scoped block is byte-identical to v0.
+- `write_surfaces` reports a missing file as `missing` and does not create it.
 - Registers five new version pins: `project-id`, `project-row`,
   `workspace-state`, `handoff-receipt` and `import-report`.
 

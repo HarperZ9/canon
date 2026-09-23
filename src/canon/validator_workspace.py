@@ -10,6 +10,7 @@ valid.
   work-item               title, status (required); detail (optional)
   environment-constraint  statement, category (required); reason, applies_to
   adr-decision            rejected_alternatives (optional): [{option, reason}]
+  personality-block       applies_to (optional): [glob, ...]
 """
 from __future__ import annotations
 
@@ -72,6 +73,16 @@ def _text_list(kind: str, field: str, value: object) -> list[str]:
             isinstance(item, str) and item for item in value):
         return [f"{kind}: {field} must be a list of non-empty strings"]
     return []
+
+
+def check_applies_to(data: dict) -> list[str]:
+    """`applies_to` on a personality block is optional; when present it is a
+    non-empty list of glob patterns the region grammar can carry."""
+    if "applies_to" not in data:
+        return []
+    from .textblock_scope import check_applies
+    reason = check_applies(data["applies_to"])
+    return [f"personality-block: {reason}"] if reason else []
 
 
 def check_rejected_alternatives(data: dict) -> list[str]:

@@ -101,6 +101,11 @@ The field is additive, so a decision record keeps the `canon.record/v1` tag, a
 decision without the field stays valid, and a 0.2.0 reader ignores the field
 rather than refusing the record.
 
+`personality-block` gains one optional field, `applies_to`: a non-empty list of
+glob patterns naming the files the block is meant for. It is additive and the
+block keeps `canon.record/v1`. See `W1-WORKSPACE.md` for how each target
+handles it.
+
 `KINDS` stays the five `canon.record/v1` kinds; `ALL_KINDS` is what the
 validator admits. The four storage adapters still hold `KINDS` only; the
 workspace-state kinds live in the per-project store described in

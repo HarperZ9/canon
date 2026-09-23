@@ -103,15 +103,18 @@ def test_the_resolve_order_reads_no_clock():
     assert stages["Resolve"] == "Current entries, clock-free order."
 
 
-def test_four_surfaces_sit_on_the_write_allow_list():
-    assert CARD["rendered surfaces"]["value"] == "four files"
+def test_seven_surfaces_sit_on_the_write_allow_list():
+    assert CARD["rendered surfaces"]["value"] == "seven files"
     catalog = registry.SURFACE_CATALOG
-    assert len(catalog) == 4
+    assert len(catalog) == 7
     assert [(s.harness, s.scope, s.relative_path) for s in catalog] == [
         ("claude-code", "global", ".claude/CLAUDE.md"),
         ("claude-code", "workspace", "CLAUDE.md"),
         ("codex", "workspace", "AGENTS.md"),
         ("hermes", "workspace", "SOUL.md"),
+        ("gemini-cli", "workspace", "GEMINI.md"),
+        ("copilot", "workspace", ".github/copilot-instructions.md"),
+        ("cursor", "workspace", ".cursor/rules/canon.mdc"),
     ]
 
 
@@ -120,11 +123,13 @@ def test_a_path_outside_the_allow_list_is_refused(tmp_path):
     home = str(tmp_path / "home")
     workspace = str(tmp_path / "workspace")
     allowed = registry.allowed_paths(home=home, workspace=workspace)
-    assert len(allowed) == 4
+    assert len(allowed) == 7
     for path in allowed:
         assert registry.is_write_allowed(path, home=home, workspace=workspace)
     stranger = str(tmp_path / "workspace" / "NOTES.md")
     assert not registry.is_write_allowed(stranger, home=home, workspace=workspace)
+    other_rule = str(tmp_path / "workspace" / ".cursor" / "rules" / "team.mdc")
+    assert not registry.is_write_allowed(other_rule, home=home, workspace=workspace)
     outcomes = {o["label"]: o["note"] for o in SURFACE["outcomes"]}
     assert outcomes["NOT WRITTEN"] == "no region, or not allow-listed"
 
@@ -243,12 +248,11 @@ def test_the_roadmap_names_two_surfaces_the_catalog_does_not_carry():
     """The honest null on the card, held against both the README and the code."""
     assert CARD["surfaces not rendered"]["value"] == "two named"
     assert CARD["surfaces not rendered"]["tone"] == "drift"
-    assert "the global SOUL.md and GEMINI.md surfaces are later phases" in README
-    paths = {surface.relative_path for surface in registry.SURFACE_CATALOG}
-    assert not [path for path in paths if "GEMINI" in path]
-    assert ("hermes", "global") not in {
-        (surface.harness, surface.scope) for surface in registry.SURFACE_CATALOG
-    }
+    assert "the global SOUL.md and the global GEMINI.md surfaces are later phases" in README
+    pairs = {(surface.harness, surface.scope) for surface in registry.SURFACE_CATALOG}
+    assert ("hermes", "global") not in pairs
+    assert ("gemini-cli", "global") not in pairs
+    assert ("gemini-cli", "workspace") in pairs
 
 
 def test_the_suite_carries_the_number_of_tests_the_card_claims():

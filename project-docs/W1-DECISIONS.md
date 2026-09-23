@@ -204,3 +204,42 @@ formats as public sources describe them on 2026-09-23 (the openai/codex source
 for rollouts, two public parsers for Claude Code sessions), with placeholders
 for the project root and for secrets. The tests build each planted value at run
 time, so no committed file carries a string a secret scanner would flag.
+
+## D-122 A block's scope rides in the sentinel and is shown as a line
+
+Cursor, Copilot and Continue can scope a rule to matching files; the plain
+instruction files cannot. A block's `applies_to` is carried in the region
+grammar as an `applies` attribute on the sentinel, which round-trips exactly,
+and shown to the model as a generated `Applies to:` line, so the scope is not
+lost on a host that loads everything. Ingest checks the line against the
+attribute and removes it; a hand-edited line is refused rather than read as
+body text. The grammar change is additive but an older reader refuses the new
+attribute, so the `textblock-grammar` pin moves to v1. Unscoped blocks render
+and hash exactly as before.
+
+## D-123 Each new surface is one exact path, chosen for how its host loads it
+
+The allow-list stays a list of exact paths. `GEMINI.md` at the workspace root
+is what Gemini CLI loads for a project; the global `~/.gemini/GEMINI.md` is left
+for a later change, like the global `SOUL.md`. For Copilot the surface is the
+repository-wide `.github/copilot-instructions.md`; the path-specific
+`.github/instructions/*.instructions.md` files are not on the list. For Cursor
+canon owns one rule, `.cursor/rules/canon.mdc`, and no other file in that
+directory, so a team's own rules are never canon's to write.
+
+## D-124 A target declares what it cannot express, and the verdict holds it to that
+
+The storage adapters declare their drops in advance and the round-trip gate
+fails on anything undeclared. The render targets follow the same rule for host
+semantics. Each target names the features it handles differently
+(`activation.glob` everywhere, `text.at-import` on Claude Code and Gemini CLI)
+and what it does instead. `target_roundtrip` classifies every such feature a
+block asks for; an undeclared one fails the verdict, and the test that removes
+the declaration watches it fail.
+
+## D-125 `write_surfaces` reports a missing file instead of failing
+
+With seven surfaces, most projects will lack some of the files. The batch
+writer already skipped a file with no region; it now also reports a file that
+does not exist as `missing` and never creates it, the same verdict the drift
+check gives. Creating a file is `switch --create`'s job, for one named target.

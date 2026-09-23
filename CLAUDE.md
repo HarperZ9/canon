@@ -272,6 +272,14 @@ level up, in the stored row:
   their `DECLARED_DROPS`; `import_write.py` turns candidates into scrubbed,
   proposed rows with an origin and a `canon.import-report/v1` report.
   `src/canon/cli_import.py` adds `canon workspace import|accept|reject`.
+- `src/canon/registry.py` carries seven surfaces: W1 adds `GEMINI.md`,
+  `.github/copilot-instructions.md` and `.cursor/rules/canon.mdc`, each a lone
+  workspace surface; `write_surfaces` reports a missing file as `missing`.
+  `src/canon/textblock_scope.py` is the v1 grammar's optional `applies`
+  attribute and its generated `Applies to:` line (`textblock-grammar` pin v1).
+  `src/canon/workspace/target_fidelity.py` declares per-target downgrades
+  (`activation.glob`, `text.at-import`) and `target_roundtrip` fails on an
+  undeclared one; `hosts.py` checks the Cursor frontmatter.
   Fixtures in `tests/fixtures/transcripts/` use placeholders; tests plant
   canaries built at run time.
 - `project-docs/W1-WORKSPACE.md` is the spec (identity, collisions, renames,
@@ -287,10 +295,13 @@ level up, in the stored row:
   missing file only, D-117 importers propose and a person accepts, D-118
   declared loss at the import boundary, D-119 scrub then check at store and
   render, D-120 the source must name this project, D-121 public-format fixtures
-  with run-time canaries.
+  with run-time canaries, D-122 scope in the sentinel plus a visible line,
+  D-123 exact paths for the three new surfaces, D-124 declared per-target
+  downgrades held by a verdict, D-125 a missing file is reported.
 
-Later phases (verifier, migration legs, region installation, the global SOUL.md
-and GEMINI.md surfaces) aim at this same envelope. Each lands on its own branch.
+Later phases (verifier, migration legs, region installation into an existing
+file, the global SOUL.md and the global GEMINI.md surfaces) aim at this same
+envelope. Each lands on its own branch.
 
 ## Working rules
 - Python 3.11+. Standard library only in F0; no runtime dependencies.

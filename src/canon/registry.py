@@ -37,17 +37,24 @@ class Surface:
 
 # The confirmed instruction surfaces. SOUL.md (harness "hermes") is a lone
 # workspace surface: no global sibling, so it renders the full merged set like
-# AGENTS.md, and it reuses the R0 block-region grammar with no banner. GEMINI.md
-# at both scopes and the GLOBAL SOUL.md are further confirmed surfaces whose
-# global-path conventions are not yet pinned; they extend this catalog once those
-# conventions are settled. The vault is not listed here: it is a whole-directory
-# mirror with its own containment (vault_mirror.is_vault_write_allowed), not a
-# single-file region-splice surface, so it is deliberately not a root-kind (D-35).
+# AGENTS.md, and it reuses the R0 block-region grammar with no banner. W1 adds
+# three more lone workspace surfaces, each chosen deliberately: GEMINI.md (Gemini
+# CLI), .github/copilot-instructions.md (GitHub Copilot's repository-wide file),
+# and one canon-owned Cursor rule, .cursor/rules/canon.mdc. canon writes that one
+# rule file and no other file under .cursor/rules. What each of them cannot
+# express (glob-scoped activation) is declared in workspace/target_fidelity.py.
+# The global GEMINI.md and the GLOBAL SOUL.md are not pinned yet. The vault is
+# not listed here: it is a whole-directory mirror with its own containment
+# (vault_mirror.is_vault_write_allowed), not a single-file region-splice
+# surface, so it is deliberately not a root-kind (D-35).
 SURFACE_CATALOG: tuple[Surface, ...] = (
     Surface("claude-code", "global", ROOT_HOME, ".claude/CLAUDE.md"),
     Surface("claude-code", "workspace", ROOT_WORKSPACE, "CLAUDE.md"),
     Surface("codex", "workspace", ROOT_WORKSPACE, "AGENTS.md"),
     Surface("hermes", "workspace", ROOT_WORKSPACE, "SOUL.md"),
+    Surface("gemini-cli", "workspace", ROOT_WORKSPACE, "GEMINI.md"),
+    Surface("copilot", "workspace", ROOT_WORKSPACE, ".github/copilot-instructions.md"),
+    Surface("cursor", "workspace", ROOT_WORKSPACE, ".cursor/rules/canon.mdc"),
 )
 
 
@@ -107,8 +114,9 @@ def write_surface(surface: Surface, pool: list[Record], *, home: str,
 
 @dataclass(frozen=True, slots=True)
 class SurfaceResult:
-    """The outcome of rendering one surface: written, unchanged, or off-limits
-    (the host had no canon region and was left untouched)."""
+    """The outcome of rendering one surface: written, unchanged, off-limits
+    (the host had no canon region and was left untouched), or missing (read_text
+    returned None: the file does not exist, so there is nothing to opt in)."""
 
     surface: Surface
     path: str
@@ -169,6 +177,9 @@ def write_surfaces(pool: list[Record], *, home: str, workspace: str,
         path = resolve_surface_path(surface, home=home, workspace=workspace)
         assert_writable(path, home=home, workspace=workspace)
         host = read_text(path)
+        if host is None:
+            results.append(SurfaceResult(surface, path, "missing", None))
+            continue
         if not extract_region(host).present:
             results.append(SurfaceResult(surface, path, "off-limits", None))
             continue

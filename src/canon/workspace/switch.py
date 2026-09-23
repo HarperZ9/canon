@@ -29,9 +29,10 @@ from canon.schema import KIND_PERSONALITY_BLOCK, Provenance, Record
 from canon.surface import SurfaceError, render_surface
 from canon.textblock import RenderRefused, recompute_source_hash
 from canon.workspace.brief import Brief, make_brief, refuse_secrets
-from canon.workspace.hosts import new_host_text
+from canon.workspace.hosts import cursor_frontmatter_problem, new_host_text
 from canon.workspace.identity import ProjectIdentity
 from canon.workspace.pool import TaggedRecord, block_pool
+from canon.workspace.target_fidelity import downgrades_for
 from canon.workspace.targets import Target
 
 BRIEF_BLOCK_ID = "canon-workspace-brief"
@@ -124,6 +125,21 @@ def _limits(target: Target, text: str) -> tuple[str, ...]:
     return ()
 
 
+def _host_warnings(target: Target, pool: list[TaggedRecord], surface: Surface,
+                   text: str) -> tuple[str, ...]:
+    """What the target will do differently from what the blocks asked for, and
+    a Cursor rule file Cursor would not load on every request."""
+    warnings = []
+    for down in downgrades_for(pool_for(surface, block_pool(pool)), target.name):
+        state = "declared" if down.declared else "UNDECLARED"
+        warnings.append(f"block {down.record_id}: {down.feature} ({state}): {down.note}")
+    if target.name == "cursor":
+        problem = cursor_frontmatter_problem(text)
+        if problem:
+            warnings.append(problem)
+    return tuple(warnings)
+
+
 def plan_switch(identity: ProjectIdentity, pool: list[TaggedRecord], target: Target, *,
                 home: str, read_text, create: bool = False,
                 budget_bytes: int | None = None, budget_lines: int | None = None,
@@ -145,7 +161,7 @@ def plan_switch(identity: ProjectIdentity, pool: list[TaggedRecord], target: Tar
     interior = region_interior(pool, surface, brief)
     refuse_secrets(interior, "instruction region")
     new_text = splice_region(host, interior)
-    warnings = _limits(target, new_text)
+    warnings = _limits(target, new_text) + _host_warnings(target, pool, surface, new_text)
     if status == "write" and new_text == host:
         status = "unchanged"
     old = None if status == "create" else host

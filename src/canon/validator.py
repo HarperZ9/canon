@@ -36,6 +36,7 @@ from .schema import (
 )
 from .validator_workspace import (
     REQUIRED as _WORKSPACE_REQUIRED,
+    check_applies_to,
     check_rejected_alternatives,
     check_workspace_kind,
 )
@@ -148,7 +149,9 @@ def _check_kind_specific(rec: Record) -> list[str]:
     """Constraints that apply to a single kind (enum-valued fields, digests)."""
     problems: list[str] = []
     data = rec.data
-    if rec.kind == KIND_EPISODIC_MEMORY:
+    if rec.kind == KIND_PERSONALITY_BLOCK:
+        problems.extend(check_applies_to(data))
+    elif rec.kind == KIND_EPISODIC_MEMORY:
         layer = data.get("layer")
         if layer not in EPISODIC_LAYERS:
             problems.append(

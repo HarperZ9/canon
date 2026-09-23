@@ -54,7 +54,7 @@ PIN_RECORD = SchemaPin("record", "v1", "canon.record/v1", "F0 D-1")
 PIN_BACKEND_SEAM = SchemaPin(
     "backend-seam", "v0", "canon.backend-seam/v0", "F1 D-9")
 PIN_TEXTBLOCK_GRAMMAR = SchemaPin(
-    "textblock-grammar", "v0", "canon.textblock/v0", "R0 D-13")
+    "textblock-grammar", "v1", "canon.textblock/v1", "W1 D-122")
 PIN_REGION_MARKER = SchemaPin(
     "region-marker", "v0", "canon.region-marker/v0", "R0 D-12")
 PIN_FRONTMATTER = SchemaPin(
