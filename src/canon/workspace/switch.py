@@ -177,10 +177,13 @@ def plan_switch(identity: ProjectIdentity, pool: list[TaggedRecord], target: Tar
                 home: str, read_text, create: bool = False,
                 budget_bytes: int | None = None, budget_lines: int | None = None,
                 declared: tuple[str, ...] = (), check_limits: bool = True,
-                receipt_hint: str | None = None) -> SwitchPlan:
+                receipt_hint: str | None = None,
+                codex_home: str | None = None) -> SwitchPlan:
     """Read the target's surface and plan the rewrite. Writes nothing.
     `check_limits=False` skips the host size refusal, for a caller that only
-    reads the region (pulling edits back) and will not write it."""
+    reads the region (pulling edits back) and will not write it. `codex_home`
+    is the `CODEX_HOME` value, where Codex reads its config instead of
+    `~/.codex`."""
     surface = workspace_surface(target)
     brief = make_brief(identity, pool, target, budget_bytes=budget_bytes,
                        budget_lines=budget_lines, declared=declared, level=2,
@@ -201,8 +204,8 @@ def plan_switch(identity: ProjectIdentity, pool: list[TaggedRecord], target: Tar
     new_text = splice_region(host, interior.replace("\n", eol))
     if status == "write" and region.inner.replace("\r\n", "\n") == interior:
         status, new_text = "unchanged", host
-    limits = switch_host.limits(target, new_text, root=Path(identity.root),
-                                home=home) if check_limits else ()
+    limits = switch_host.limits(target, new_text, root=Path(identity.root), home=home,
+                                codex_home=codex_home) if check_limits else ()
     warnings = limits + _host_warnings(target, pool, surface, new_text, brief)
     old = None if status == "create" else host
     return SwitchPlan(target, brief, surface, path, status, old, new_text, interior, warnings,

@@ -198,8 +198,9 @@ brief reaches it without a paste. The write follows the canon rules:
 - a file with no canon region is refused with the two marker lines to add, and
   a missing file is created only with `--create`, holding an empty region;
 - a file the host would truncate is refused before writing. For Codex the
-  limit is `project_doc_max_bytes` from `~/.codex/config.toml` under `--home`,
-  32,768 by default, and a nested `AGENTS.md` the combined chain from the root
+  limit is `project_doc_max_bytes` from `config.toml` under `CODEX_HOME` when
+  that is set, else under `~/.codex` in `--home`, 32,768 by default, and the
+  refusal names the setting and where it was read, and a nested `AGENTS.md` the combined chain from the root
   would cut is named in a warning. A file past a host's line guidance writes
   with a warning;
 - Codex reads `AGENTS.override.md` instead of `AGENTS.md` in the same folder,

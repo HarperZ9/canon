@@ -146,7 +146,7 @@ def _switch(parsed, ctx: WorkspaceContext, out: Output, environ) -> int:
     plan = plan_switch(ctx.identity, pool, target, home=home, read_text=read_text,
                        create=parsed.create, budget_bytes=parsed.budget_bytes,
                        budget_lines=parsed.budget_lines, declared=declared,
-                       receipt_hint=hint)
+                       receipt_hint=hint, codex_home=environ.get("CODEX_HOME") or None)
     overwritten = _refuse_pending_edits(ctx, plan, parsed.dry_run)
     receipt = [(parsed.receipt, _receipt_text(plan.receipt))] if parsed.receipt else []
     check_new_files([path for path, _ in receipt])

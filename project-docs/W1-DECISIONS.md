@@ -497,3 +497,16 @@ characters, mixes letters and digits in twelve or more, or runs to sixteen or
 more characters without being a lower-case name. `git`, `deploy`,
 `first.last` and `x-access-token` stay. `scrub.py` and the walkthrough state
 the rule in those terms.
+
+## D-139 The Codex budget is read where Codex reads its config
+
+D-134 read `project_doc_max_bytes` from `~/.codex/config.toml` only. Codex
+reads its config from `CODEX_HOME` when that is set, so a user who keeps
+Codex there and raised the budget was still refused at 32,768 bytes, and a
+budget lowered there was not enforced. The refusal also did not name the
+setting.
+
+`switch` now takes `CODEX_HOME` from its environment and reads `config.toml`
+there, falling back to `~/.codex` under `--home` only when it is unset, which
+is the order Codex uses. The refusal says the limit is
+`project_doc_max_bytes`, where the number came from, and where to raise it.

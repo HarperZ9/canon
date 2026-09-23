@@ -199,8 +199,9 @@ edits back without switching.
 - The brief budgets are canon's defaults; `--budget-bytes` and `--budget-lines`
   override them. The host file limits come from each tool's public
   documentation and can change. For Codex, canon reads `project_doc_max_bytes`
-  from `~/.codex/config.toml`, so a limit you raised there is the one canon
-  refuses at.
+  from `config.toml` where Codex reads it (under `CODEX_HOME` when that is set,
+  else under `~/.codex`), so a limit you raised there is the one canon refuses
+  at, and the refusal names the setting.
 - The store trusts the local filesystem. Isolation keeps projects from mixing;
   it does not defend against someone who can write the store directly.
 - The brief shows what was recorded or imported. It does not know about work in

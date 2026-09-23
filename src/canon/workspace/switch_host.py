@@ -13,9 +13,11 @@
 - Codex. Codex reads AGENTS.override.md instead of AGENTS.md when both sit in a
   directory, so a switch that would write a file Codex never reads is refused.
   Codex also applies one byte budget (`project_doc_max_bytes`, 32768 unless
-  ~/.codex/config.toml sets another) to every AGENTS file from the project root
+  its config.toml sets another) to every AGENTS file from the project root
   down to the working directory, so the root file is refused past the budget
-  and a nested file the combined chain would cut is named in a warning.
+  and a nested file the combined chain would cut is named in a warning. The
+  config is read where Codex reads it: under `CODEX_HOME` when that is set,
+  else under `~/.codex`.
 """
 from __future__ import annotations
 
@@ -68,15 +70,26 @@ def host_newline(region) -> str:
     return "\r\n" if region.prefix.endswith("\r\n") else "\n"
 
 
-def codex_budget(home: str, default: int) -> int:
-    """project_doc_max_bytes from the Codex config under `home`, else the
-    documented default. A config canon cannot parse leaves the default."""
-    path = Path(home) / ".codex" / "config.toml"
+def codex_config(home: str, codex_home: str | None) -> tuple[Path, str]:
+    """The config file Codex reads and how to name its place: under
+    `CODEX_HOME` when that is set, else under `~/.codex` in `home`."""
+    if codex_home:
+        return Path(codex_home) / "config.toml", "CODEX_HOME"
+    return Path(home) / ".codex" / "config.toml", "~/.codex"
+
+
+def codex_budget(home: str, default: int, codex_home: str | None = None) -> tuple[int, str]:
+    """project_doc_max_bytes from the Codex config, else the documented
+    default, and where the number came from. A config canon cannot parse
+    leaves the default."""
+    path, place = codex_config(home, codex_home)
     try:
         value = tomllib.loads(path.read_text(encoding="utf-8")).get("project_doc_max_bytes")
     except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
-        return default
-    return value if isinstance(value, int) and value > 0 else default
+        return default, f"the Codex default; no value in config.toml under {place}"
+    if isinstance(value, int) and value > 0:
+        return value, f"from config.toml under {place}"
+    return default, f"the Codex default; no value in config.toml under {place}"
 
 
 def refuse_shadow(root: Path) -> None:
@@ -122,15 +135,19 @@ def nested_codex_warnings(root: Path, root_bytes: int, budget: int) -> list[str]
     return warnings
 
 
-def limits(target: Target, text: str, *, root: Path, home: str) -> tuple[str, ...]:
+def limits(target: Target, text: str, *, root: Path, home: str,
+           codex_home: str | None = None) -> tuple[str, ...]:
     size = len(text.encode("utf-8"))
-    budget = target.file_bytes_limit
+    budget, raise_it = target.file_bytes_limit, ""
     if target.name == "codex" and budget is not None:
-        budget = codex_budget(home, budget)
+        budget, source = codex_budget(home, budget, codex_home)
+        raise_it = (f" (project_doc_max_bytes, {source}); raise project_doc_max_bytes "
+                    "in config.toml under CODEX_HOME, or ~/.codex when CODEX_HOME is "
+                    "unset, or shorten the file")
     if budget is not None and size > budget:
         raise SwitchRefused(
             "budget_too_small", f"the file would be {size} bytes; {target.display} "
-            f"reads at most {budget} and truncates the rest")
+            f"reads at most {budget} and truncates the rest{raise_it}")
     warnings = nested_codex_warnings(root, size, budget) if target.name == "codex" else []
     lines = text.count("\n")
     if target.file_lines_advice is not None and lines > target.file_lines_advice:
