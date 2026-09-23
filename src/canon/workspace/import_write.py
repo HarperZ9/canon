@@ -100,12 +100,17 @@ def build_proposals(store: ProjectStore, extraction: Extraction, source: Source,
 
 
 def seen_before(store: ProjectStore) -> tuple[dict, set]:
+    """The accepted records by id, and every rejection as (id, content digest,
+    render). An import has no render (None); an edit read back from a region
+    names the render it was read against, so rejecting it holds only until a
+    later render stands and the same edit made again is proposed again."""
     accepted = {r.record.id: r.record for r in store.rows(STATE_ACCEPTED)}
     rejected = set()
     for entry in store.log_entries():
         origin = entry.get("origin") or {}
         if entry.get("action") == "reject" and origin.get("content_sha256"):
-            rejected.add((entry["record_key"].split("/", 1)[1], origin["content_sha256"]))
+            rejected.add((entry["record_key"].split("/", 1)[1], origin["content_sha256"],
+                          origin.get("base_render")))
     return accepted, rejected
 
 
@@ -120,7 +125,7 @@ def run_import(identity: ProjectIdentity, store: ProjectStore, extraction: Extra
     for record, origin in proposals:
         entry = {"id": record.id, "kind": record.kind, "rule": origin["rule"],
                  "line": origin["line"]}
-        if (record.id, origin["content_sha256"]) in rejected:
+        if (record.id, origin["content_sha256"], None) in rejected:
             previously.append(entry)
             continue
         prior = accepted.get(record.id)

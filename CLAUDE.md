@@ -286,7 +286,8 @@ level up, in the stored row:
   (`activation.glob`, `text.at-import`) and `target_roundtrip` fails on an
   undeclared one; `hosts.py` checks the Cursor frontmatter.
 - `src/canon/workspace/ledger.py` is the render ledger (`renders.json`,
-  `canon.render-ledger/v1`): what `switch` last wrote per surface.
+  `canon.render-ledger/v1`): what `switch` last wrote per checkout and surface,
+  the recent renders per surface, the block owners and a render number.
   `backflow.py` compares the region on disk with it and turns block edits into
   proposals; `backflow_brief.py` maps edited brief lines (goal, work status,
   new work, new constraint, removed work) and keeps anything else as a memory
@@ -320,7 +321,8 @@ level up, in the stored row:
   and a new checkout is announced, D-131 the scrubber covers the everyday
   forms, scrubs before extraction, and anchors placeholders, D-132 the
   importers read what the host wrote as the host's and compare projects by
-  identity.
+  identity, D-133 back-flow reads a checkout against its own render and keeps
+  every edit.
 
 Later phases (verifier, migration legs, region installation into an existing
 file, the global SOUL.md and the global GEMINI.md surfaces) aim at this same

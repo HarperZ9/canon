@@ -25,7 +25,7 @@ from .cli_workspace_common import (
 )
 from .workspace.backflow import pending_edits
 from .workspace.brief import BudgetError, SecretInRender, make_brief
-from .workspace.ledger import record_render
+from .workspace.ledger import record_render_unlocked
 from .workspace.pool import project_pool
 from .workspace.switch import SwitchRefused, commit_switch, plan_switch
 from .workspace.targets import UnknownTarget, target_for
@@ -108,12 +108,13 @@ def _status_words(status: str, dry_run: bool, rel: str | None) -> str:
     return f"{(_WOULD if dry_run else _DONE)[status]} {rel}"
 
 
-def _refuse_pending_edits(ctx: WorkspaceContext, plan, dry_run: bool) -> None:
+def _refuse_pending_edits(ctx: WorkspaceContext, plan, dry_run: bool) -> list[str]:
     """Edits made inside the region since canon last wrote it become proposals,
-    and the switch stops until each one is accepted or rejected."""
+    and the switch stops until each one is accepted or rejected. Returns the
+    ids of rejected edits the switch will overwrite, so the output names them."""
     report = pending_edits(ctx.store, plan, dry_run=dry_run)
     if report is None or not report["proposed"]:
-        return
+        return [d["id"] for d in (report or {}).get("already_decided", []) if d.get("rejected")]
     rel = plan.surface.relative_path
     ids = ", ".join(p["id"] for p in report["proposed"])
     verb = "would become" if dry_run else "are now"
@@ -123,6 +124,18 @@ def _refuse_pending_edits(ctx: WorkspaceContext, plan, dry_run: bool) -> None:
         "canon workspace accept|reject, then switch again")
 
 
+def _commit(ctx: WorkspaceContext, plan, target) -> None:
+    """Write the file and its ledger entry under one project lock, so a held
+    lock refuses before anything is written and a written file always has the
+    ledger entry that marks it as canon's own."""
+    with ctx.store.locked():
+        commit_switch(plan, _write_text, _read_text)
+        if plan.surface is not None:
+            record_render_unlocked(ctx.store, plan.surface.relative_path, target.name,
+                                   plan.interior, checkout=ctx.identity.checkout,
+                                   owners=plan.owners)
+
+
 def _switch(parsed, ctx: WorkspaceContext, out: Output, environ) -> int:
     target = target_for(parsed.to)
     pool, declared = _pool(parsed, ctx)
@@ -130,16 +143,16 @@ def _switch(parsed, ctx: WorkspaceContext, out: Output, environ) -> int:
     plan = plan_switch(ctx.identity, pool, target, home=home, read_text=_read_text,
                        create=parsed.create, budget_bytes=parsed.budget_bytes,
                        budget_lines=parsed.budget_lines, declared=declared)
-    _refuse_pending_edits(ctx, plan, parsed.dry_run)
+    overwritten = _refuse_pending_edits(ctx, plan, parsed.dry_run)
     if not parsed.dry_run:
-        commit_switch(plan, _write_text, _read_text)
-        if plan.surface is not None:
-            record_render(ctx.store, plan.surface.relative_path, target.name, plan.interior)
+        _commit(ctx, plan, target)
     rel = plan.surface.relative_path if plan.surface else None
     lines = [f"{target.display}: {_status_words(plan.status, parsed.dry_run, rel)}",
              f"brief: {len(plan.brief.included)} records, "
              f"{len(plan.brief.left_out)} left out"]
     lines += [f"warning: {w}" for w in plan.warnings]
+    if overwritten:
+        lines.append("overwrote edits you rejected before: " + ", ".join(overwritten))
     if plan.surface is None or parsed.dry_run:
         lines += ["", plan.brief.text if plan.surface is None else plan.interior]
     data = {"target": target.name, "status": plan.status, "dry_run": parsed.dry_run,

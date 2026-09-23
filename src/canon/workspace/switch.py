@@ -14,7 +14,7 @@ cut. IO is injected, so planning reads and commit writes are separate steps.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from canon.layering import LayeringError
 from canon.region import RegionError, extract_region, splice_region
@@ -58,6 +58,7 @@ class SwitchPlan:
     new_text: str | None
     interior: str | None
     warnings: tuple[str, ...]
+    owners: dict = field(default_factory=dict)
 
 
 def workspace_surface(target: Target) -> Surface | None:
@@ -65,6 +66,23 @@ def workspace_surface(target: Target) -> Surface | None:
         if surface.harness == target.harness and surface.scope == "workspace":
             return surface
     return None
+
+
+def block_owners(pool: list[TaggedRecord], surface: Surface) -> dict:
+    """Which project (or `global`) owns each block the surface renders. A
+    workspace block of this or a declared project wins over a global one with
+    the same id, as layering resolves it."""
+    owners: dict = {}
+    for item in pool:
+        rec = item.record
+        if rec.kind != KIND_PERSONALITY_BLOCK:
+            continue
+        if rec.scope == "workspace":
+            owners[rec.id] = item.project_id
+        else:
+            owners.setdefault(rec.id, "global")
+    rendered = {b.id for b in pool_for(surface, block_pool(pool))}
+    return {rid: owner for rid, owner in owners.items() if rid in rendered}
 
 
 def brief_record(brief: Brief) -> Record:
@@ -168,7 +186,8 @@ def plan_switch(identity: ProjectIdentity, pool: list[TaggedRecord], target: Tar
     if status == "write" and new_text == host:
         status = "unchanged"
     old = None if status == "create" else host
-    return SwitchPlan(target, brief, surface, path, status, old, new_text, interior, warnings)
+    return SwitchPlan(target, brief, surface, path, status, old, new_text, interior, warnings,
+                      block_owners(pool, surface))
 
 
 def commit_switch(plan: SwitchPlan, write_text, read_text=None) -> None:

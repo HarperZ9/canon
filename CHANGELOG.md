@@ -83,6 +83,12 @@ and the version is unchanged.
   note), and `switch` refuses to overwrite until every proposal is accepted or
   rejected. `canon workspace pull --from <target>` reads the edits back without
   switching.
+- In-place edits inside a rendered region come back as proposals, and `switch`
+  waits for them. Several checkouts of one project, and a file restored by a
+  branch switch, read as stale renders rather than edits; an edit proposes only
+  the fields it changed; a removed constraint, decision or goal line is
+  proposed or kept; an edit of a block another project or global owns is kept
+  as a note; and a rejection holds only for the render it was made against.
 - Registers six new version pins: `project-id`, `project-row`,
   `workspace-state`, `handoff-receipt`, `import-report` and `render-ledger`.
 

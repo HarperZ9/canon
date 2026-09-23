@@ -52,8 +52,8 @@ def _proposals(store):
 
 def test_switch_records_what_it_wrote(project):
     store, path, _ = project
-    assert last_render(store, "CLAUDE.md") is not None
-    assert "Plain technical English." in last_render(store, "CLAUDE.md")
+    entry = last_render(store, "CLAUDE.md", store.identity.checkout)
+    assert entry is not None and "Plain technical English." in entry.interior
 
 
 def test_an_edited_block_becomes_a_proposal_and_blocks_the_overwrite(project):
@@ -162,7 +162,7 @@ def test_removing_another_projects_line_never_drops_this_projects_task(project):
     foreign = f"- [open] Their task ({task.id}) [from prj_{'0' * 32}]"
     base = f"### Open work\n- [open] Write the tests ({task.id})\n{foreign}"
     actual = f"### Open work\n- [open] Write the tests ({task.id})"
-    edits = brief_edits(actual, base, 1, store.records(), has_base=True)
+    edits, _ = brief_edits(actual, base, 1, store.records(), has_base=True)
     assert [e for e in edits if e.rule == "brief-removed-work"] == []
-    own_removed = brief_edits("### Open work", base, 1, store.records(), has_base=True)
+    own_removed, _ = brief_edits("### Open work", base, 1, store.records(), has_base=True)
     assert [(e.rid, e.data["status"]) for e in own_removed] == [(task.id, "dropped")]

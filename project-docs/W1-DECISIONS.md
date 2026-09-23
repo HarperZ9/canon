@@ -369,3 +369,30 @@ replaced by a new proposal with the same id.
 A malformed last line was always read as a truncation. A writer appends a line
 and its newline together, so only an unterminated last line is a truncation;
 a malformed line that ends in a newline is corruption and refuses.
+
+## D-133 Back-flow reads a checkout against its own render and keeps every edit
+
+The ledger kept one render per project and surface, but worktrees and clones
+share a project id and each has its own file, so one checkout read another's
+newer render as its base and proposed dropping live work. The last render is
+now kept per checkout, and a region equal to any render canon remembers writing
+to the surface is stale, whichever checkout wrote it or whichever branch
+restored it. An empty region has no base, so opting a file in never proposes a
+retirement. A file is written and its ledger entry recorded under one lock, so
+a held lock can no longer leave a written file with an old ledger entry.
+
+An edited line was mapped whole, so a title edit also carried the status the
+file showed, and reverted a newer status set elsewhere. Each line is now paired
+with the line canon rendered for the same id, and only the changed fields are
+proposed. A tick written `[x]` or `[Done]`, or a trailing space, used to read as
+a removal; a line that still names an id never does now. Removed constraint,
+decision, goal and detail lines, a changed brief heading and a changed sentinel
+ordinal were silently overwritten; each is now proposed or kept in the note.
+A rejection was remembered by content forever, so a later real edit with the
+same content was discarded; it is now tied to the render it was made against.
+
+An edit of a block another project or global owns was proposed as this
+project's record, and accepting it blocked every later `--include-project`
+switch. The ledger records each rendered block's owner, and such an edit is
+kept in the note, naming the owner. A retired copy of a block no longer counts
+in the collision check.

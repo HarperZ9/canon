@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from canon.layering import is_current
 from canon.schema import KIND_PERSONALITY_BLOCK, Record
 from canon.workspace.store import IsolationError, ProjectStore
 
@@ -60,8 +61,8 @@ def _refuse_block_collisions(tagged: list[TaggedRecord], own: str) -> None:
     owners: dict[tuple[str, str], set[str | None]] = {}
     for item in tagged:
         rec = item.record
-        if rec.kind != KIND_PERSONALITY_BLOCK:
-            continue
+        if rec.kind != KIND_PERSONALITY_BLOCK or not is_current(rec):
+            continue  # a retired copy renders nothing, so it overrides nothing
         owners.setdefault((rec.scope, rec.id), set()).add(item.project_id)
     for (scope, rid), projects in sorted(owners.items()):
         if len(projects - {None}) > 1:

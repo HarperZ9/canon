@@ -244,16 +244,25 @@ Agents and people edit instruction files. When they edit inside canon's region,
 the next `switch` must not overwrite that work, and it must not guess what the
 edit meant either.
 
-`switch` records the interior it wrote for each surface in the project's render
-ledger (`projects/<id>/renders.json`, a `canon.render-ledger/v1` object keyed by
-the surface's relative path). Before the next write it compares the region on
-disk with that last render:
+`switch` records the interior it wrote in the project's render ledger
+(`projects/<id>/renders.json`, a `canon.render-ledger/v1` object). A project can
+have several checkouts, each with its own file, so the last render is kept per
+checkout, keyed by a path-clean digest of the checkout root and the surface's
+relative path. The ledger also keeps the last 16 interiors canon wrote to each
+surface from any checkout, which blocks each render owned (this project, a
+declared project, or `global`), and a render number. The file write and the
+ledger entry happen under one project lock, so a held lock refuses before
+anything is written. Before the next write `switch` compares the region on disk
+with what canon wrote:
 
-- equal: the file is canon's own, possibly stale; the switch overwrites it.
-- different: the region was edited in place. Each edit becomes a proposed
-  record, and the switch refuses with `edits_pending` until every proposal is
-  accepted or rejected. After that the switch writes, carrying the accepted
-  edits and dropping the rejected ones.
+- equal to any remembered render, or empty: the file is canon's own, possibly
+  stale (one render behind another checkout, or restored by a branch switch);
+  the switch overwrites it.
+- otherwise: the region was edited in place. It is read against the closest of
+  this checkout's last render and the remembered renders. Each edit becomes a
+  proposed record, and the switch refuses with `edits_pending` until every
+  proposal is accepted or rejected. After that the switch writes, carrying the
+  accepted edits and dropping the rejected ones.
 
 What an edit becomes:
 
@@ -262,22 +271,33 @@ What an edit becomes:
 | a block's title, body or scope changed | the same block with the new content |
 | a new block | a new personality block |
 | a block removed | the block, retired (`valid_until` set) |
+| a block of another project or of global edited or removed | the memory note, naming the owner; never a record under this project |
+| a block's sentinel `ord` or `sup` changed | the memory note |
 | `Goal:` changed in the brief | the focus with the new goal, other fields kept |
-| a work line's status or title changed | that work item, updated |
+| a work or constraint line changed | that record, with only the fields that differ from the rendered line |
 | a new work line, or a new constraint line | a new work item or constraint |
 | a work line removed | that work item with status `dropped` |
-| any other changed line | one memory record holding the lines as written |
+| a constraint line removed | that constraint, retired |
+| the brief heading changed | the memory note |
+| any other added line | the memory note, as written |
+| any other removed line (a goal, a decision, a detail) | the memory note, as `removed: <line>` |
 | an edit that broke the region grammar | one memory record holding the changed lines |
 
-Lines labelled `[global]` or `[from <project>]` belong to another scope and are
-kept as text rather than mapped. With no ledger entry (canon never wrote this
-file for this project) the region is compared with what canon would write now,
-and only additions and changes count, since an absent block says nothing when
-canon never put it there. Every proposal is scrubbed like an import, carries an
-origin naming the surface, the file digest, the line and the rule, keeps an
-existing record's ordinal, and is skipped when the same content was already
-accepted or rejected. `canon workspace pull --from <target>` runs the same read
-without switching.
+The memory note is one proposed memory record per read. A mark is read
+loosely (`[x]` and `[Done]` mean done), trailing spaces are ignored, and a line
+that still names an id is never read as removing it. Lines labelled `[global]`
+or `[from <project>]` belong to another scope and are kept as text rather than
+mapped. With no ledger entry for this checkout the region is compared with the
+closest remembered render, or with what canon would write now, and only
+additions and changes count, since an absent block says nothing when canon
+never put it there. Every proposal is scrubbed like an import, carries an origin
+naming the surface, the file digest, the line, the rule, the render number it
+was read against and the digest of the accepted record it was built from, and
+keeps an existing record's ordinal. It is skipped when the same content was
+already accepted, or rejected against the same render; once a later render
+stands, the same edit made again is proposed again, and `switch` names the
+rejected edits it overwrites. `canon workspace pull --from <target>` runs the
+same read without switching.
 
 ## Importers
 
