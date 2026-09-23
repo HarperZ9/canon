@@ -219,7 +219,7 @@
         },
         {
           "key": "python tests",
-          "value": "1238 passing",
+          "value": "1238 cases",
           "note": "pytest over 63 files: 943 test functions plus their parametrized cases, covering records, backends, MCP, context, continuity export and every number here."
         },
         {

@@ -271,7 +271,7 @@ def test_the_suite_carries_the_number_of_tests_the_card_claims():
     per_file = re.findall(r"^tests/\S+\.py: (\d+)$", proc.stdout, re.MULTILINE)
     test_files = sorted((ROOT / "tests").glob("test_*.py"))
     assert len(per_file) == len(test_files)
-    assert CARD["python tests"]["value"] == f"{sum(int(n) for n in per_file)} passing"
+    assert CARD["python tests"]["value"] == f"{sum(int(n) for n in per_file)} cases"
 
 
 def test_the_note_counts_the_functions_behind_those_cases():
