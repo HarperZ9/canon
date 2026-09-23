@@ -243,3 +243,23 @@ With seven surfaces, most projects will lack some of the files. The batch
 writer already skipped a file with no region; it now also reports a file that
 does not exist as `missing` and never creates it, the same verdict the drift
 check gives. Creating a file is `switch --create`'s job, for one named target.
+
+## D-126 switch records what it wrote, so a stale file and an edit differ
+
+V4 decided drift against what is on disk with no recorded base (D-51), which
+suits a region only canon writes. A region an agent is invited to edit needs to
+tell canon's own stale render apart from an edit, because only the first is
+safe to overwrite. `switch` therefore records the interior it wrote per
+surface, with a digest, in the project's render ledger. A ledger entry whose
+digest fails is refused rather than trusted.
+
+## D-127 An in-place edit becomes a proposal, and switch waits for the decision
+
+Overwriting an edit loses work; applying it automatically lets any tool that
+can write the file change the project's records. Each edit is read back into
+the record it most plausibly means, by a fixed rule per line shape, and written
+as a proposal; a line that fits no rule is kept verbatim as a memory proposal
+instead of being guessed at. `switch` refuses while any proposal from the
+region is undecided, and proceeds once each is accepted or rejected. Without a
+ledger entry only additions and changes count, so the first switch into a file
+never proposes to retire blocks canon did not write.

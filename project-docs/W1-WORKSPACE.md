@@ -210,6 +210,47 @@ scoped block is byte-identical to the v0 grammar, and a block's source hash
 changes only when it has a scope. The `textblock-grammar` pin moves to
 `canon.textblock/v1`.
 
+## Edits made inside a rendered region
+
+Agents and people edit instruction files. When they edit inside canon's region,
+the next `switch` must not overwrite that work, and it must not guess what the
+edit meant either.
+
+`switch` records the interior it wrote for each surface in the project's render
+ledger (`projects/<id>/renders.json`, a `canon.render-ledger/v1` object keyed by
+the surface's relative path). Before the next write it compares the region on
+disk with that last render:
+
+- equal: the file is canon's own, possibly stale; the switch overwrites it.
+- different: the region was edited in place. Each edit becomes a proposed
+  record, and the switch refuses with `edits_pending` until every proposal is
+  accepted or rejected. After that the switch writes, carrying the accepted
+  edits and dropping the rejected ones.
+
+What an edit becomes:
+
+| edit | proposal |
+|---|---|
+| a block's title, body or scope changed | the same block with the new content |
+| a new block | a new personality block |
+| a block removed | the block, retired (`valid_until` set) |
+| `Goal:` changed in the brief | the focus with the new goal, other fields kept |
+| a work line's status or title changed | that work item, updated |
+| a new work line, or a new constraint line | a new work item or constraint |
+| a work line removed | that work item with status `dropped` |
+| any other changed line | one memory record holding the lines as written |
+| an edit that broke the region grammar | one memory record holding the changed lines |
+
+Lines labelled `[global]` or `[from <project>]` belong to another scope and are
+kept as text rather than mapped. With no ledger entry (canon never wrote this
+file for this project) the region is compared with what canon would write now,
+and only additions and changes count, since an absent block says nothing when
+canon never put it there. Every proposal is scrubbed like an import, carries an
+origin naming the surface, the file digest, the line and the rule, keeps an
+existing record's ordinal, and is skipped when the same content was already
+accepted or rejected. `canon workspace pull --from <target>` runs the same read
+without switching.
+
 ## Importers
 
 `canon workspace import --from claude-code|codex <file>` reads one session file
@@ -314,6 +355,7 @@ projects/<project_id>/records.jsonl    accepted rows
 projects/<project_id>/proposed.jsonl   proposed rows awaiting a decision
 projects/<project_id>/log.jsonl        every write, decision, promotion, adoption
 projects/<project_id>/project.json     the path-clean identity
+projects/<project_id>/renders.json     what switch last wrote to each surface
 global/records.jsonl                   rows promoted to global scope
 global/log.jsonl                       every promotion into global
 ```
@@ -374,6 +416,7 @@ canon workspace accept <id> | reject <id> --reason "not a real task"
 canon handoff --to codex [--receipt brief.receipt.json] [--out BRIEF.md]
 canon switch --to claude-code [--dry-run] [--create]
 canon workspace targets                  # files, budgets and declared downgrades
+canon workspace pull --from claude-code [--dry-run]   # edits in a region -> proposals
 ```
 
 Every command takes `--workspace` (default `.`), `--store`, and `--remote` to

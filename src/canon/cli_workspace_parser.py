@@ -123,6 +123,13 @@ def _import_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--dry-run", action="store_true", help="report; write nothing")
 
 
+def _pull_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--from", dest="target", required=True,
+                        help="the target whose instruction region to read back")
+    parser.add_argument("--home", default=None, help="home directory for global surfaces")
+    parser.add_argument("--dry-run", action="store_true", help="report; write nothing")
+
+
 def _decide_proposal_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("record_id", help="the proposed record id")
     parser.add_argument("--reason", default=None, help="why (required to reject)")
@@ -140,6 +147,7 @@ _SUBCOMMANDS = (
     ("constraint", "record a constraint or an environment quirk", _constraint_args),
     ("targets", "list the handoff targets, their files, budgets and downgrades", _no_args),
     ("import", "propose records from a Claude Code or Codex session", _import_args),
+    ("pull", "turn edits made inside a rendered region into proposals", _pull_args),
     ("accept", "accept a proposed record", _decide_proposal_args),
     ("reject", "reject a proposed record (logged)", _decide_proposal_args),
 )

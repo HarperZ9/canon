@@ -68,8 +68,44 @@ def run_decide_cmd(parsed, ctx: WorkspaceContext, out: Output, command: str) -> 
                 text=f"{verb} {summary(row.record)}")
 
 
+def run_pull_cmd(parsed, ctx: WorkspaceContext, out: Output, command: str) -> int:
+    from pathlib import Path
+
+    from .cli_handoff import _read_text
+    from .workspace.backflow import pending_edits
+    from .workspace.pool import project_pool
+    from .workspace.switch import SwitchRefused, plan_switch
+    from .workspace.targets import UnknownTarget, target_for
+
+    try:
+        target = target_for(parsed.target)
+        plan = plan_switch(ctx.identity, project_pool(ctx.store), target,
+                           home=parsed.home or str(Path.home()), read_text=_read_text,
+                           check_limits=False)
+    except UnknownTarget as exc:
+        raise CommandFailure("invalid_args", str(exc)) from exc
+    except SwitchRefused as exc:
+        raise CommandFailure(exc.code, str(exc)) from exc
+    report = pending_edits(ctx.store, plan, dry_run=parsed.dry_run) or {
+        "surface": plan.surface.relative_path if plan.surface else None,
+        "proposed": [], "already_decided": [], "parse_error": None,
+        "secrets_redacted": {}, "dry_run": parsed.dry_run}
+    verb = "would propose" if parsed.dry_run else "proposed"
+    lines = [f"{verb} {len(report['proposed'])} records from edits in {report['surface']}"]
+    lines += [f"- {p['kind']} {p['id']} ({p['rule']}, line {p['line']})"
+              for p in report["proposed"]]
+    if report["already_decided"]:
+        lines.append("already decided: " + ", ".join(p["id"] for p in report["already_decided"]))
+    if report["parse_error"]:
+        lines.append(f"the region no longer parses ({report['parse_error']}); its changed "
+                     "lines were kept as one proposed note")
+    return emit(out, command=command, message=lines[0], data={"report": report},
+                text="\n".join(lines))
+
+
 IMPORT_HANDLERS = {
     "import": run_import_cmd,
     "accept": run_decide_cmd,
     "reject": run_decide_cmd,
+    "pull": run_pull_cmd,
 }

@@ -64,8 +64,14 @@ Canon starts to carry a project's working state between models and tools.
 - The region grammar moves to `canon.textblock/v1` for the optional `applies`
   attribute. A region with no scoped block is byte-identical to v0.
 - `write_surfaces` reports a missing file as `missing` and does not create it.
-- Registers five new version pins: `project-id`, `project-row`,
-  `workspace-state`, `handoff-receipt` and `import-report`.
+- `switch` records what it wrote to each file. When the region was edited in
+  place since then, each edit becomes a proposed record (a changed block, a
+  ticked or added task, a new goal, a new quirk; anything else is kept as a
+  note), and `switch` refuses to overwrite until every proposal is accepted or
+  rejected. `canon workspace pull --from <target>` reads the edits back without
+  switching.
+- Registers six new version pins: `project-id`, `project-row`,
+  `workspace-state`, `handoff-receipt`, `import-report` and `render-ledger`.
 
 Limits:
 
@@ -87,6 +93,8 @@ Limits:
 - The scrubber recognises secrets by shape. A secret with no recognisable shape
   passes through; email addresses are not redacted.
 - Gemini CLI, Cursor, ChatGPT and Claude web exports have no importer yet.
+- Edit back-flow reads line shapes the brief itself writes. An edit in another
+  shape is kept as a note to accept, not mapped to a record.
 
 ## 0.2.0 - 2026-09-22
 

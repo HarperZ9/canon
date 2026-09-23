@@ -280,6 +280,13 @@ level up, in the stored row:
   `src/canon/workspace/target_fidelity.py` declares per-target downgrades
   (`activation.glob`, `text.at-import`) and `target_roundtrip` fails on an
   undeclared one; `hosts.py` checks the Cursor frontmatter.
+- `src/canon/workspace/ledger.py` is the render ledger (`renders.json`,
+  `canon.render-ledger/v1`): what `switch` last wrote per surface.
+  `backflow.py` compares the region on disk with it and turns block edits into
+  proposals; `backflow_brief.py` maps edited brief lines (goal, work status,
+  new work, new constraint, removed work) and keeps anything else as a memory
+  proposal. `switch` refuses with `edits_pending` while any such proposal is
+  undecided; `canon workspace pull --from <target>` runs the read alone.
   Fixtures in `tests/fixtures/transcripts/` use placeholders; tests plant
   canaries built at run time.
 - `project-docs/W1-WORKSPACE.md` is the spec (identity, collisions, renames,
@@ -297,7 +304,8 @@ level up, in the stored row:
   render, D-120 the source must name this project, D-121 public-format fixtures
   with run-time canaries, D-122 scope in the sentinel plus a visible line,
   D-123 exact paths for the three new surfaces, D-124 declared per-target
-  downgrades held by a verdict, D-125 a missing file is reported.
+  downgrades held by a verdict, D-125 a missing file is reported, D-126 the
+  render ledger, D-127 in-place edits become proposals and switch waits.
 
 Later phases (verifier, migration legs, region installation into an existing
 file, the global SOUL.md and the global GEMINI.md surfaces) aim at this same

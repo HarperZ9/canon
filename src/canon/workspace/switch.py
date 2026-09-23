@@ -143,8 +143,10 @@ def _host_warnings(target: Target, pool: list[TaggedRecord], surface: Surface,
 def plan_switch(identity: ProjectIdentity, pool: list[TaggedRecord], target: Target, *,
                 home: str, read_text, create: bool = False,
                 budget_bytes: int | None = None, budget_lines: int | None = None,
-                declared: tuple[str, ...] = ()) -> SwitchPlan:
-    """Read the target's surface and plan the rewrite. Writes nothing."""
+                declared: tuple[str, ...] = (), check_limits: bool = True) -> SwitchPlan:
+    """Read the target's surface and plan the rewrite. Writes nothing.
+    `check_limits=False` skips the host size refusal, for a caller that only
+    reads the region (pulling edits back) and will not write it."""
     brief = make_brief(identity, pool, target, budget_bytes=budget_bytes,
                        budget_lines=budget_lines, declared=declared, level=2)
     surface = workspace_surface(target)
@@ -161,7 +163,8 @@ def plan_switch(identity: ProjectIdentity, pool: list[TaggedRecord], target: Tar
     interior = region_interior(pool, surface, brief)
     refuse_secrets(interior, "instruction region")
     new_text = splice_region(host, interior)
-    warnings = _limits(target, new_text) + _host_warnings(target, pool, surface, new_text)
+    limits = _limits(target, new_text) if check_limits else ()
+    warnings = limits + _host_warnings(target, pool, surface, new_text)
     if status == "write" and new_text == host:
         status = "unchanged"
     old = None if status == "create" else host

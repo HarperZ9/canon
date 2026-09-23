@@ -23,7 +23,9 @@ from .cli_workspace_common import (
     emit,
     guarded,
 )
+from .workspace.backflow import pending_edits
 from .workspace.brief import BudgetError, SecretInRender, make_brief
+from .workspace.ledger import record_render
 from .workspace.pool import project_pool
 from .workspace.switch import SwitchRefused, commit_switch, plan_switch
 from .workspace.targets import UnknownTarget, target_for
@@ -106,6 +108,21 @@ def _status_words(status: str, dry_run: bool, rel: str | None) -> str:
     return f"{(_WOULD if dry_run else _DONE)[status]} {rel}"
 
 
+def _refuse_pending_edits(ctx: WorkspaceContext, plan, dry_run: bool) -> None:
+    """Edits made inside the region since canon last wrote it become proposals,
+    and the switch stops until each one is accepted or rejected."""
+    report = pending_edits(ctx.store, plan, dry_run=dry_run)
+    if report is None or not report["proposed"]:
+        return
+    rel = plan.surface.relative_path
+    ids = ", ".join(p["id"] for p in report["proposed"])
+    verb = "would become" if dry_run else "are now"
+    raise CommandFailure(
+        "edits_pending", f"{len(report['proposed'])} edits made inside the canon region "
+        f"of {rel} {verb} proposals ({ids}); accept or reject each with "
+        "canon workspace accept|reject, then switch again")
+
+
 def _switch(parsed, ctx: WorkspaceContext, out: Output, environ) -> int:
     target = target_for(parsed.to)
     pool, declared = _pool(parsed, ctx)
@@ -113,8 +130,11 @@ def _switch(parsed, ctx: WorkspaceContext, out: Output, environ) -> int:
     plan = plan_switch(ctx.identity, pool, target, home=home, read_text=_read_text,
                        create=parsed.create, budget_bytes=parsed.budget_bytes,
                        budget_lines=parsed.budget_lines, declared=declared)
+    _refuse_pending_edits(ctx, plan, parsed.dry_run)
     if not parsed.dry_run:
         commit_switch(plan, _write_text)
+        if plan.surface is not None:
+            record_render(ctx.store, plan.surface.relative_path, target.name, plan.interior)
     rel = plan.surface.relative_path if plan.surface else None
     lines = [f"{target.display}: {_status_words(plan.status, parsed.dry_run, rel)}",
              f"brief: {len(plan.brief.included)} records, "

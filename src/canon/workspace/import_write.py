@@ -80,7 +80,7 @@ def build_proposals(store: ProjectStore, extraction: Extraction, source: Source,
     return out, hits
 
 
-def _seen_before(store: ProjectStore) -> tuple[dict, set]:
+def seen_before(store: ProjectStore) -> tuple[dict, set]:
     accepted = {r.record.id: r.record for r in store.rows(STATE_ACCEPTED)}
     rejected = set()
     for entry in store.log_entries():
@@ -96,7 +96,7 @@ def run_import(identity: ProjectIdentity, store: ProjectStore, extraction: Extra
     """Check, scrub, propose, and report. Writes nothing when `dry_run`."""
     check = _refuse_early(identity, extraction, accept_foreign)
     proposals, hits = build_proposals(store, extraction, source, importer=importer)
-    accepted, rejected = _seen_before(store)
+    accepted, rejected = seen_before(store)
     written, already, previously = [], [], []
     for record, origin in proposals:
         entry = {"id": record.id, "kind": record.kind, "rule": origin["rule"],
