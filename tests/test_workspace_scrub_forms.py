@@ -35,6 +35,8 @@ def _forms() -> list[str]:
         "DB_PASS=" + V,
         "SMTP_PASS=" + V,
         "export openai_api_key=" + V,
+        "the password: hunter22",
+        "Reset the password: " + "correcthorsebattery",
         "client_secret: " + V + "9f8e7d",
         "https://api.example.com/v1/items?access_token=" + V,
         "https://" + V + "abcdefgh@github.com/o/r.git",
@@ -88,6 +90,8 @@ def test_the_everyday_form_is_redacted_and_leaves_nothing_behind(text):
     "API_KEY=%API_KEY%",
     "passed: 1234 tests",
     "The password field is required.",
+    "Fix token: expire it after an hour",
+    "- [open] Refresh token: handle expiry (task-3)",
 ])
 def test_code_and_prose_that_name_a_secret_stay_as_written(text):
     assert scrub(text).text == text

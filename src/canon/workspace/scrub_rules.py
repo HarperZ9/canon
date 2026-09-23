@@ -49,13 +49,28 @@ def beyond_markers(value: str) -> str:
     return MARKER_RE.sub("", value).strip(" .,;:!?\"'()[]{}<>")
 
 
+def _prose_colon(match: re.Match[str], group: int) -> bool:
+    """True for `word: short-word` inside a sentence ("Fix token: expire it"),
+    which is prose. A config key is compound (`db_password:`) or starts its
+    line (YAML), and a value with a digit, a symbol or twelve letters is kept
+    as a secret either way."""
+    head = match.string[match.start():match.start(group)]
+    if "=" in head or ":" not in head or re.search(r"[_.\-]", head.split(":")[0]):
+        return False
+    line_start = match.string.rfind("\n", 0, match.start()) + 1
+    if not match.string[line_start:match.start()].strip(" \t-*#>"):
+        return False
+    value = match.group(group).strip("\"'")
+    return value.isalpha() and len(value) < 12
+
+
 def value_is_secret(match: re.Match[str], group: int) -> bool:
     """A value after a secret-named key is a secret unless it is a
     placeholder, a code reference or an ordinary word."""
     raw = match.group(group)
     quoted = raw[:1] in "\"'" and raw[-1:] == raw[:1]
     value = raw[1:-1] if quoted else raw
-    if _PLACEHOLDER.match(value.strip()):
+    if _PLACEHOLDER.match(value.strip()) or _prose_colon(match, group):
         return False
     if MARKER_RE.search(value):
         return bool(beyond_markers(value))  # a marker plus more: the rest is secret

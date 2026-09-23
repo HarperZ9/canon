@@ -442,7 +442,9 @@ attribute, a dotted name, a type name such as `string`) or as a placeholder
 placeholder has to be the whole value, so `$2b$12$...` or a value that joins an
 earlier redaction to more text is still redacted. A name whose only secret
 segment is `key` or `auth` needs a value that looks random, so
-`key=lambda r: r.id` stays as written. Each match becomes
+`key=lambda r: r.id` stays as written, and a one-word name followed by a colon
+inside a sentence ("Refresh token: handle expiry") is prose unless its value
+has a digit, a symbol or twelve letters. Each match becomes
 `[REDACTED:<rule>]`. The report counts the hits by rule; it never stores the
 value or a digest of it. Two more checks sit behind the scrubber: the store refuses any record that still matches
 (`secret_quarantine`), and a brief or an instruction region that would carry a
