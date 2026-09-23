@@ -186,7 +186,10 @@ edits back without switching.
   recognise rather than guess. Gemini CLI, Cursor, ChatGPT and Claude web
   histories have no importer yet.
 - The scrubber recognises secrets by their shape. A secret with no recognisable
-  shape passes through, and email addresses are not redacted. After a
+  shape passes through, and email addresses are not redacted. After `Bearer`,
+  `Authorization:` or `X-API-Key:`, a word, a number, a date or a path on the
+  same line is left alone, so "use bearer authentication" and an OAuth
+  `token_type: bearer` line stay as written. After a
   secret-named key, a value shorter than four characters, a value that reads
   as code (`get_token()`, `self.password`, `string`), a number, a date, a path
   and a boolean are left alone, so a numeric PIN after `password=` passes

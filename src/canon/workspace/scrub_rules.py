@@ -5,11 +5,14 @@ Each rule is (code, pattern, group, check). `group` holds the secret (0 means
 the whole match). `check` is None for a shape that is a secret by itself (a
 provider key format, a private key block, a webhook URL) and a function for a
 shape that is a secret only when its value looks like one: a value after a
-credential-bearing name, a cookie, a token in a URL, a URL's user part. The
-name-based rules skip a placeholder, a call or attribute access, a dotted
-name, or a word such as `true` or `string`, so code and prose that mention a
-password are left alone; `scrub_shape.py` holds the value-shape rules that
-decide the rest (a number, a date, a path or a short word is a setting).
+credential-bearing name, a bearer, authorization or API-key header, a cookie,
+a token in a URL, a URL's user part. A header value sits on the header's own
+line, and a word, a number, a date or a path after a header name is not a
+token. The name-based rules skip a placeholder, a call or attribute access,
+a dotted name, or a word such as `true` or `string`, so code and prose that
+mention a password are left alone; `scrub_shape.py` holds the value-shape
+rules that decide the rest (a number, a date, a path or a short word is a
+setting).
 
 Provider prefixes carry short minimum lengths on purpose: a token cut short by
 a line wrap or a length cap is still a secret, and the prefix alone carries
@@ -22,6 +25,7 @@ from typing import Callable
 
 from canon.workspace.scrub_shape import (
     cookie_is_secret,
+    header_value_is_secret,
     name_class,
     shape_is_secret,
     userinfo_is_token,
@@ -57,10 +61,11 @@ _VALUE = r"(\"[^\"\n]{4,}\"|'[^'\n]{4,}'|<[^<>\n]*>|[^\s\"'`,;(){}\[\]]{4,})"
 # inside a dotted or underscored run, and a URL scheme and a URL password
 # have a length cap, so a long run of text is scanned once, not once per
 # character.
+#
 # A `name=value` right after `?` or `&` is a URL query parameter, which has
 # its own rule whose value ends at the next `&` or `#`; the assignment rules
-# leave it alone. A name after `?` or `&` followed by `:` is still theirs.
-# Atomic, so a later failure never retries the lookahead after a plain start.
+# leave it alone. A name after `?` or `&` followed by `:` is still theirs. The
+# group is atomic, so a later failure never retries the lookahead.
 _NOT_A_QUERY = r"(?>(?<![?&])|(?=[A-Za-z0-9_.\-]*+\s*:))"
 _NAME_START = r"(?<![A-Za-z0-9])(?<![A-Za-z0-9][_.\-])" + _NOT_A_QUERY
 # An assignment name starts after a character that cannot be in a name, or
@@ -136,6 +141,16 @@ def data_value_is_secret(match: re.Match[str], group: int) -> bool:
     return _value_check(match, group, code_refs=False)
 
 
+def header_is_secret(match: re.Match[str], group: int) -> bool:
+    """A bearer, authorization or API-key header value, unless it is a
+    placeholder or a word that is never a secret (`required`), or its shape
+    says it is not a token (`scrub_shape.header_value_is_secret`)."""
+    value = match.group(group)
+    if _PLACEHOLDER.match(value) or value.lower() in _NOT_SECRET:
+        return False
+    return header_value_is_secret(value)
+
+
 def cookie_value_is_secret(match: re.Match[str], group: int) -> bool:
     return cookie_is_secret(match.group(group))
 
@@ -176,14 +191,14 @@ RULES: tuple[tuple[str, re.Pattern[str], int, Check], ...] = (
         r"|\bSG\.[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}|\bSK[0-9a-fA-F]{32}\b"
         r"|\b\d{8,10}:AA[A-Za-z0-9_\-]{30,}"), 0, None),
     ("jwt", _p(r"\beyJ[A-Za-z0-9_\-]{8,}\.eyJ[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}"), 0, None),
-    ("bearer-header", _p(r"(?i)\bbearer\s+([A-Za-z0-9._~+/\-]{8,}=*)"), 1, None),
-    ("auth-header", _p(r"(?i)\bauthorization\s*:\s*(?:basic|token|digest)\s+([A-Za-z0-9._~+/=\-]{8,})"),
-     1, None),
+    ("bearer-header", _p(r"(?i)\bbearer[ \t]+([A-Za-z0-9._~+/\-]{8,}=*)"), 1, header_is_secret),
+    ("auth-header", _p(r"(?i)\bauthorization[ \t]*:[ \t]*(?:basic|token|digest)[ \t]+"
+                       r"([A-Za-z0-9._~+/=\-]{8,})"), 1, header_is_secret),
     ("cookie-header", _p(r"(?i)\b(?:set-)?cookie\s*:\s*([A-Za-z0-9_.\-]+=[^\s;\"']*"
                          r"(?:;\s*[A-Za-z0-9_.\-]+(?:=[^\s;\"']*)?)*)"), 1,
      cookie_value_is_secret),
-    ("api-key-header", _p(r"(?i)\b(?:x-api-key|api-key|x-auth-token)\s*[:=]\s*[\"']?([^\s\"',;]{8,})"),
-     1, None),
+    ("api-key-header", _p(r"(?i)\b(?:x-api-key|api-key|x-auth-token)[ \t]*[:=][ \t]*[\"']?"
+                          r"([^\s\"',;]{8,})"), 1, header_is_secret),
     ("connection-string", _p(_SCHEME + r"[^\s:/@\"']*:(?!\d+(?:[/?#]|$))([^\s@\"']{1,512})@"),
      1, None),
     ("connection-string", _p(_SCHEME + r"([^\s:/@\"']+)@"), 1, userinfo_is_secret),

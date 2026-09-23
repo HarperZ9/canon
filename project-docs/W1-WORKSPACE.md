@@ -434,7 +434,10 @@ extraction. The rules (`scrub_rules.py`) redact provider key formats
 npm, PyPI, DigitalOcean, Shopify, SendGrid, Twilio, Telegram), with short
 minimum lengths after the prefix so a cut token is still caught; JSON web
 tokens; PEM, PGP and PuTTY private keys; Slack and Discord webhook URLs;
-bearer, basic, token and API-key headers and cookies; the password of any
+bearer, basic, token and API-key headers whose value, on the header's own
+line, is not a setting (a number, a date, a path) or a lower-case or
+capitalised word of fewer than twenty letters (`bearer authentication`,
+`X-API-Key: required`), and cookies; the password of any
 `user:password@` in a URL unless it is a placeholder (a port followed by a
 path, a query, a fragment or the end is not a password), and a user part with
 no password when, with its percent escapes decoded, it holds a random run (a

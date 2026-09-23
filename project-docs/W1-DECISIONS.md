@@ -609,3 +609,24 @@ redacts the value up to the next `&`. The general assignment rule also
 starts a name after the `-` or `--` of a command-line flag, so
 `--api-token=<token>` is redacted; before, a name had to start after a
 character that cannot be in a name, and the flag's dash blocked it.
+
+## D-144 A header value is judged by its shape and read on its own line
+
+D-136 moved the name-based rules to shape checks and left three header rules
+matching by name alone: `bearer-header`, `auth-header` and `api-key-header`.
+The bearer rule's `\s+` also crossed a line break, so `token_type: bearer`
+followed by `expires_in: 3600` on the next line, which is how an OAuth token
+response prints, redacted `expires_in`. Prose and config were refused with
+exit 4: "Use bearer authentication for the admin API", "X-API-Key:
+required", `x-auth-token: disabled`, `Authorization: Token placeholder`, and
+a date, a number or a path after `X-API-Key:`, which the walkthrough says a
+secret-named key leaves alone.
+
+The three rules now take spaces and tabs only between the header name and
+its value, and a value is a token unless it is a placeholder, a word that is
+never a secret, a setting by its shape (a number, a date, a path of two
+segments), or a lower-case or capitalised word of fewer than twenty letters.
+A bearer token of twenty identical letters, as the rule test uses, is still
+a token. The cost: a real token that is one lower-case word of fewer than
+twenty letters passes, and a number of up to 19 digits after `X-API-Key:`
+passes, as it does after any secret-named key.

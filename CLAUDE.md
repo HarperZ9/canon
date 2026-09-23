@@ -336,7 +336,8 @@ level up, in the stored row:
   the scrubber runs in time linear in its input, D-141 a value looks random by
   its runs, not by its character classes, D-142 the last secret word decides a
   name, and a password keeps its suffix, D-143 a URL query parameter ends at
-  the next `&` or `#`.
+  the next `&` or `#`, D-144 a header value is judged by its shape and read on
+  its own line.
 
 Later phases (verifier, migration legs, region installation into an existing
 file, the global SOUL.md and the global GEMINI.md surfaces) aim at this same

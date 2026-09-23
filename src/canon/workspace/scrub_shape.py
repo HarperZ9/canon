@@ -78,6 +78,7 @@ _PATH = re.compile(r"(?:~|\.{1,2}|[A-Za-z]:|\$\{?[A-Za-z_][A-Za-z0-9_]*\}?|%[A-Z
 _BASE64 = re.compile(r"[A-Za-z0-9+/=]+")
 _ARN = re.compile(r"arn:[a-z0-9-]+:[a-z0-9-]+:[a-z0-9-]*:\d*:\S+")
 _WORD = re.compile(r"[A-Za-z][a-z]{0,9}")
+_PROSE_WORD = re.compile(r"[A-Za-z][a-z]{0,18}")
 _URL = re.compile(r"[a-zA-Z][a-zA-Z0-9+.\-]*://")
 _RUN = re.compile(r"[A-Za-z0-9]+")
 # A word, a number, or a word followed by a number (`eastus2`, `v2`, `2024`,
@@ -194,6 +195,14 @@ def userinfo_is_token(value: str) -> bool:
     `git`, `first.last`, `deploy-bot-2024`, `GitHubUser42` or an email address
     is not."""
     return random_run(unquote(value))
+
+
+def header_value_is_secret(value: str) -> bool:
+    """A header value (after `Bearer`, `Authorization: Basic`, `X-API-Key:`)
+    is a token unless it is a setting (a number, a date, a path) or a
+    lower-case or capitalised word of fewer than twenty letters, which reads
+    as prose (`bearer authentication`, `Token placeholder`)."""
+    return not (ordinary(value, strict=True) or _PROSE_WORD.fullmatch(value))
 
 
 def cookie_is_secret(pairs: str) -> bool:
