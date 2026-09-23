@@ -214,3 +214,9 @@ def _parse_error(stdout: TextIO, stderr: TextIO, *, json_requested: bool, color:
 
 
 __all__ = ["COMMANDS", "build_parser", "run_cli", "main"]
+
+
+if __name__ == "__main__":
+    # MCP host configs launch "python -m canon.cli mcp"; without this guard the module
+    # imports, does nothing, and exits 0, which a host reports as "Connection closed".
+    raise SystemExit(main())
