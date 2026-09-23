@@ -16,7 +16,11 @@ PuTTY), Slack and Discord webhook URLs, bearer, basic and API-key headers,
 cookies, credentials inside a URL (a password, a token as the user, or a token
 query parameter), Azure account keys, `.npmrc` tokens, JSON secret fields,
 password fields in any case and after `=` or `:`, and assignments whose name
-says key, token, secret, pass, password or credential, in any case.
+says key, token, secret, pass, password or credential, in any case. A value
+after such a name is judged by its shape (`scrub_shape.py`): a number, a date,
+a path or a boolean is a setting, a short word is a setting after a key or
+token name, and a name that qualifies the secret word (`token_type`,
+`KEY_COUNT`) needs a value that looks random.
 
 It does not prove a text is free of secrets; a secret with no recognisable
 shape passes through. `find_secrets` is the same scan without the rewrite, used

@@ -4,10 +4,12 @@ it applies them.
 Each rule is (code, pattern, group, check). `group` holds the secret (0 means
 the whole match). `check` is None for a shape that is a secret by itself (a
 provider key format, a private key block, a webhook URL) and a function for a
-shape that is a secret only when its value looks like one (a value after a
-secret-named key). The name-based rules skip a value that is a placeholder, a
-call or attribute access, a dotted name, or a word such as `true` or
-`string`, so code and prose that mention a password are left alone.
+shape that is a secret only when its value looks like one: a value after a
+credential-bearing name, a cookie, a token in a URL, a URL's user part. The
+name-based rules skip a placeholder, a call or attribute access, a dotted
+name, or a word such as `true` or `string`, so code and prose that mention a
+password are left alone; `scrub_shape.py` holds the value-shape rules that
+decide the rest (a number, a date, a path or a short word is a setting).
 
 Provider prefixes carry short minimum lengths on purpose: a token cut short by
 a line wrap or a length cap is still a secret, and the prefix alone carries
@@ -17,6 +19,8 @@ from __future__ import annotations
 
 import re
 from typing import Callable
+
+from canon.workspace.scrub_shape import cookie_is_secret, name_class, shape_is_secret
 
 REDACTED = "[REDACTED:{code}]"
 MARKER_RE = re.compile(r"\[REDACTED:[a-z0-9-]+\]")
@@ -34,7 +38,7 @@ _NOT_SECRET = frozenset({
     "lambda",
 })
 _DOTTED = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+$")
-_WEAK_WORDS = frozenset({"key", "auth"})
+_NAME = re.compile(r"[A-Za-z0-9_.\-]+")
 _SEGMENT_WORDS = ("key", "token", "secret", "password", "passwd", "pwd", "pass",
                   "passphrase", "credential", "credentials", "apikey", "auth")
 # A cut token is still a secret; a lower-case word after the prefix (hf_transfer,
@@ -64,36 +68,45 @@ def _prose_colon(match: re.Match[str], group: int) -> bool:
     return value.isalpha() and len(value) < 12
 
 
-def value_is_secret(match: re.Match[str], group: int) -> bool:
-    """A value after a secret-named key is a secret unless it is a
-    placeholder, a code reference or an ordinary word."""
+def _name_before(match: re.Match[str], group: int) -> str:
+    """The name the value is assigned to: the last name-shaped run of text
+    between the start of the match and the value."""
+    names = _NAME.findall(match.string[match.start():match.start(group)])
+    return names[-1] if names else ""
+
+
+def _value_check(match: re.Match[str], group: int, code_refs: bool) -> bool:
     raw = match.group(group)
-    quoted = raw[:1] in "\"'" and raw[-1:] == raw[:1]
-    value = raw[1:-1] if quoted else raw
-    if _PLACEHOLDER.match(value.strip()) or _prose_colon(match, group):
+    quoted = raw[:1] in "\"'" and raw[-1:] == raw[:1] and len(raw) > 1
+    value = (raw[1:-1] if quoted else raw).strip()
+    if _PLACEHOLDER.match(value) or _prose_colon(match, group):
         return False
     if MARKER_RE.search(value):
         return bool(beyond_markers(value))  # a marker plus more: the rest is secret
     if value.lower() in _NOT_SECRET:
         return False
-    if not quoted:
+    if code_refs and not quoted:
         after = match.string[match.end(group):match.end(group) + 1]
         if after in ("(", "[", ".") or _DOTTED.match(value):
             return False
-    return True
+    return shape_is_secret(value, name_class(_name_before(match, group)))
 
 
-def _named_value(match: re.Match[str], group: int) -> bool:
-    """The lower-case name rule: a weak word (`key`, `auth`) alone needs a
-    value that looks random, so `key=lambda` or `sort_key: name` stay prose."""
-    if not value_is_secret(match, group):
-        return False
-    segments = re.split(r"[_.\-]", match.group(1).lower())
-    if any(s in _SEGMENT_WORDS and s not in _WEAK_WORDS for s in segments):
-        return True
-    value = match.group(group).strip("\"'")
-    return len(value) >= 12 and re.search(r"[A-Za-z]", value) is not None \
-        and re.search(r"[0-9]", value) is not None
+def value_is_secret(match: re.Match[str], group: int) -> bool:
+    """A value after a credential-bearing name is a secret unless it is a
+    placeholder, a code reference, an ordinary word, or a setting by its shape
+    (`scrub_shape.shape_is_secret`)."""
+    return _value_check(match, group, code_refs=True)
+
+
+def data_value_is_secret(match: re.Match[str], group: int) -> bool:
+    """The same check for a value that is data, never code: a JSON string or
+    a URL query parameter."""
+    return _value_check(match, group, code_refs=False)
+
+
+def cookie_value_is_secret(match: re.Match[str], group: int) -> bool:
+    return cookie_is_secret(match.group(group))
 
 
 def _p(pattern: str, flags: int = 0) -> re.Pattern[str]:
@@ -129,7 +142,8 @@ RULES: tuple[tuple[str, re.Pattern[str], int, Check], ...] = (
     ("auth-header", _p(r"(?i)\bauthorization\s*:\s*(?:basic|token|digest)\s+([A-Za-z0-9._~+/=\-]{8,})"),
      1, None),
     ("cookie-header", _p(r"(?i)\b(?:set-)?cookie\s*:\s*([A-Za-z0-9_.\-]+=[^\s;\"']*"
-                         r"(?:;\s*[A-Za-z0-9_.\-]+(?:=[^\s;\"']*)?)*)"), 1, None),
+                         r"(?:;\s*[A-Za-z0-9_.\-]+(?:=[^\s;\"']*)?)*)"), 1,
+     cookie_value_is_secret),
     ("api-key-header", _p(r"(?i)\b(?:x-api-key|api-key|x-auth-token)\s*[:=]\s*[\"']?([^\s\"',;]{8,})"),
      1, None),
     ("connection-string", _p(r"\b[a-zA-Z][a-zA-Z0-9+.\-]*://[^\s:/@\"']*:(?!\d+(?:/|$))([^\s@\"']+)@"),
@@ -138,13 +152,13 @@ RULES: tuple[tuple[str, re.Pattern[str], int, Check], ...] = (
     ("url-credential", _p(
         r"(?i)[?&](?:access_token|token|api_key|apikey|key|secret|sig|signature|password|auth|"
         r"code|client_secret|x-amz-signature|x-amz-credential|x-amz-security-token)="
-        r"([^&\s#\"']{6,})"), 1, None),
+        r"([^&\s#\"']{6,})"), 1, data_value_is_secret),
     ("azure-key", _p(r"(?i)\b(?:AccountKey|SharedAccessSignature|SharedAccessKey)=([^;\s\"']{8,})"),
      1, None),
     ("npmrc-token", _p(r":_(?:authToken|auth|password)=([^\s\"']{8,})"), 1, None),
     ("json-secret", _p(
         r"(?i)\\?\"[a-z0-9_\-]*(?:api[_-]?key|token|secret|password|passwd|credential)"
-        r"[a-z0-9_\-]*\\?\"\s*:\s*\\?\"([^\"\\\n]{4,})\\?\""), 1, None),
+        r"[a-z0-9_\-]*\\?\"\s*:\s*\\?\"([^\"\\\n]{4,})\\?\""), 1, data_value_is_secret),
     ("password-field", _p(
         r"(?i)(?<![A-Za-z0-9])(?:[a-z0-9]+[_.\-])*(?:password|passwd|pwd|pass|passphrase)"
         r"\s*[:=]\s*" + _VALUE), 1, value_is_secret),
@@ -153,5 +167,5 @@ RULES: tuple[tuple[str, re.Pattern[str], int, Check], ...] = (
         r"(\"[^\"\n]{4,}\"|'[^'\n]{4,}'|<[^<>\n]*>|[^\s\"']{4,})"), 1, value_is_secret),
     ("env-assignment", _p(
         r"(?i)(?<![A-Za-z0-9_.\-])(?<!\$\{)((?:[a-z0-9]+[_.\-])*(?:" + "|".join(_SEGMENT_WORDS) +
-        r")(?:[_.\-][a-z0-9]+)*)\s*[=:]\s*" + _VALUE), 2, _named_value),
+        r")(?:[_.\-][a-z0-9]+)*)\s*[=:]\s*" + _VALUE), 2, value_is_secret),
 )

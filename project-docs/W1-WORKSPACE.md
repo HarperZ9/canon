@@ -440,9 +440,20 @@ least four characters, and one that reads as code (a call, an index, an
 attribute, a dotted name, a type name such as `string`) or as a placeholder
 (`<...>`, `${VAR}`, an all-caps `$VAR`, `%VAR%`, `{{...}}`) is left alone; a
 placeholder has to be the whole value, so `$2b$12$...` or a value that joins an
-earlier redaction to more text is still redacted. A name whose only secret
-segment is `key` or `auth` needs a value that looks random, so
-`key=lambda r: r.id` stays as written, and a one-word name followed by a colon
+earlier redaction to more text is still redacted. The rest is decided by the
+value's shape (`scrub_shape.py`). A number of at most 19 digits, a date or
+time, a path, or a boolean is a setting after any name (`KEY_COUNT=1000`,
+`second pass: 2026-10-01`, `private_key_path: ~/.ssh/id_ed25519`); a path
+segment that mixes both cases with a digit, or runs to sixteen mixed-case
+letters, is not a path. After a name that ends in a password word any other
+value is a secret. After a name that ends in another credential word, or in
+`key` after a word such as `api`, `access` or `secret`, a word of up to ten
+letters is a setting (`token: bearer`) and anything else is a secret. After
+any other name (`token_type`, `KEY_PREFIX`, a bare `key` or `auth`, `MONKEY`)
+the value must look random: twelve or more characters with no space that mix
+letters and digits, or both cases with `+`, `/` or `=`. A cookie header is a
+secret when one of its values is, and a URL query parameter and a JSON field
+take the same name and shape rules. A one-word name followed by a colon
 inside a sentence ("Refresh token: handle expiry") is prose unless its value
 has a digit, a symbol or twelve letters. Each match becomes
 `[REDACTED:<rule>]`. The report counts the hits by rule; it never stores the

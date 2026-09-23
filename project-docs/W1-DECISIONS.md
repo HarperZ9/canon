@@ -444,3 +444,26 @@ this project. That is the same answer as deriving the checkout's identity with
 the override, since the override names the repository and a worktree shares
 its config. Any other checkout is compared by identity without the override,
 so a nested repository and a submodule stay other projects.
+
+## D-136 A value after a secret-named key is judged by its shape
+
+D-131 widened the name rules and kept "where the two conflict the rule
+redacts". The store backstop turned that into a refusal: a hand-typed
+`canon workspace task "Set session_token_ttl=3600 in prod"` exited 4 with no
+override, and so did `pass_rate=0.95` and `KEY_COUNT=1000`. The name rules
+also redacted `KEY_PREFIX=canon`, `token_type: bearer`,
+`private_key_path: ~/.ssh/id_ed25519`, `Cookie: consent=yes`, `?key=value123`
+and `second pass: 2026-10-01`. A redaction of a setting is not free when the
+same rule refuses the record.
+
+The name now says what a value is for and the value's shape says whether it
+is a secret (`scrub_shape.py`). A number, a date, a path and a boolean are
+settings after any name. After a password word any other value is a secret,
+since a person picks a password. After another credential word a word of up
+to ten letters is a setting, since an issued token never reads as one. A name
+where another word follows the secret word (`token_type`, `KEY_PREFIX`)
+describes the secret rather than holding it, so its value must look random.
+Cookies, URL query parameters and JSON fields take the same checks. Every
+form in the end-to-end secret test is still redacted, and both lists are
+tests. A numeric PIN after `password=` now passes through; that is the
+declared cost of reading a number as a setting.

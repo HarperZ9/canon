@@ -270,7 +270,7 @@ level up, in the stored row:
   `canon switch`; `src/canon/cli_files.py` is their file IO with named
   failures.
 - `src/canon/workspace/scrub.py` redacts secret-shaped values by the rules in
-  `scrub_rules.py` and counts hits (no values, no digests); importers scrub each
+  `scrub_rules.py` (value shapes in `scrub_shape.py`) and counts hits (no values, no digests); importers scrub each
   source string whole before extraction; the store refuses a record that still
   matches (`SecretRefused`), and `brief.refuse_secrets` guards the brief and the
   switch region. `extract.py` holds the fixed text rules; `import_source.py` the
@@ -327,7 +327,8 @@ level up, in the stored row:
   identity, D-133 back-flow reads a checkout against its own render and keeps
   every edit, D-134 switch checks the host as it is (links, override, budget
   chain, line endings) and the brief is measured as it lands, D-135 the
-  project check resolves a working directory to its checkout first.
+  project check resolves a working directory to its checkout first, D-136 a
+  value after a secret-named key is judged by its shape.
 
 Later phases (verifier, migration legs, region installation into an existing
 file, the global SOUL.md and the global GEMINI.md surfaces) aim at this same

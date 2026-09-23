@@ -176,10 +176,14 @@ edits back without switching.
   recognise rather than guess. Gemini CLI, Cursor, ChatGPT and Claude web
   histories have no importer yet.
 - The scrubber recognises secrets by their shape. A secret with no recognisable
-  shape passes through, a value shorter than four characters after a
-  secret-named key is not redacted, a value that reads as code (`get_token()`,
-  `self.password`, `string`) after such a key is left alone, and email
-  addresses are not redacted.
+  shape passes through, and email addresses are not redacted. After a
+  secret-named key, a value shorter than four characters, a value that reads
+  as code (`get_token()`, `self.password`, `string`), a number, a date, a path
+  and a boolean are left alone, so a numeric PIN after `password=` passes
+  through. A word of up to ten letters after a key or token name is left alone
+  (`token: bearer`), and a name where another word follows the secret word
+  (`token_type`, `KEY_COUNT`, `session_token_ttl`) keeps its value unless the
+  value looks random: twelve or more characters that mix letters and digits.
 - None of the instruction files can load a rule for some files only. A block
   scoped to files with `applies_to` is written for every file, with an
   `Applies to:` line the model reads as advice.
