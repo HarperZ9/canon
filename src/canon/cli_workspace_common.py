@@ -63,11 +63,19 @@ class CommandFailure(Exception):
         self.code = code
 
 
-def build_context(parsed: argparse.Namespace, environ: Mapping[str, str]) -> WorkspaceContext:
+def build_context(parsed: argparse.Namespace, environ: Mapping[str, str],
+                  out: "Output | None" = None) -> WorkspaceContext:
+    """The project context. With `out`, a checkout new to an existing project
+    is announced on stderr, so a merge the identity rules cannot see (two
+    repositories sharing one remote) is never silent."""
     workspace = Path(parsed.workspace)
     identity = derive_identity(workspace, remote_url=parsed.remote)
     root = Path(parsed.store) if parsed.store else default_store_root(environ)
-    return WorkspaceContext(identity, ProjectStore(root, identity), workspace.resolve())
+    store = ProjectStore(root, identity)
+    notice = store.checkout_notice() if out is not None else None
+    if notice:
+        out.stderr.write(f"notice: {notice}\n")
+    return WorkspaceContext(identity, store, workspace.resolve())
 
 
 def one_line(text: str, limit: int = 400) -> str:

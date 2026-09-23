@@ -32,8 +32,18 @@ canon workspace id
 
 canon derives the project's id from its git remote, so two clones of one
 repository share their records and a fork has its own. A repository with no
-remote is identified by its path. Records live outside the repository, in
-`~/.canon/store` unless `CANON_STORE` or `--store` points elsewhere.
+remote is identified by a random value canon keeps in its `.git` directory.
+Records live outside the repository, in `~/.canon/store` unless `CANON_STORE`
+or `--store` points elsewhere.
+
+Two different apps started by cloning one starter repository keep its remote,
+so canon cannot tell them apart. The first command you run in a checkout the
+project has not seen prints a notice. If it is a different project, give it
+its own name:
+
+```bash
+git config canon.project chat-app
+```
 
 Every stored record names its project. A read that finds another project's
 record in this project's file fails rather than mixing the two, and another
@@ -45,9 +55,9 @@ reads it, is an explicit, logged command:
 canon workspace promote decision-7 --reason "house rule for every repository"
 ```
 
-If you rename the remote or move a repository that has no remote, its id
-changes. The old records stay in the store; copy them over with
-`canon workspace adopt --from <old-id> --reason "moved the checkout"`.
+If you rename the remote, its id changes. The old records stay in the store;
+copy them over with
+`canon workspace adopt --from <old-id> --reason "renamed the remote"`.
 
 ## Record the state you would otherwise re-explain
 

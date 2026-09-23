@@ -38,7 +38,7 @@ def run_handoff_command(parsed: argparse.Namespace, *, stdout: TextIO, stderr: T
 
     def action() -> int:
         try:
-            ctx = build_context(parsed, environ)
+            ctx = build_context(parsed, environ, out)
             return handler(parsed, ctx, out, environ)
         except UnknownTarget as exc:
             raise CommandFailure("invalid_args", str(exc)) from exc

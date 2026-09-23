@@ -230,10 +230,13 @@ that door and still writes nothing:
 W1 is the workspace band: per-project state that survives a change of model or
 tool. It keeps the record envelope unchanged and binds records to a project one
 level up, in the stored row:
-- `src/canon/workspace/identity.py` derives a `prj_` id from the normalized
-  remote URL (credentials, port, scheme and `.git` dropped, host lowercased,
-  path case kept) or from the root path when there is no remote. A `.git` in the
-  home directory or a filesystem root claims only itself.
+- `src/canon/workspace/identity.py` derives a `prj_` id from a `canon.project`
+  git config name, else the normalized remote URL (credentials, a default port,
+  scheme and `.git` dropped, host lowercased, path case kept), else a nonce in
+  the git directory (`gitconfig.py` reads the config and keeps the nonce), else
+  the root path. A `.git` in the home directory or a filesystem root claims
+  only itself. The store keeps a digest per checkout root and announces a
+  checkout new to a project.
 - `src/canon/workspace/rows.py` is the `canon.project-row/v1` row that wraps an
   unchanged record with its `project_id`, `state` (accepted or proposed),
   `origin` and `promoted_from`.
@@ -310,7 +313,9 @@ level up, in the stored row:
   render ledger, D-127 in-place edits become proposals and switch waits,
   D-128 the review findings folded in (tagged removals, the anchor ceiling,
   re-read before write, four-character minimum for name-based secret rules),
-  D-129 promote refuses a global id clash and accept refuses a stale base.
+  D-129 promote refuses a global id clash and accept refuses a stale base,
+  D-130 a non-default port splits, a nonce keys a repository with no remote,
+  and a new checkout is announced.
 
 Later phases (verifier, migration legs, region installation into an existing
 file, the global SOUL.md and the global GEMINI.md surfaces) aim at this same

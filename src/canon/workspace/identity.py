@@ -11,13 +11,23 @@ Derivation, in order:
   1. The repository root is the nearest directory at or above the workspace that
      holds a `.git` entry (a directory, or the file a worktree or submodule
      carries). A workspace with no `.git` above it is its own root.
-  2. With a remote, the id is derived from the normalized remote URL alone:
-     scheme, credentials, port, query and a trailing `.git` are dropped and the
-     host is lowercased. Two clones of one repository share an id wherever they
-     sit on disk. The remote is `origin` when present, else the first remote by
-     name, so the choice does not depend on file order.
-  3. With no remote, the id is derived from the resolved root path. Moving such
-     a repository changes its id.
+  2. A `canon.project` name in the repository's git config names the project
+     explicitly and wins over the remote. It splits two checkouts that share a
+     remote but are different projects (two apps cloned from one starter).
+  3. With a remote, the id is derived from the normalized remote URL alone:
+     scheme, credentials, query and a trailing `.git` are dropped, the host is
+     lowercased, and a port is dropped only when it is the scheme's default.
+     Two clones of one repository share an id wherever they sit on disk. The
+     remote is `origin` when present, else the first remote by name, so the
+     choice does not depend on file order.
+  4. With no remote, a repository is keyed on a random nonce canon writes once
+     into its shared git directory, so moving it keeps its id and a new `git
+     init` at a reused path is a new project. A directory with no git directory,
+     or one canon cannot write, is keyed on its resolved path.
+
+A merge the rules cannot see (two apps started from one starter repository keep
+its remote) is announced rather than silent: the store records a digest of each
+checkout root that used the project, and a command run from a new one says so.
 
 The path of a case-sensitive repository host is kept as written. Two remotes
 that differ only by path case therefore get two ids. That split is deliberate:
@@ -39,16 +49,23 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from canon.versions import PIN_PROJECT_ID
+from canon.workspace.gitconfig import (  # noqa: F401  (parse_remotes re-exported)
+    GitConfigError,
+    parse_remotes,
+    project_nonce,
+    read_project_name,
+    read_remote_url,
+)
 
 ID_SCHEMA = PIN_PROJECT_ID.kind_tag
 METHOD_REMOTE = "remote"
 METHOD_PATH = "path"
+METHOD_CONFIG = "config"
+_DEFAULT_PORTS = {"ssh": 22, "git+ssh": 22, "ssh+git": 22, "http": 80, "https": 443,
+                  "git": 9418}
 _ID_PREFIX = "prj_"
 PROJECT_ID_RE = re.compile(r"^prj_[0-9a-f]{32}$")
 
-_SECTION_RE = re.compile(r'^\[\s*remote\s+"((?:[^"\\]|\\.)*)"\s*\]$')
-_ANY_SECTION_RE = re.compile(r"^\[.*\]$")
-_URL_RE = re.compile(r"^url\s*=\s*(.*)$", re.IGNORECASE)
 _SCP_RE = re.compile(r"^(?:[^@/\s]+@)?([^:/\s]+):(?!//)(.+)$")
 
 
@@ -69,6 +86,12 @@ class ProjectIdentity:
     key: str
     label: str
     root: Path
+
+    @property
+    def checkout(self) -> str:
+        """A path-clean digest of this checkout's root, so the store can tell a
+        second checkout of the project from the first without naming a path."""
+        return _sha256(os.path.normcase(str(self.root)))[:16]
 
     def to_public(self) -> dict:
         """The path-clean form a receipt or a brief may carry."""
@@ -124,78 +147,6 @@ def find_repo_root(start: Path, *,
         current = current.parent
 
 
-def _git_dir(root: Path) -> Path:
-    """The git directory for `root`: `.git` itself, or the directory a
-    worktree's or submodule's `.git` file points at."""
-    dot_git = root / ".git"
-    if dot_git.is_dir():
-        return dot_git
-    text = dot_git.read_text(encoding="utf-8").strip()
-    if not text.startswith("gitdir:"):
-        raise ProjectIdentityError("a .git file without a gitdir line")
-    target = Path(text[len("gitdir:"):].strip())
-    return target if target.is_absolute() else (root / target)
-
-
-def _config_path(root: Path) -> Path:
-    """A worktree keeps its remotes in the common directory named by its
-    `commondir` file; a submodule and a plain repository keep them in the git
-    directory itself."""
-    git_dir = _git_dir(root)
-    common = git_dir / "commondir"
-    if common.is_file():
-        rel = Path(common.read_text(encoding="utf-8").strip())
-        git_dir = rel if rel.is_absolute() else (git_dir / rel)
-    return git_dir / "config"
-
-
-def parse_remotes(config_text: str) -> dict[str, str]:
-    """Remote name to URL from a git config file's text. The first `url` in a
-    remote section wins. `include` directives and `insteadOf` rewrites are not
-    followed (a declared limit)."""
-    remotes: dict[str, str] = {}
-    current: str | None = None
-    for raw in config_text.splitlines():
-        line = raw.strip()
-        if not line or line[0] in "#;":
-            continue
-        section = _SECTION_RE.match(line)
-        if section:
-            current = section.group(1)
-            continue
-        if _ANY_SECTION_RE.match(line):
-            current = None
-            continue
-        match = _URL_RE.match(line)
-        if current is not None and match and current not in remotes:
-            remotes[current] = _unquote_value(match.group(1))
-    return remotes
-
-
-def _unquote_value(value: str) -> str:
-    value = value.strip()
-    if len(value) >= 2 and value[0] == '"' and value[-1] == '"':
-        return value[1:-1]
-    for marker in (" #", " ;", "\t#", "\t;"):
-        if marker in value:
-            value = value.split(marker, 1)[0]
-    return value.strip()
-
-
-def read_remote_url(root: Path) -> str | None:
-    """The chosen remote's URL for the repository at `root`, or None."""
-    if not (root / ".git").exists():
-        return None
-    config = _config_path(root)
-    if not config.is_file():
-        return None
-    remotes = parse_remotes(config.read_text(encoding="utf-8"))
-    if not remotes:
-        return None
-    name = "origin" if "origin" in remotes else sorted(remotes)[0]
-    return remotes[name]
-
-
 def normalize_remote(url: str, *, root: Path | None = None) -> str:
     """The comparison form of a remote URL: `host/path` for a network remote,
     `local:<path>` for a path remote. Credentials never survive."""
@@ -217,6 +168,13 @@ def _normalize_scheme_url(text: str) -> str:
     host = parts.hostname
     if not host:
         raise ProjectIdentityError("remote URL has no host")
+    try:
+        port = parts.port
+    except ValueError as exc:
+        raise ProjectIdentityError("remote URL has an invalid port") from exc
+    if port is not None and port != _DEFAULT_PORTS.get(parts.scheme.lower()):
+        # Two servers on one host are two projects; a doubt splits.
+        host = f"{host}:{port}"
     return _join_host_path(host, parts.path)
 
 
@@ -250,20 +208,29 @@ def derive_identity(workspace: str | Path, *, remote_url: str | None = None,
     if not start.is_dir():
         raise ProjectIdentityError("workspace is not a directory")
     root = find_repo_root(start, ceilings=ceilings) or start
-    url = remote_url if remote_url is not None else read_remote_url(root)
+    try:
+        name = None if remote_url is not None else read_project_name(root)
+        url = remote_url if remote_url is not None else read_remote_url(root)
+    except GitConfigError as exc:
+        raise ProjectIdentityError(str(exc)) from exc
+    method, key, label = _derive_key(root, name, url)
+    return ProjectIdentity(_digest_id(method, key), method, key, label, root)
+
+
+def _derive_key(root: Path, name: str | None, url: str | None) -> tuple[str, str, str]:
+    if name:
+        return METHOD_CONFIG, "project:" + name, name
     label = root.name or "project"
     if url:
-        method = METHOD_REMOTE
         key = normalize_remote(url, root=root)
         if key.startswith("local:"):
             # A path remote names a local directory; keep the path out of the key.
-            key = "local-sha256:" + _sha256(key)
-        else:
-            label = key
-    else:
-        method = METHOD_PATH
-        key = "path-sha256:" + _sha256(os.path.normcase(str(root)))
-    return ProjectIdentity(_digest_id(method, key), method, key, label, root)
+            return METHOD_REMOTE, "local-sha256:" + _sha256(key), label
+        return METHOD_REMOTE, key, key
+    nonce = project_nonce(root)
+    if nonce:
+        return METHOD_PATH, "nonce-sha256:" + _sha256(nonce), label
+    return METHOD_PATH, "path-sha256:" + _sha256(os.path.normcase(str(root))), label
 
 
 def _sha256(text: str) -> str:

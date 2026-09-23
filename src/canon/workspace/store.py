@@ -25,16 +25,13 @@ so two processes cannot interleave a read-modify-write on one file.
 """
 from __future__ import annotations
 
-import hashlib
 import json
-import os
 from contextlib import contextmanager
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterator, Mapping
 
-from canon.concurrency import acquire_run_lock, release_run_lock
 from canon.schema import SCOPE_WORKSPACE, Record
 from canon.workspace.identity import ProjectIdentity, is_project_id
 from canon.workspace.scrub import secrets_in
@@ -42,21 +39,23 @@ from canon.workspace.rows import (
     STATE_ACCEPTED,
     STATE_PROPOSED,
     ProjectRow,
-    decode_rows,
     encode_rows,
+)
+from canon.workspace.store_io import (  # noqa: F401  (re-exported)
+    LOG_SCHEMA,
+    IsolationError,
+    append_log,
+    read_bound,
+    record_digest,
+    run_lock,
+    write_atomic,
 )
 
 STORE_ENV = "CANON_STORE"
-LOG_SCHEMA = "canon.project-log/v1"
 RECORDS_FILE = "records.jsonl"
 PROPOSED_FILE = "proposed.jsonl"
 LOG_FILE = "log.jsonl"
 PROJECT_FILE = "project.json"
-
-
-class IsolationError(Exception):
-    """A read would mix projects: a file holds a row bound to another project,
-    or a caller asked for another project's records without declaring it."""
 
 
 class StoreError(Exception):
@@ -76,15 +75,6 @@ class AcceptConflict(StoreError):
 def default_store_root(environ: Mapping[str, str]) -> Path:
     configured = environ.get(STORE_ENV)
     return Path(configured) if configured else Path.home() / ".canon" / "store"
-
-
-def _sha256(text: str) -> str:
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
-
-
-def record_digest(record: Record) -> str:
-    """The sha256 of a record's canonical JSON, the digest the log carries."""
-    return _sha256(record.to_json())
 
 
 def _utc_now() -> str:
@@ -226,64 +216,42 @@ class ProjectStore:
 
     def ensure_manifest(self) -> None:
         """Check (once per store object) that the project directory names this
-        project, writing the manifest on first use."""
+        project, writing the manifest on first use and adding this checkout's
+        root digest to the manifest's `checkouts` list."""
         if self._manifest_checked:
             return
-        path = self.project_dir() / PROJECT_FILE
-        if path.is_file():
-            stored = json.loads(path.read_text(encoding="utf-8"))
-            if stored.get("project_id") != self.project_id:
-                raise StoreError("project directory names another project")
-            self._manifest_checked = True
-            return
-        if self.identity is None:
+        stored = self._manifest()
+        if stored is not None and stored.get("project_id") != self.project_id:
+            raise StoreError("project directory names another project")
+        if self.identity is not None:
+            known = list(stored.get("checkouts", [])) if stored else []
+            if stored is None or self.identity.checkout not in known:
+                manifest = {**self.identity.to_public(),
+                            "checkouts": sorted(set(known) | {self.identity.checkout})}
+                write_atomic(self.project_dir() / PROJECT_FILE,
+                             json.dumps(manifest, sort_keys=True, indent=2) + "\n")
+        elif stored is None:
             raise StoreError("a store opened by id alone does not write")
-        write_atomic(path, json.dumps(self.identity.to_public(),
-                                       sort_keys=True, indent=2) + "\n")
         self._manifest_checked = True
+
+    def _manifest(self) -> dict | None:
+        path = self.project_dir() / PROJECT_FILE
+        return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else None
+
+    def checkout_notice(self) -> str | None:
+        """A one-line notice when this checkout is new to a project other
+        checkouts already use, since two unrelated repositories can share a
+        remote (two apps cloned from one starter) and would read each other's
+        records. None when the checkout is known or the project is new."""
+        stored = self._manifest() if self.identity is not None else None
+        known = stored.get("checkouts", []) if stored else []
+        if not known or self.identity.checkout in known:
+            return None
+        return (f"this checkout is new to project {self.project_id} ({self.identity.label}), "
+                f"which {len(known)} other checkout(s) already use. If it is a different "
+                "project, split it with `git config canon.project <name>` or a different "
+                "remote; if it is the same project (a clone or a worktree), carry on")
 
     def log(self, action: str, record: Record, detail: dict) -> None:
         append_log(self.project_dir() / LOG_FILE, action, record,
                     {**detail, "project_id": self.project_id}, self.clock())
-
-
-def read_bound(path: Path, expected: str | None, *, label: str) -> list[ProjectRow]:
-    """Read a row file and refuse it whole if any row names another project."""
-    if not path.is_file():
-        return []
-    rows = decode_rows(path.read_text(encoding="utf-8"), source=label)
-    foreign = sorted({str(r.project_id) for r in rows if r.project_id != expected})
-    if foreign:
-        raise IsolationError(
-            f"{label} holds rows bound to {foreign}, not {expected!r}; refusing "
-            "the file rather than mixing projects")
-    return rows
-
-
-def write_atomic(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f"{path.name}.tmp-{os.getpid()}")
-    tmp.write_bytes(text.encode("utf-8"))
-    os.replace(tmp, path)
-
-
-def append_log(path: Path, action: str, record: Record, detail: dict,
-                when: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    existing = path.read_text(encoding="utf-8") if path.is_file() else ""
-    seq = sum(1 for line in existing.splitlines() if line.strip()) + 1
-    entry = {"schema": LOG_SCHEMA, "seq": seq, "action": action,
-             "record_key": f"{record.scope}/{record.id}", "record_kind": record.kind,
-             "record_sha256": _sha256(record.to_json()), "time": when, **detail}
-    with path.open("a", encoding="utf-8", newline="\n") as handle:
-        handle.write(json.dumps(entry, sort_keys=True, ensure_ascii=False) + "\n")
-
-
-@contextmanager
-def run_lock(root: Path, name: str) -> Iterator[None]:
-    root.mkdir(parents=True, exist_ok=True)
-    lock = acquire_run_lock(root, name)
-    try:
-        yield
-    finally:
-        release_run_lock(lock)

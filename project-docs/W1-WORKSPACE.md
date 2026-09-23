@@ -24,14 +24,30 @@ derived it, a path-clean `key`, a display `label`, and the local `root`.
 2. A `.git` in the home directory or a filesystem root claims only that
    directory itself. A dotfiles repository in the home directory would
    otherwise give every unversioned project below it one shared identity.
-3. With a remote (`origin`, else the first remote by name), the key is the
-   normalized remote URL: scheme, credentials, port, query, fragment and a
-   trailing `.git` are dropped, the host is lowercased, and the path is kept as
-   written. `git@github.com:o/r.git`, `https://github.com/o/r` and
-   `ssh://git@github.com:22/o/r` all give `github.com/o/r`.
-4. A remote that is a local path gives `local-sha256:<digest>`, so the key
+3. A `canon.project` value in the repository's git config (`git config
+   canon.project <name>`) names the project explicitly. The method is
+   `config`, the key `project:<name>` and the label the name. It wins over the
+   remote, so two checkouts that share a remote but are different projects can
+   be split for good.
+4. With a remote (`origin`, else the first remote by name), the key is the
+   normalized remote URL: scheme, credentials, query, fragment and a trailing
+   `.git` are dropped, the host is lowercased, and the path is kept as written.
+   A port is dropped only when it is the scheme's default (22 for ssh, 80 for
+   http, 443 for https, 9418 for git); any other port stays in the key as
+   `host:port`, because two servers on one host are two projects.
+   `git@github.com:o/r.git`, `https://github.com/o/r` and
+   `ssh://git@github.com:22/o/r` all give `github.com/o/r`. An ssh remote on a
+   custom port and the https remote of the same repository split; `adopt`
+   joins them.
+5. A remote that is a local path gives `local-sha256:<digest>`, so the key
    carries no local path.
-5. With no remote, the key is `path-sha256:<digest of the resolved root>`.
+6. With no remote, canon writes a random nonce once into the repository's
+   shared git directory (`canon-project-nonce`, next to the git config) and
+   the key is `nonce-sha256:<digest of the nonce>`. The nonce travels with
+   `.git`, so moving the repository keeps its id, worktrees share it, and a new
+   `git init` at a reused path gets a new one. A directory with no git
+   directory, or one canon cannot write, falls back to
+   `path-sha256:<digest of the resolved root>`.
 
 The id is `prj_` plus the first 32 hex digits of
 `sha256("canon.project-id/v1\n<method>\n<key>")`.
@@ -43,11 +59,19 @@ Two checkouts get one id, and so share records, when:
 - they have the same normalized remote. Two clones of one repository in two
   directories are one project on purpose. A fork has its own remote URL and so
   its own id.
-- they have no remote and sit at the same resolved path at different times. A
-  repository deleted and replaced by an unrelated one at the same path inherits
-  the old records. Adding a remote to the new repository separates them.
+- they have no remote and share one git directory: a worktree, or a copy made
+  with the `.git` directory inside it. A repository deleted and re-created at
+  the same path gets a new nonce and so a new id. A directory with no git
+  directory still falls back to its path.
 - their remote URLs differ only in the parts normalization drops (scheme,
-  credentials, port, host case, `.git`).
+  credentials, a default port, host case, `.git`).
+- they are two unrelated repositories started by cloning one starter
+  repository, which keep its remote. The rules cannot see this merge, so it is
+  announced: `project.json` in the store keeps a path-clean digest of every
+  checkout root that has written to the project, and any workspace command run
+  from a root the project has not seen prints a one-line notice naming the
+  number of other checkouts and the two ways to split
+  (`git config canon.project <name>` or a different remote).
 
 Two remotes that differ only by path case get two ids. That is deliberate: a
 split hides records until they are adopted, while a merge shows one project's
@@ -60,9 +84,11 @@ prefix collision and is not handled.
   id.
 - Renaming the remote repository, or transferring it to another owner, changes
   the key and so the id.
-- Moving a project with no remote changes its id.
+- Moving a project with no remote keeps its id, because the nonce moves with
+  `.git`. A directory with no git directory is keyed on its path, and moving it
+  changes its id.
 
-In the two changing cases the old records stay in the store under the old id
+In the changing cases the old records stay in the store under the old id
 and are not shown under the new one. Nothing merges them automatically.
 `canon workspace adopt --from <old-id> --reason <text>` copies the old
 project's accepted records to the new id, refuses before writing if any

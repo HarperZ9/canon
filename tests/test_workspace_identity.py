@@ -79,7 +79,7 @@ def test_two_remotes_get_two_ids(tmp_path):
     assert a.project_id != b.project_id
 
 
-def test_without_a_remote_the_path_decides_and_a_move_changes_the_id(tmp_path):
+def test_two_repositories_without_a_remote_get_two_ids(tmp_path):
     first = derive_identity(init_repo(tmp_path / "local-a"))
     moved = derive_identity(init_repo(tmp_path / "moved" / "local-a"))
     assert first.method == METHOD_PATH
@@ -154,3 +154,79 @@ def test_the_drive_root_ceiling_holds_even_without_a_home_directory(tmp_path, mo
     monkeypatch.setattr(identity.Path, "home", staticmethod(no_home))
     start = tmp_path.resolve()
     assert Path(start.anchor) in identity.default_ceilings(start)
+
+
+def test_a_non_default_port_splits_two_servers_on_one_host():
+    assert normalize_remote("https://git.example.com:3000/team/app") != \
+        normalize_remote("https://git.example.com:8443/team/app")
+    assert normalize_remote("https://git.example.com:3000/team/app") == \
+        "git.example.com:3000/team/app"
+
+
+@pytest.mark.parametrize("url", [
+    "https://git.example.com:443/team/app",
+    "http://git.example.com:80/team/app",
+    "ssh://git@git.example.com:22/team/app.git",
+    "git://git.example.com:9418/team/app",
+])
+def test_a_default_port_still_collapses(url):
+    assert normalize_remote(url) == "git.example.com/team/app"
+
+
+def test_two_ports_on_one_host_give_two_project_ids(tmp_path):
+    a = derive_identity(init_repo(tmp_path / "a", "https://git.example.com:3000/team/app"))
+    b = derive_identity(init_repo(tmp_path / "b", "https://git.example.com:8443/team/app"))
+    assert a.project_id != b.project_id
+
+
+def test_a_repository_reinitialised_at_a_reused_path_is_a_new_project(tmp_path):
+    import shutil
+    first = derive_identity(init_repo(tmp_path / "scratch"))
+    shutil.rmtree(tmp_path / "scratch")
+    second = derive_identity(init_repo(tmp_path / "scratch"))
+    assert first.project_id != second.project_id
+    assert str(tmp_path) not in json.dumps(second.to_public())
+
+
+def test_a_moved_repository_without_a_remote_keeps_its_id(tmp_path):
+    first = derive_identity(init_repo(tmp_path / "old" / "proj"))
+    (tmp_path / "new").mkdir()
+    (tmp_path / "old" / "proj").rename(tmp_path / "new" / "proj")
+    assert derive_identity(tmp_path / "new" / "proj").project_id == first.project_id
+
+
+def test_git_config_canon_project_splits_template_clones(tmp_path):
+    one = init_repo(tmp_path / "invoice-app", "https://github.com/acme/starter")
+    two = init_repo(tmp_path / "chat-app", "https://github.com/acme/starter")
+    assert derive_identity(one).project_id == derive_identity(two).project_id
+    with (two / ".git" / "config").open("a", encoding="utf-8") as handle:
+        handle.write("[canon]\n\tproject = chat-app\n")
+    split = derive_identity(two)
+    assert split.project_id != derive_identity(one).project_id
+    assert split.method == "config" and split.label == "chat-app"
+
+
+def test_a_second_checkout_joining_a_project_is_announced(tmp_path):
+    import io
+
+    from canon.cli import run_cli
+    from canon.exit_codes import EX_OK
+
+    store = str(tmp_path / "store")
+    one = init_repo(tmp_path / "invoice-app", "https://github.com/acme/starter")
+    two = init_repo(tmp_path / "chat-app", "https://github.com/acme/starter")
+
+    def run(repo, *argv):
+        out, err = io.StringIO(), io.StringIO()
+        code = run_cli(["workspace", *argv, "--workspace", str(repo), "--store", store],
+                       stdin=None, stdout=out, stderr=err, environ={})
+        return code, err.getvalue()
+
+    assert run(one, "focus", "--goal", "Invoice PDF export")[0] == EX_OK
+    code, err = run(two, "list")
+    assert code == EX_OK
+    assert "new to project" in err and "git config canon.project" in err
+    assert "1 other checkout" in err
+    assert str(tmp_path) not in err
+    assert run(two, "task", "Chat window")[0] == EX_OK
+    assert "new to project" not in run(two, "list")[1], "announced once it is recorded"

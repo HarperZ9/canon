@@ -9,7 +9,9 @@ and the version is unchanged.
 
 - Adds a stable project identity (`canon workspace id`). A project with a
   remote is keyed on the normalized remote URL, so two clones or a moved
-  checkout stay one project; a project with no remote is keyed on its path.
+  checkout stay one project; a non-default port stays in the key. A project
+  with no remote is keyed on a nonce canon writes once into its git directory,
+  and `git config canon.project <name>` names a project explicitly.
   Credentials in a remote URL never reach the key. A `.git` in the home
   directory or a filesystem root claims only itself, so a dotfiles repository
   does not merge every project below it.
@@ -82,8 +84,11 @@ Limits:
 
 - The identity reader does not follow git `include` directives or `insteadOf`
   rewrites.
-- Renaming a remote, or moving a project that has no remote, changes its id.
-  The old records are kept and can be adopted; nothing merges them on its own.
+- Renaming a remote changes its id, as does moving a directory that has no git
+  directory. The old records are kept and can be adopted; nothing merges them
+  on its own. Two repositories cloned from one starter share its remote and so
+  one id; canon announces a checkout new to a project, and
+  `git config canon.project <name>` splits them.
 - The four storage adapters still hold only the five original kinds. The
   workspace-state kinds live in the per-project store.
 - The per-target budgets come from each host's public documentation, read on

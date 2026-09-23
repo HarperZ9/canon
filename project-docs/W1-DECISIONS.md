@@ -302,3 +302,22 @@ when the current accepted record differs. `--force` accepts anyway, for the
 person who compared the two. The store's secret check now covers the whole row,
 provenance included, because an importer copies a session id from the source
 verbatim.
+
+## D-130 A non-default port splits, a nonce keys a local repository, and a new checkout is announced
+
+D-102 says a doubt splits. Dropping every port merged two servers on one host
+(a staging and a production forge) into one project, so a port now stays in
+the key unless it is the scheme's default.
+
+Two merges were silent. A repository with no remote was keyed on its path, so
+one deleted and re-created at the same path inherited the old records, and two
+apps cloned from one starter keep its remote and share an id. canon now writes a
+random nonce once into the shared git directory of a repository with no remote
+and keys on that; it moves with `.git`, which also removes the old "moving it
+changes its id" limit. For the starter case the rules cannot tell a second clone
+of the same project from an unrelated repository, so the store records a
+path-clean digest of each checkout root and a command from a new root prints a
+notice. `git config canon.project <name>` names a project explicitly and wins
+over the remote, so a split survives every command without a flag. Writing the
+nonce is the one place identity derivation writes a file; a git directory canon
+cannot write falls back to the path key.

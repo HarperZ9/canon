@@ -36,7 +36,7 @@ def run_workspace_command(parsed: argparse.Namespace, *, stdout: TextIO,
     command = f"workspace {parsed.ws_command}"
 
     def action() -> int:
-        ctx = build_context(parsed, environ)
+        ctx = build_context(parsed, environ, out)
         return _HANDLERS[parsed.ws_command](parsed, ctx, out, command)
 
     return guarded(command, out, action)
