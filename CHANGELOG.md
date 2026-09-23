@@ -17,6 +17,17 @@ Canon starts to carry a project's working state between models and tools.
 - New records are workspace records. `canon workspace promote` is the only way
   into global scope, and `canon workspace adopt` is the only way to copy another
   project's records in; both need a reason and both are logged.
+- Adds three workspace-state record kinds under their own schema tag,
+  `canon.workspace-state/v1`: `workspace-focus` (goal, active areas, branch),
+  `work-item` (title and status), and `environment-constraint` (a constraint or
+  a quirk). Decision records gain an optional `rejected_alternatives` list, each
+  entry an option and the reason it was dropped. Records of the five existing
+  kinds keep the `canon.record/v1` tag and their exact bytes.
+- Adds `canon workspace focus`, `task`, `set-status`, `decide` (with
+  `--reject OPTION REASON`) and `constraint` (with `--quirk`) to write that
+  state by hand.
+- Registers three new version pins: `project-id`, `project-row` and
+  `workspace-state`.
 
 Limits:
 
@@ -24,6 +35,8 @@ Limits:
   rewrites.
 - Renaming a remote, or moving a project that has no remote, changes its id.
   The old records are kept and can be adopted; nothing merges them on its own.
+- The four storage adapters still hold only the five original kinds. The
+  workspace-state kinds live in the per-project store.
 
 ## 0.2.0 - 2026-09-22
 

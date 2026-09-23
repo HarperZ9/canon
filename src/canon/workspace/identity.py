@@ -38,7 +38,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
 
-ID_SCHEMA = "canon.project-id/v1"
+from canon.versions import PIN_PROJECT_ID
+
+ID_SCHEMA = PIN_PROJECT_ID.kind_tag
 METHOD_REMOTE = "remote"
 METHOD_PATH = "path"
 _ID_PREFIX = "prj_"

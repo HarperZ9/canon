@@ -23,9 +23,10 @@ from dataclasses import dataclass
 
 from canon.schema import Record
 from canon.validator import validate_record
+from canon.versions import PIN_PROJECT_ROW
 from canon.workspace.identity import is_project_id
 
-ROW_SCHEMA = "canon.project-row/v1"
+ROW_SCHEMA = PIN_PROJECT_ROW.kind_tag
 STATE_ACCEPTED = "accepted"
 STATE_PROPOSED = "proposed"
 STATES = (STATE_ACCEPTED, STATE_PROPOSED)

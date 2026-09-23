@@ -69,6 +69,26 @@ project's accepted records to the new id, refuses before writing if any
 record id would overwrite one the new project already holds, and logs each
 adopted record with the project it came from.
 
+## Workspace state
+
+Four kinds of record carry the working state a developer would otherwise
+explain again to every new tool. The schema is in `F0-SCHEMA.md` (W1
+addendum); the builders are in `canon.workspace.authoring`.
+
+| what | kind | id | written by |
+|---|---|---|---|
+| current focus: goal, active areas, branch | `workspace-focus` | `focus` (one per project) | `canon workspace focus` |
+| open work and its status | `work-item` | `task-<n>` | `canon workspace task`, `set-status` |
+| decisions, with the alternatives dropped and why | `adr-decision` | `decision-<n>` | `canon workspace decide --reject OPTION REASON` |
+| constraints and environment quirks | `environment-constraint` | `constraint-<n>` | `canon workspace constraint [--quirk]` |
+
+Every builder validates before it returns, stamps a provenance receipt
+(`harness: canon-cli`, a content hash of the kind and payload, and the next
+clock-free ordinal from the project's store), and writes a workspace record.
+`set-status` keeps a work item's id and ordinal, so its place in a brief does
+not move when its status changes. `focus` reads the branch from the
+repository's `HEAD` file when `--branch` is not given, and runs no git command.
+
 ## The store
 
 The store root defaults to `~/.canon/store` and can be set with `CANON_STORE`
@@ -88,11 +108,11 @@ Each line of a row file is a `canon.project-row/v1` object:
 
 ```
 {"schema": "canon.project-row/v1", "project_id": "prj_...", "state": "accepted",
- "record": { ...a canon.record/v1 record, unchanged... },
+ "record": { ...the record, unchanged... },
  "origin": null, "promoted_from": null}
 ```
 
-The record inside is the F0 envelope byte for byte. The binding to a project
+The record inside is the F0 envelope byte for byte, with its own schema tag. The binding to a project
 lives in the row, so every existing reader of a record keeps working, and a row
 copied into another project's file still names the project it came from.
 
@@ -128,6 +148,11 @@ protects and watching the test fail.
 ```bash
 canon workspace id                      # this project's identity and record counts
 canon workspace list [--proposed]       # this project's records
+canon workspace focus --goal "Ship the handoff" --area src/canon/workspace
+canon workspace task "Write the Codex importer" [--status in-progress]
+canon workspace set-status task-4 done
+canon workspace decide --title "Row format" --decision "JSONL rows"     --context "Stores must diff in review" --reject SQLite "binary diffs"
+canon workspace constraint "CI runs on Windows and Linux" --quirk
 canon workspace promote <id> --reason "applies to every project"
 canon workspace adopt --from <prj_id> --reason "moved the checkout"
 ```

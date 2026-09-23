@@ -67,11 +67,17 @@ def test_the_art_gate_passes_every_check():
     assert result["passed"] is True
 
 
-def test_one_envelope_carries_five_kinds():
-    assert CARD["record kinds"]["value"] == "five of them"
+def test_one_envelope_carries_eight_kinds_under_two_tags():
+    assert CARD["record kinds"]["value"] == "eight of them"
     assert len(schema.KINDS) == 5
+    assert len(schema.WORKSPACE_KINDS) == 3
+    assert schema.ALL_KINDS == schema.KINDS + schema.WORKSPACE_KINDS
     named = CARD["record kinds"]["note"].split(":", 1)[1].split(".")[0]
     assert [word.strip() for word in named.split(",")] == list(schema.KINDS)
+    assert "WORKSPACE_KINDS adds three on their own tag" in CARD["record kinds"]["note"]
+    tags = {schema.schema_tag_for(kind) for kind in schema.WORKSPACE_KINDS}
+    assert tags == {"canon.workspace-state/v1"}
+    assert {schema.schema_tag_for(kind) for kind in schema.KINDS} == {"canon.record/v1"}
 
 
 def test_two_scopes_layer_workspace_over_global():
@@ -173,10 +179,10 @@ def test_five_capability_tokens_declare_what_an_adapter_carries():
         assert token in named
 
 
-def test_sixteen_seams_each_carry_a_version_pin():
-    assert CARD["schema pins"]["value"] == "sixteen seams"
-    assert len(versions.SEAM_PINS) == 16
-    assert len(versions.PIN_REGISTRY) == 16
+def test_nineteen_seams_each_carry_a_version_pin():
+    assert CARD["schema pins"]["value"] == "nineteen seams"
+    assert len(versions.SEAM_PINS) == 19
+    assert len(versions.PIN_REGISTRY) == 19
     assert set(versions.PIN_REGISTRY) == set(versions.SEAM_PINS)
 
 

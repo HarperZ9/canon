@@ -245,13 +245,23 @@ level up, in the stored row:
   this project's accepted rows, and named projects' rows, each tagged.
   `src/canon/workspace/moves.py` holds `promote` and `adopt`, the only two
   cross-boundary moves, both logged with a reason.
-- `src/canon/cli_workspace*.py` add `canon workspace id|list|promote|adopt`.
+- `src/canon/schema.py` adds three workspace-state kinds (`workspace-focus`,
+  `work-item`, `environment-constraint`) stamped `canon.workspace-state/v1` via
+  `schema_tag_for(kind)`; `KINDS` stays the five v1 kinds and `ALL_KINDS` is
+  what the validator admits. `src/canon/validator_workspace.py` holds their rules
+  and the optional `rejected_alternatives` list on `adr-decision`.
+  `src/canon/workspace/authoring.py` builds them for the CLI. The pin type moved
+  to `src/canon/versions_pin.py` (re-exported by `versions.py`).
+- `src/canon/cli_workspace*.py` add `canon workspace
+  id|list|promote|adopt|focus|task|set-status|decide|constraint`.
 - `project-docs/W1-WORKSPACE.md` is the spec (identity, collisions, renames,
   store layout, isolation); `project-docs/W1-DECISIONS.md` records D-101 the
   binding lives in the row, D-102 remote-keyed identity that splits on doubt,
   D-103 the ceiling directories, D-104 isolation checked on read, D-105 named
   foreign reads never merge by id, D-106 global by promotion only, D-107 the
-  store outside the repository, D-108 adoption answers a rename.
+  store outside the repository, D-108 adoption answers a rename, D-109 the
+  workspace-state tag, D-110 rejected alternatives as an additive field, D-111
+  the adapters keep the five v1 kinds, D-112 the pin type split.
 
 Later phases (verifier, migration legs, region installation, the global SOUL.md
 and GEMINI.md surfaces) aim at this same envelope. Each lands on its own branch.
@@ -269,7 +279,9 @@ and GEMINI.md surfaces) aim at this same envelope. Each lands on its own branch.
 ## The one envelope (F0 contract)
 A record is `{canon_schema, kind, id, scope, data, provenance, temporal}`.
 - `kind` is one of: personality-block, episodic-memory, synthesized-persona-l3,
-  adr-decision, research-artifact-ref.
+  adr-decision, research-artifact-ref (`canon.record/v1`), or one of the W1
+  workspace-state kinds workspace-focus, work-item, environment-constraint
+  (`canon.workspace-state/v1`). `canon_schema` is a function of the kind.
 - `scope` is `global` or `workspace`. There is no `repo` scope: the ~90 per-repo
   instruction files stay hand-authored (the self-contained-repo invariant).
 - `provenance` carries `harness` + `source_hash` (both required) and a clock-free

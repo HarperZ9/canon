@@ -8,10 +8,13 @@ from __future__ import annotations
 
 from canon.schema import (
     KIND_ADR_DECISION,
+    KIND_ENVIRONMENT_CONSTRAINT,
     KIND_EPISODIC_MEMORY,
     KIND_PERSONALITY_BLOCK,
     KIND_RESEARCH_ARTIFACT_REF,
     KIND_SYNTHESIZED_PERSONA_L3,
+    KIND_WORK_ITEM,
+    KIND_WORKSPACE_FOCUS,
     Record,
 )
 
@@ -21,6 +24,9 @@ _LABEL_FIELD = {
     KIND_EPISODIC_MEMORY: "text",
     KIND_SYNTHESIZED_PERSONA_L3: "text",
     KIND_RESEARCH_ARTIFACT_REF: "locator",
+    KIND_WORKSPACE_FOCUS: "goal",
+    KIND_WORK_ITEM: "title",
+    KIND_ENVIRONMENT_CONSTRAINT: "statement",
 }
 
 

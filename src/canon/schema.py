@@ -12,6 +12,17 @@ does not know which store will hold it. Five kinds share one envelope:
   adr-decision             a decision record (shape here; placement in F3)
   research-artifact-ref    a content-addressed reference to external research
 
+W1 adds three workspace-state kinds on the same envelope, stamped
+`canon.workspace-state/v1` instead of `canon.record/v1`:
+
+  workspace-focus          what the project is doing now: goal, areas, branch
+  work-item                one open or closed piece of work and its status
+  environment-constraint   a constraint or a quirk of the environment
+
+A decision record may also carry `rejected_alternatives`, each an option and
+the reason it was dropped. Every record of the five F0 kinds keeps its v1 tag
+and its bytes.
+
 The envelope carries a provenance receipt on every record and a temporal
 block on the kinds that support supersede/valid_until. Ordering prefers a
 clock-free ordinal (`create_ord`) over the wall clock so a rebuild from the
@@ -45,6 +56,24 @@ KINDS = (
     KIND_RESEARCH_ARTIFACT_REF,
 )
 
+# W1: the workspace-state kinds. They share the one envelope but carry their own
+# schema tag, canon.workspace-state/v1, so a reader that knows only the five
+# canon.record/v1 kinds refuses them by tag rather than misreading them, and
+# every canon.record/v1 record stays byte-identical. KINDS stays the v1
+# vocabulary; ALL_KINDS is what the validator admits.
+KIND_WORKSPACE_FOCUS = "workspace-focus"
+KIND_WORK_ITEM = "work-item"
+KIND_ENVIRONMENT_CONSTRAINT = "environment-constraint"
+WORKSPACE_KINDS = (
+    KIND_WORKSPACE_FOCUS,
+    KIND_WORK_ITEM,
+    KIND_ENVIRONMENT_CONSTRAINT,
+)
+ALL_KINDS = KINDS + WORKSPACE_KINDS
+WORK_ITEM_STATUSES = ("open", "in-progress", "blocked", "done", "dropped")
+OPEN_WORK_STATUSES = ("open", "in-progress", "blocked")
+CONSTRAINT_CATEGORIES = ("constraint", "quirk")
+
 # The kinds that carry a temporal (supersede/valid_until) block. A
 # research-artifact-ref is a content-addressed pointer to an immutable
 # artifact; it is not superseded in place (a new artifact is a new ref), so it
@@ -55,6 +84,7 @@ TEMPORAL_KINDS = frozenset({
     KIND_EPISODIC_MEMORY,
     KIND_SYNTHESIZED_PERSONA_L3,
     KIND_ADR_DECISION,
+    *WORKSPACE_KINDS,
 })
 
 # The two render scopes F0 admits. "repo" is deliberately absent: the ~90
@@ -162,7 +192,7 @@ class Record:
         tests/test_schema_roundtrip.py). `data` is deep-copied so the returned
         dict is independent of this frozen record's payload."""
         return {
-            "canon_schema": SCHEMA,
+            "canon_schema": schema_tag_for(self.kind),
             "kind": self.kind,
             "id": self.id,
             "scope": self.scope,
@@ -178,8 +208,9 @@ class Record:
         validator's job, not this constructor's. `data` is deep-copied so the
         record does not alias the caller's input dict."""
         got = d.get("canon_schema")
-        if got != SCHEMA:
-            raise ValueError(f"expected canon_schema {SCHEMA!r}, got {got!r}")
+        expected = schema_tag_for(d.get("kind"))
+        if got != expected:
+            raise ValueError(f"expected canon_schema {expected!r}, got {got!r}")
         temporal = d.get("temporal")
         return cls(
             kind=d["kind"],
@@ -201,14 +232,23 @@ class Record:
         return replace(self, temporal=temporal)
 
 
+def schema_tag_for(kind: object) -> str:
+    """The canon_schema tag a record of `kind` carries: the workspace-state tag
+    for a workspace-state kind, canon.record/v1 for every other kind. An unknown
+    kind gets canon.record/v1, so the validator reports it by name rather than
+    the tag check refusing it with a less useful message."""
+    return WORKSPACE_STATE_SCHEMA if kind in WORKSPACE_KINDS else SCHEMA
+
+
 # D-94: canon.record/v1 lives as PIN_RECORD.kind_tag in versions.py; schema
 # aliases it here so every downstream reader of `SCHEMA` reads the same bytes,
 # and a drift between the pin and the wire literal fails loud at import time.
 # The bottom-of-module late import keeps the top-of-file surface clean and
 # avoids a cycle (versions.py imports nothing from canon.schema).
-from canon.versions import PIN_RECORD  # noqa: E402
+from canon.versions import PIN_RECORD, PIN_WORKSPACE_STATE  # noqa: E402
 
 SCHEMA = PIN_RECORD.kind_tag
+WORKSPACE_STATE_SCHEMA = PIN_WORKSPACE_STATE.kind_tag
 assert SCHEMA == "canon.record/v1", (
     f"PIN_RECORD.kind_tag drifted from the canon.record/v1 wire literal; "
     f"got {SCHEMA!r}")

@@ -16,6 +16,7 @@ from typing import TextIO
 
 from .cli_format import make_result, write_result
 from .concurrency import LockError
+from .workspace.authoring import AuthoringError
 from .workspace.identity import ProjectIdentity, ProjectIdentityError, derive_identity
 from .workspace.rows import RowError
 from .workspace.store import IsolationError, ProjectStore, StoreError, default_store_root
@@ -26,6 +27,7 @@ _FAILURES: tuple[tuple[type[BaseException], str], ...] = (
     (LockError, "store_busy"),
     (ProjectIdentityError, "invalid_args"),
     (StoreError, "invalid_args"),
+    (AuthoringError, "invalid_args"),
 )
 
 

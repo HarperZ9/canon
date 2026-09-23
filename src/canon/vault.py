@@ -215,7 +215,7 @@ def _render_body(record: Record, title: str) -> str:
         parts = _body_memory_like(record, f"# Persona {record.id}")
     elif kind == KIND_RESEARCH_ARTIFACT_REF:
         parts = _body_research_ref(record, title)
-    else:  # pragma: no cover -- validate_record rejects unknown kinds first
+    else:  # a workspace-state kind: heading only, the carrier holds the record
         parts = [f"# {title}"]
     return "\n".join(parts) + "\n"
 

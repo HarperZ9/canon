@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import json
 
-from canon.schema import SCHEMA, Record
+from canon.schema import Record, schema_tag_for
 
 FENCE = "---"
 _CANON_PREFIX = "canon: '"
@@ -81,7 +81,7 @@ def emit_frontmatter(
     _require_single_line("id", record.id)
     _require_single_line("title", title)
     values = {
-        "canon_schema": emit_scalar(SCHEMA),
+        "canon_schema": emit_scalar(schema_tag_for(record.kind)),
         "kind": emit_scalar(record.kind),
         "id": emit_scalar(record.id),
         "scope": emit_scalar(record.scope),

@@ -82,3 +82,44 @@ merge D-102 refuses to make. `adopt` copies another project's accepted records
 into this project when a person names the old id and a reason, refuses before
 writing when any record would overwrite one this project holds, and logs each
 adopted record with its source project.
+
+## D-109 The workspace-state kinds carry their own schema tag
+
+Adding three kinds to the `canon.record/v1` vocabulary would have changed what
+a v1 reader must accept: a 0.2.0 reader would meet `work-item` and report an
+unknown kind. Bumping every record to a `canon.record/v2` would have changed
+the bytes of every existing record, every vault note that carries one, and
+every hash over them.
+
+The new kinds instead share the envelope and carry their own tag,
+`canon.workspace-state/v1`, pinned as the `workspace-state` seam.
+`schema_tag_for(kind)` chooses the tag and `Record.from_dict` refuses a
+mismatch in either direction. A record of the five F0 kinds keeps its tag and
+its bytes, which the fixture test checks; an old reader refuses a
+workspace-state record by its tag instead of misreading it. `KINDS` stays the v1
+vocabulary and `ALL_KINDS` is what the validator admits.
+
+## D-110 Rejected alternatives are an additive field on the decision record
+
+A decision's rejected alternatives are the part a new tool most needs and the
+part no session format records as data. They are a list of `{option, reason}`
+objects on `adr-decision`, optional and validated only when present. An
+alternative without its reason is refused, because an option with no reason
+is the thing a later tool retries. The field is additive, so the decision
+record keeps `canon.record/v1`: an old decision stays valid and an old reader
+ignores the field.
+
+## D-111 The storage adapters keep holding the five v1 kinds
+
+The files, SQLite, mneme and flywheel adapters declare `KINDS` as what they
+hold, and their round-trip proofs are written against it. The workspace-state
+kinds live in the per-project store (D-101), so the adapters are unchanged and a
+workspace-state record offered to one is refused as an unsupported kind rather
+than stored under a contract that was never proved for it.
+
+## D-112 The pin type moves to `versions_pin.py`
+
+`versions.py` was already over the 300-line gate before W1 added three pins.
+The error classes, the closed `SEAM_PINS` vocabulary and `SchemaPin` moved to
+`versions_pin.py`, which imports nothing from canon, and `versions.py`
+re-exports every name, so no caller changes an import.

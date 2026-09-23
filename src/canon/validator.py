@@ -20,8 +20,9 @@ from __future__ import annotations
 
 from .schema import (
     ADR_STATUSES,
+    ALL_KINDS,
     EPISODIC_LAYERS,
-    KINDS,
+    WORKSPACE_KINDS,
     KIND_ADR_DECISION,
     KIND_EPISODIC_MEMORY,
     KIND_PERSONALITY_BLOCK,
@@ -32,6 +33,11 @@ from .schema import (
     TEMPORAL_KINDS,
     Record,
     is_sha256,
+)
+from .validator_workspace import (
+    REQUIRED as _WORKSPACE_REQUIRED,
+    check_rejected_alternatives,
+    check_workspace_kind,
 )
 
 # Per-kind required keys in `data`, each with the type(s) the value must have.
@@ -61,6 +67,7 @@ _REQUIRED: dict[str, dict[str, type | tuple[type, ...]]] = {
         "artifact_hash": str,
         "locator": str,
     },
+    **_WORKSPACE_REQUIRED,
 }
 
 
@@ -88,9 +95,9 @@ def validate_record(rec: Record) -> list[str]:
     # Envelope checks. None of scope, id, or data-is-dict depends on the kind,
     # so all of them run even when the kind is unknown -- a caller wants every
     # problem at once, not a fix-one-rerun loop.
-    known_kind = rec.kind in KINDS
+    known_kind = rec.kind in ALL_KINDS
     if not known_kind:
-        problems.append(f"unknown kind {rec.kind!r}; expected one of {list(KINDS)}")
+        problems.append(f"unknown kind {rec.kind!r}; expected one of {list(ALL_KINDS)}")
 
     if rec.scope not in SCOPES:
         problems.append(f"unknown scope {rec.scope!r}; expected one of {list(SCOPES)}")
@@ -159,6 +166,9 @@ def _check_kind_specific(rec: Record) -> list[str]:
             problems.append(
                 f"adr-decision: status must be one of {list(ADR_STATUSES)}, got {status!r}"
             )
+        problems.extend(check_rejected_alternatives(data))
+    elif rec.kind in WORKSPACE_KINDS:
+        problems.extend(check_workspace_kind(rec))
     elif rec.kind == KIND_RESEARCH_ARTIFACT_REF:
         digest = data.get("artifact_hash")
         if digest is not None and not is_sha256(digest):

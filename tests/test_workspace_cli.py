@@ -83,3 +83,47 @@ def test_a_misfiled_row_fails_the_command_with_the_isolation_code(tmp_path):
     payload = json.loads(out)
     assert payload["failure_code"] == "isolation_refused"
     assert "Only in A." not in out
+
+
+def _ws(tmp_path, *args):
+    store, repo_a, _ = _setup(tmp_path)
+    return _run(["--json", "workspace", *args, "--workspace", str(repo_a),
+                 "--store", str(store)])
+
+
+def test_the_authoring_commands_write_workspace_state(tmp_path):
+    store, repo, _ = _setup(tmp_path)
+    (repo / ".git" / "HEAD").write_text("ref: refs/heads/feat/x\n", encoding="utf-8")
+    base = ["--workspace", str(repo), "--store", str(store)]
+    assert _run(["workspace", "focus", "--goal", "Ship handoff", "--area", "src/canon",
+                 *base])[0] == EX_OK
+    assert _run(["workspace", "task", "Write importer", *base])[0] == EX_OK
+    assert _run(["workspace", "decide", "--title", "Row format", "--decision", "JSONL",
+                 "--context", "diffable", "--reject", "SQLite", "binary diffs",
+                 *base])[0] == EX_OK
+    assert _run(["workspace", "constraint", "Tests run on Windows", "--quirk",
+                 *base])[0] == EX_OK
+    records = {r.kind: r for r in ProjectStore(store, derive_identity(repo)).records()}
+    assert records["workspace-focus"].data["branch"] == "feat/x"
+    assert records["work-item"].data["status"] == "open"
+    assert records["adr-decision"].data["rejected_alternatives"] == [
+        {"option": "SQLite", "reason": "binary diffs"}]
+    assert records["environment-constraint"].data["category"] == "quirk"
+
+
+def test_set_status_updates_a_work_item_in_place(tmp_path):
+    store, repo, _ = _setup(tmp_path)
+    base = ["--workspace", str(repo), "--store", str(store)]
+    code, out, _ = _run(["--json", "workspace", "task", "Port parser", *base])
+    rid = json.loads(out)["data"]["record"]["record"]["id"]
+    assert _run(["workspace", "set-status", rid, "done", *base])[0] == EX_OK
+    items = [r for r in ProjectStore(store, derive_identity(repo)).records()
+             if r.kind == "work-item"]
+    assert [(r.id, r.data["status"]) for r in items] == [(rid, "done")]
+
+
+def test_an_invalid_status_is_a_usage_error_and_writes_nothing(tmp_path):
+    code, out, _ = _ws(tmp_path, "task", "Something", "--status", "finished")
+    assert code == EX_USAGE
+    assert json.loads(out)["failure_code"] == "invalid_args"
+    assert "status" in json.loads(out)["message"]
