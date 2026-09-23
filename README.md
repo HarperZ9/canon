@@ -12,12 +12,17 @@ shapes (`CLAUDE.md`, `AGENTS.md`, `SOUL.md`, `GEMINI.md`) plus per-tool memory
 stores that do not talk to each other. canon gives all of them one typed record
 to draw from and write back to, and renders each tool's file from that record.
 
+When you move one repository from one agent to the next, canon also carries
+that project's working state (focus, open work, decisions with the alternatives
+you dropped, environment quirks) and keeps it apart from every other project.
+
 ## What it does
 
-- **One envelope, five kinds.** An authored personality block, a raw or extracted
-  memory, a synthesized persona, a decision record, and a reference to an
-  external research artifact all share one record shape with a provenance
-  receipt on every entry.
+- **One envelope, eight kinds.** An authored personality block, a raw or
+  extracted memory, a synthesized persona, a decision record, and a reference to
+  an external research artifact share one record shape with a provenance receipt
+  on every entry. Three workspace-state kinds (a project's focus, its work items,
+  and its constraints and quirks) use the same shape under their own schema tag.
 - **Two scopes that layer.** A `global` block is your default everywhere; a
   `workspace` block with the same id overrides it where that workspace applies.
   A render resolves the effective set for its target, current entries only.
@@ -29,11 +34,77 @@ to draw from and write back to, and renders each tool's file from that record.
   cross-provider transport. It adds the one record they share and the renderer
   that projects each surface.
 
+## Moving a project between models
+
+Switching a repository from one agent to another usually means explaining the
+project again, and memory tools that key on a user rather than a project show
+one repository's history inside another. canon keeps a project's working state
+as records bound to that project and writes it into the file the next agent
+reads at startup.
+
+```bash
+cd your-repo
+canon workspace import --from claude-code path/to/session.jsonl   # or --from codex
+canon workspace list --proposed
+canon workspace accept <proposal-id>                               # an id from the list
+canon workspace focus --goal "Ship the JSON export" --area src/export
+canon workspace decide --title "Keep the CSV writer" --decision "Add JSON beside CSV" \
+    --context "Downstream scripts parse CSV" --reject "Replace CSV" "breaks three scripts"
+canon switch --to codex --create
+```
+
+- **One project, one store.** The project id comes from the repository's remote,
+  from `git config canon.project <name>` when you set one, or from a nonce
+  canon keeps in `.git` when there is no remote. Every stored record names its
+  project, and a read that finds another project's record fails instead of
+  mixing the two. Global scope is reached only by `canon workspace promote`,
+  and another project's records only by naming them; both are explicit.
+- **The state you would otherwise re-explain.** Focus, open work items,
+  decisions with the alternatives dropped and why, and constraints and
+  environment quirks are record kinds of their own. A dropped alternative cannot
+  be recorded without its reason.
+- **Import what the last session knew.** `canon workspace import` reads a Claude
+  Code session or a Codex rollout and proposes focus, open plan steps, `TODO`
+  markers, decisions and failed approaches by fixed patterns. Each proposal
+  names the file and line it came from, and nothing reaches a brief until you
+  accept it.
+- **Secrets stay out.** Keys, tokens, private keys, auth headers, cookies,
+  passwords in URLs and config files, and secret-named assignments in any case
+  are redacted before anything is stored, the store refuses anything that still looks like one, and
+  a brief that would carry one is refused.
+- **Losses are named.** Each importer lists what it drops and counts it. A
+  session with content the importer has not seen is refused until you declare
+  that drop, so a format change cannot lose data quietly.
+- **A brief that fits.** `canon handoff --to <target>` lists focus, open work,
+  recent decisions and constraints, in that order, inside the target's size
+  budget. What does not fit is left out whole and named at the end, and
+  `--receipt` writes digests of the brief and the records behind it.
+- **Switch in one command.** `canon switch --to <target>` writes your blocks and
+  the brief into the target's own instruction file, between canon's markers
+  only. `--create` makes a missing file; an existing file is opted in by adding
+  the two marker lines (`<!-- canon:begin scope=workspace -->` and
+  `<!-- canon:end -->`). If you or an agent edit inside that region, the next switch turns each
+  edit into a proposal and waits for your decision instead of overwriting it.
+
+Targets: `claude-code` (`CLAUDE.md`), `codex` (`AGENTS.md`), `gemini-cli`
+(`GEMINI.md`), `copilot` (`.github/copilot-instructions.md`), `cursor`
+(`.cursor/rules/canon.mdc`), and `markdown` for a brief to paste into a chat app
+or a local model. `canon workspace targets` prints each target's budget and what
+its file cannot express: none of these files can load a block for some files
+only, so a block scoped with `applies_to` is written for every file with an
+`Applies to:` line, and that downgrade is declared rather than silent.
+
+The walkthrough, every command, and the limits are in
+[`docs/switching-models.md`](docs/switching-models.md). The short version of
+the limits: the importers use fixed patterns rather than a model, the session
+formats they read are not stable interfaces, the scrubber recognises secrets by
+shape, and the brief knows only what was recorded or imported.
+
 ## How one record becomes the file each tool reads
 
-![Eight stages taking one record to the file a tool reads: record, validate, layer, resolve, render, region, allow-list, write. Every entry is one envelope in one of five kinds: an authored personality block, an episodic memory, a synthesized persona, a decision record, and a reference to an external research artifact. The validator checks every field and refuses a record it cannot vouch for. A workspace block overrides a global block carrying the same id, and the resolve step keeps current entries only, ordered by a clock-free ordinal so a rebuild is byte-identical. The block set is rendered to text and spliced into the span between the canon begin and end markers, and every byte outside that span is preserved. The write allow-list holds four surfaces: a global and a workspace file for Claude Code, an AGENTS.md for Codex, and a workspace SOUL.md for Hermes. A path outside that list is refused, and so is a file with no canon region. Three outcomes: written inside the markers canon owns, a surface that drifted and needs a human, and a file canon declines to write at all.](docs/art/surface-lane.svg)
+![Eight stages taking one record to the file a tool reads: record, validate, layer, resolve, render, region, allow-list, write. Every entry is one envelope in one of eight kinds: an authored personality block, an episodic memory, a synthesized persona, a decision record, a reference to an external research artifact, and three workspace-state kinds for a project's focus, its work items and its environment constraints. The validator checks every field and refuses a record it cannot vouch for. A workspace block overrides a global block carrying the same id, and the resolve step keeps current entries only, ordered by a clock-free ordinal so a rebuild is byte-identical. The block set is rendered to text and spliced into the span between the canon begin and end markers, and every byte outside that span is preserved. The write allow-list holds seven surfaces: a global and a workspace file for Claude Code, an AGENTS.md for Codex, a workspace SOUL.md for Hermes, a GEMINI.md for Gemini CLI, the repository instructions file for GitHub Copilot, and one canon-owned Cursor rule. A path outside that list is refused, and so is a file with no canon region. Three outcomes: written inside the markers canon owns, a surface that drifted and needs a human, and a file canon declines to write at all.](docs/art/surface-lane.svg)
 
-canon writes four paths and no others, and inside those four it rewrites only
+canon writes seven paths and no others, and inside those seven it rewrites only
 the span between its own markers. A file with no canon region is left alone.
 
 ## How a rendered file is checked back against the record
@@ -45,7 +116,7 @@ in advance. Anything else fails the gate rather than logging a warning.
 
 ## What canon carries
 
-![A table of twelve rows: what canon carries, how many of it there are, and where each number is read from. Five record kinds share one envelope. Two scopes layer, workspace over global. Four surfaces sit on the write allow-list: a global and a workspace file for Claude Code, an AGENTS.md for Codex, and a workspace SOUL.md for Hermes. Four storage adapters implement the backend protocol, and five capability tokens describe what each one can carry. Sixteen schema pins name the seams that carry a version. The aggregate check folds four legs, and four gate functions share the same zero or one exit code. 111 source modules hold 19,737 lines, and 54 test files hold 1063 tests. Two surfaces named in the roadmap are absent from the catalog, a global SOUL.md and a GEMINI.md, so canon does not render them.](docs/art/record-table.svg)
+![A table of twelve rows: what canon carries, how many of it there are, and where each number is read from. Eight record kinds share one envelope: five under the v1 record tag and three workspace-state kinds under their own tag. Two scopes layer, workspace over global. Seven surfaces sit on the write allow-list: a global and a workspace file for Claude Code, an AGENTS.md for Codex, a workspace SOUL.md for Hermes, a GEMINI.md, the Copilot instructions file, and one Cursor rule. Four storage adapters implement the backend protocol, and five capability tokens describe what each one can carry. Twenty-two schema pins name the seams that carry a version. The aggregate check folds four legs, and four gate functions share the same zero or one exit code. 152 source modules hold 25,799 lines, and 79 test files hold 1535 tests. Two surfaces named in the roadmap are absent from the catalog, a global SOUL.md and a global GEMINI.md, so canon does not render them.](docs/art/record-table.svg)
 
 Every count is asserted against the module that defines it in
 `tests/test_repo_art.py`.
@@ -98,20 +169,34 @@ transform omissions and says what the export does not prove, including host
 enforcement. It does not import provider auth, private databases, ChatGPT web
 state, or Claude web state.
 
-Installing a region into a fresh file, the first migrator on the version seam,
-and the global SOUL.md and GEMINI.md surfaces are later phases. Everything
+W1 adds the workspace backend described under "Moving a project between
+models": a project identity and a store that refuses to mix projects, the
+workspace-state kinds, the handoff brief and `switch`, the two session
+importers with their secret scrubber and declared losses, three more surfaces
+(`GEMINI.md`, the Copilot instructions file, one Cursor rule) with the
+downgrades each declares, and the read-back of edits made inside a rendered
+region. It is specified in `project-docs/W1-WORKSPACE.md`.
+
+Installing a region into an existing file, the first migrator on the version seam,
+and the global SOUL.md and the global GEMINI.md surfaces are later phases. Everything
 shipped is proven by a full test suite and aims at the one envelope.
 
 ## Run it
 
-Canon 0.1.0 is prepared as a GitHub release candidate. Install from a reviewed
-GitHub release asset after publication, or from a local wheel during review:
+The latest release is on PyPI as `flywheel-canon` (the console script is
+`canon`):
 
 ```bash
-python -m pip install canon-0.1.0-py3-none-any.whl
+python -m pip install flywheel-canon
 ```
 
-No PyPI package ownership or publication is claimed here.
+The workspace commands above (`canon workspace`, `canon handoff`,
+`canon switch`) are not released yet; 0.2.0 does not have them. To use them,
+install from a checkout of this repository:
+
+```bash
+python -m pip install -e .
+```
 
 Serve the record set to a harness:
 
@@ -172,11 +257,18 @@ src/canon/
   capsule*.py, atom.py, adapter.py       the continuity capsule, atom and target contract
   cli_compile.py, cli_export.py          preview, stdout export and bundle export
   cli_artifacts.py, cli_publish.py       source hashes and confined artifact publishing
+  workspace/                             project identity, the store and its isolation,
+                                         authoring, briefs, switch, importers, the
+                                         scrubber, target downgrades, edit read-back
+  validator_workspace.py, versions_pin.py the workspace kinds' rules, the pin type
+  textblock_scope.py                     a block's glob scope in the region grammar
+  cli_workspace*.py, cli_handoff.py,     the workspace, handoff, switch, import and
+  cli_import.py                          pull commands
 tests/                                   round-trip, validator, layering, backend,
                                          fidelity, surface, orchestration, vault,
                                          drift, reconcile, continuity, and artwork proofs
 docs/art/                                the drawings above and the spec they render from
-project-docs/                            the F0, F1, R0, R1, R2, V2, V3, V4, MCP decisions
+project-docs/                            the F0, F1, R0, R1, R2, V2, V3, V4, MCP, W1 decisions
 ```
 
 See `project-docs/` for the schema reference, the layering derivation, the

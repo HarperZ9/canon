@@ -9,7 +9,9 @@ disk, and returns a sha256-keyed verdict per surface. It reads; it never writes.
 It scores canon-owned bytes: the region interior between the markers, not the
 whole host file. The prefix and suffix are hand-authored and preserved by
 construction, so a change there is the host's own prose, never canon drift. A
-change inside the region is drift.
+change inside the region is drift; a CRLF line ending is not. A reserved block
+the region carries (the resume brief `canon switch` writes) is part of the
+expected render, since no record in the pool renders it.
 
 Total, like the fidelity gate: every refusal (a deformed marker, a mis-scoped
 region, a render the pool cannot represent) is returned as a verdict, never
@@ -30,7 +32,7 @@ from canon.registry import (
     resolve_surface_path,
 )
 from canon.schema import Record
-from canon.surface import render_surface
+from canon.surface import carried_blocks, render_surface
 from canon.textblock import RenderRefused
 
 VERDICT_MATCH = "match"
@@ -98,7 +100,8 @@ def surface_drift(surface: Surface, pool: list[Record], *, home: str,
             surface, path, VERDICT_REFUSED, None, None,
             f"region scope {region.scope!r} != surface scope {surface.scope!r}")
     try:
-        expected = render_surface(pool_for(surface, pool), surface.scope)
+        expected = render_surface(pool_for(surface, pool) + carried_blocks(host),
+                                  surface.scope)
     except LayeringError as exc:
         # A pool that carries a non-personality-block record, or a record with
         # an unknown scope, is not a personality set layering can place. D-58:
@@ -109,7 +112,7 @@ def surface_drift(surface: Surface, pool: list[Record], *, home: str,
     except RenderRefused as exc:
         return SurfaceDrift(surface, path, VERDICT_REFUSED, None, None,
                             f"render refused: {exc}")
-    actual = region.inner
+    actual = region.inner.replace("\r\n", "\n")
     expected_sha, actual_sha = _sha256(expected), _sha256(actual)
     verdict = VERDICT_MATCH if expected == actual else VERDICT_DRIFT
     return SurfaceDrift(surface, path, verdict, expected_sha, actual_sha, None)

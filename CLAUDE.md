@@ -227,8 +227,122 @@ that door and still writes nothing:
   fails, D-73 a bad file is reported not skipped, D-74 three read verbs, D-75 no
   `blocks/` directory in this repository (an honest null).
 
-Later phases (verifier, migration legs, region installation, the global SOUL.md
-and GEMINI.md surfaces) aim at this same envelope. Each lands on its own branch.
+W1 is the workspace band: per-project state that survives a change of model or
+tool. It keeps the record envelope unchanged and binds records to a project one
+level up, in the stored row:
+- `src/canon/workspace/identity.py` derives a `prj_` id from a `canon.project`
+  git config name, else the normalized remote URL (credentials, a default port,
+  scheme and `.git` dropped, host lowercased, path case kept), else a nonce in
+  the git directory (`gitconfig.py` reads the config and keeps the nonce), else
+  the root path. A `.git` in the home directory or a filesystem root claims
+  only itself. The store keeps a digest per checkout root and announces a
+  checkout new to a project.
+- `src/canon/workspace/rows.py` is the `canon.project-row/v1` row that wraps an
+  unchanged record with its `project_id`, `state` (accepted or proposed),
+  `origin` and `promoted_from`.
+- `src/canon/workspace/store.py` is one store per project under a root
+  (`~/.canon/store`, `CANON_STORE`, `--store`). A read refuses a whole file when
+  any row names another project; writes are sorted, atomic and under the run
+  lock. `put` refuses a global record.
+- `src/canon/workspace/pool.py` assembles what a render may read: global rows,
+  this project's accepted rows, and named projects' rows, each tagged.
+  `src/canon/workspace/moves.py` holds `promote` and `adopt`, the only two
+  cross-boundary moves, both logged with a reason.
+- `src/canon/schema.py` adds three workspace-state kinds (`workspace-focus`,
+  `work-item`, `environment-constraint`) stamped `canon.workspace-state/v1` via
+  `schema_tag_for(kind)`; `KINDS` stays the five v1 kinds and `ALL_KINDS` is
+  what the validator admits. `src/canon/validator_workspace.py` holds their rules
+  and the optional `rejected_alternatives` list on `adr-decision`.
+  `src/canon/workspace/authoring.py` builds them for the CLI. The pin type moved
+  to `src/canon/versions_pin.py` (re-exported by `versions.py`).
+- `src/canon/cli_workspace*.py` add `canon workspace
+  id|list|promote|adopt|focus|task|set-status|decide|constraint`.
+- `src/canon/workspace/targets.py` is the target catalog with sourced size
+  budgets; `brief_items.py` picks and orders what a brief shows (excluded
+  records are named with the rule); `brief.py` fits the brief as a strict
+  prefix of the priority order with a `Left out` report and a
+  `canon.handoff-receipt/v1` receipt; `switch.py` renders the target's
+  workspace region with the brief as the reserved block
+  `canon-workspace-brief`, through the allow-list, refusing a file Codex would
+  truncate; `switch_host.py` holds the host checks (links, the region, line
+  endings, the Codex override and budget chain); `hosts.py` is the text of a
+  file `--create` makes. `src/canon/cli_handoff.py` adds `canon handoff` and
+  `canon switch`; `src/canon/cli_files.py` is their file IO with named
+  failures.
+- `src/canon/workspace/scrub.py` redacts secret-shaped values by the rules in
+  `scrub_rules.py` (value shapes in `scrub_shape.py`) and counts hits (no
+  values, no digests); importers scrub each source string whole before
+  extraction; the store refuses a record that still
+  matches (`SecretRefused`), and `brief.refuse_secrets` guards the brief and the
+  switch region. `extract.py` holds the fixed text rules; `import_source.py` the
+  JSONL reader; `import_project.py` the identity-based project check;
+  `import_common.py` the declared-loss `Ledger` and the `Collector` (with
+  turn rollback); `import_claude_chain.py` the live branch and the task list; `import_claude.py` and `import_codex.py` the two importers with
+  their `DECLARED_DROPS`; `import_write.py` turns candidates into scrubbed,
+  proposed rows with an origin and a `canon.import-report/v1` report.
+  `src/canon/cli_import.py` adds `canon workspace import|accept|reject`.
+- `src/canon/registry.py` carries seven surfaces: W1 adds `GEMINI.md`,
+  `.github/copilot-instructions.md` and `.cursor/rules/canon.mdc`, each a lone
+  workspace surface; `write_surfaces` reports a missing file as `missing`.
+  `src/canon/textblock_scope.py` is the v1 grammar's optional `applies`
+  attribute and its generated `Applies to:` line (`textblock-grammar` pin v1).
+  `src/canon/workspace/target_fidelity.py` declares per-target downgrades
+  (`activation.glob`, `text.at-import`) and `target_roundtrip` fails on an
+  undeclared one; `hosts.py` checks the Cursor frontmatter.
+- `src/canon/workspace/ledger.py` is the render ledger (`renders.json`,
+  `canon.render-ledger/v1`): what `switch` last wrote per checkout and surface,
+  the recent renders per surface, the block owners and a render number.
+  `backflow.py` compares the region on disk with it and turns block edits into
+  proposals; `backflow_brief.py` maps edited brief lines (goal, work status,
+  new work, new constraint, removed work) and keeps anything else as a memory
+  proposal. `switch` refuses with `edits_pending` while any such proposal is
+  undecided; `canon workspace pull --from <target>` runs the read alone.
+  Fixtures in `tests/fixtures/transcripts/` use placeholders; tests plant
+  canaries built at run time.
+- `docs/switching-models.md` is the user-facing walkthrough with run-it-now
+  commands and the limits; keep it in step with the commands.
+- `project-docs/W1-WORKSPACE.md` is the spec (identity, collisions, renames,
+  store layout, isolation); `project-docs/W1-DECISIONS.md` records D-101 the
+  binding lives in the row, D-102 remote-keyed identity that splits on doubt,
+  D-103 the ceiling directories, D-104 isolation checked on read, D-105 named
+  foreign reads never merge by id, D-106 global by promotion only, D-107 the
+  store outside the repository, D-108 adoption answers a rename, D-109 the
+  workspace-state tag, D-110 rejected alternatives as an additive field, D-111
+  the adapters keep the five v1 kinds, D-112 the pin type split, D-113 the
+  strict-prefix brief with a report, D-114 the brief as a reserved region
+  block, D-115 sourced budgets and the Codex refusal, D-116 `--create` for a
+  missing file only, D-117 importers propose and a person accepts, D-118
+  declared loss at the import boundary, D-119 scrub then check at store and
+  render, D-120 the source must name this project, D-121 public-format fixtures
+  with run-time canaries, D-122 scope in the sentinel plus a visible line,
+  D-123 exact paths for the three new surfaces, D-124 declared per-target
+  downgrades held by a verdict, D-125 a missing file is reported, D-126 the
+  render ledger, D-127 in-place edits become proposals and switch waits,
+  D-128 the review findings folded in (tagged removals, the anchor ceiling,
+  re-read before write, four-character minimum for name-based secret rules),
+  D-129 promote refuses a global id clash and accept refuses a stale base,
+  D-130 a non-default port splits, a nonce keys a repository with no remote,
+  and a new checkout is announced, D-131 the scrubber covers the everyday
+  forms, scrubs before extraction, and anchors placeholders, D-132 the
+  importers read what the host wrote as the host's and compare projects by
+  identity, D-133 back-flow reads a checkout against its own render and keeps
+  every edit, D-134 switch checks the host as it is (links, override, budget
+  chain, line endings) and the brief is measured as it lands, D-135 the
+  project check resolves a working directory to its checkout first, D-136 a
+  value after a secret-named key is judged by its shape, D-137 a markdown
+  brief says on the command line what it left out, D-138 a URL user part is
+  redacted by its shape, not by a length floor, D-139 the Codex budget is
+  read where Codex reads its config (`CODEX_HOME`, else `~/.codex`), D-140
+  the scrubber runs in time linear in its input, D-141 a value looks random by
+  its runs, not by its character classes, D-142 the last secret word decides a
+  name, and a password keeps its suffix, D-143 a URL query parameter ends at
+  the next `&` or `#`, D-144 a header value is judged by its shape and read on
+  its own line, D-145 a Codex URL that names this checkout's own remote defers
+  to the directory under `--remote`.
+
+Later phases (verifier, migration legs, region installation into an existing
+file, the global SOUL.md and the global GEMINI.md surfaces) aim at this same
+envelope. Each lands on its own branch.
 
 ## Working rules
 - Python 3.11+. Standard library only in F0; no runtime dependencies.
@@ -243,7 +357,9 @@ and GEMINI.md surfaces) aim at this same envelope. Each lands on its own branch.
 ## The one envelope (F0 contract)
 A record is `{canon_schema, kind, id, scope, data, provenance, temporal}`.
 - `kind` is one of: personality-block, episodic-memory, synthesized-persona-l3,
-  adr-decision, research-artifact-ref.
+  adr-decision, research-artifact-ref (`canon.record/v1`), or one of the W1
+  workspace-state kinds workspace-focus, work-item, environment-constraint
+  (`canon.workspace-state/v1`). `canon_schema` is a function of the kind.
 - `scope` is `global` or `workspace`. There is no `repo` scope: the ~90 per-repo
   instruction files stay hand-authored (the self-contained-repo invariant).
 - `provenance` carries `harness` + `source_hash` (both required) and a clock-free

@@ -93,9 +93,10 @@ def test_doctor_reads_true_once_the_directory_loads(tmp_path, monkeypatch):
     assert doctor["ok"] is True and doctor["blocks_loaded"] == 1
     assert doctor["block_problems"] == []
     assert doctor["tools"] == TOOL_NAMES
-    # The four write surfaces are named, so a caller can see what canon claims
+    # Every write surface is named, so a caller can see what canon claims
     # authority over without reading this repository.
-    assert len(doctor["surfaces"]) == 4
+    from canon.registry import SURFACE_CATALOG
+    assert len(doctor["surfaces"]) == len(SURFACE_CATALOG) == 7
 
 
 def test_doctor_sees_the_drift_roots_once_they_are_set(tmp_path, monkeypatch):

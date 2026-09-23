@@ -77,6 +77,40 @@ a supersede-in-place. The validator rejects a temporal block on that kind.
 `synthesized-persona-l3.layer` is exactly `L3`. `research-artifact-ref.artifact_hash`
 is a lowercase 64-hex sha256.
 
+## W1 addendum: the workspace-state kinds
+
+W1 adds three kinds on the same envelope. They are stamped
+`"canon_schema": "canon.workspace-state/v1"` instead of `canon.record/v1`, so a
+reader that knows only the five kinds above refuses them by tag, and every
+record of the five kinds keeps its tag and its bytes. `schema_tag_for(kind)` is
+the one place the tag is chosen, and `Record.from_dict` refuses a record whose
+tag does not match its kind in either direction.
+
+| kind | `data` required fields | optional fields | temporal? |
+|---|---|---|:---:|
+| `workspace-focus` | `goal` | `areas` (list of text), `branch`, `notes` | yes |
+| `work-item` | `title`, `status` | `detail` | yes |
+| `environment-constraint` | `statement`, `category` | `reason`, `applies_to` (list of text) | yes |
+
+`work-item.status` is one of `open`, `in-progress`, `blocked`, `done`,
+`dropped`. `environment-constraint.category` is `constraint` or `quirk`.
+
+`adr-decision` gains one optional field, `rejected_alternatives`: a list of
+objects each carrying exactly a non-empty `option` and a non-empty `reason`.
+The field is additive, so a decision record keeps the `canon.record/v1` tag, a
+decision without the field stays valid, and a 0.2.0 reader ignores the field
+rather than refusing the record.
+
+`personality-block` gains one optional field, `applies_to`: a non-empty list of
+glob patterns naming the files the block is meant for. It is additive and the
+block keeps `canon.record/v1`. See `W1-WORKSPACE.md` for how each target
+handles it.
+
+`KINDS` stays the five `canon.record/v1` kinds; `ALL_KINDS` is what the
+validator admits. The four storage adapters still hold `KINDS` only; the
+workspace-state kinds live in the per-project store described in
+`W1-WORKSPACE.md`.
+
 ## Round-trip guarantee
 
 `Record.from_dict(rec.to_dict()) == rec` for every kind, field-identical, with

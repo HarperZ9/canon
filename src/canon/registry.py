@@ -9,13 +9,15 @@ public catalog carries no operator path: only the generic filename conventions
 (`.claude/CLAUDE.md`, `CLAUDE.md`, `AGENTS.md`) live in source. A write is
 allowed only if its resolved path is exactly one of the catalog surfaces under
 the injected roots; anything else -- a secret file, a traversal escape, an
-ad-hoc surface -- is refused before a byte is read or written.
+ad-hoc surface, or a path that runs through a symlink or junction -- is
+refused before a byte is read or written.
 """
 from __future__ import annotations
 
 import os
 from dataclasses import dataclass
 
+from canon.path_policy import PathPolicyError, resolve_under_root
 from canon.region import extract_region
 from canon.schema import Record
 from canon.surface import SurfaceError, apply_surface
@@ -37,17 +39,24 @@ class Surface:
 
 # The confirmed instruction surfaces. SOUL.md (harness "hermes") is a lone
 # workspace surface: no global sibling, so it renders the full merged set like
-# AGENTS.md, and it reuses the R0 block-region grammar with no banner. GEMINI.md
-# at both scopes and the GLOBAL SOUL.md are further confirmed surfaces whose
-# global-path conventions are not yet pinned; they extend this catalog once those
-# conventions are settled. The vault is not listed here: it is a whole-directory
-# mirror with its own containment (vault_mirror.is_vault_write_allowed), not a
-# single-file region-splice surface, so it is deliberately not a root-kind (D-35).
+# AGENTS.md, and it reuses the R0 block-region grammar with no banner. W1 adds
+# three more lone workspace surfaces, each chosen deliberately: GEMINI.md (Gemini
+# CLI), .github/copilot-instructions.md (GitHub Copilot's repository-wide file),
+# and one canon-owned Cursor rule, .cursor/rules/canon.mdc. canon writes that one
+# rule file and no other file under .cursor/rules. What each of them cannot
+# express (glob-scoped activation) is declared in workspace/target_fidelity.py.
+# The global GEMINI.md and the GLOBAL SOUL.md are not pinned yet. The vault is
+# not listed here: it is a whole-directory mirror with its own containment
+# (vault_mirror.is_vault_write_allowed), not a single-file region-splice
+# surface, so it is deliberately not a root-kind (D-35).
 SURFACE_CATALOG: tuple[Surface, ...] = (
     Surface("claude-code", "global", ROOT_HOME, ".claude/CLAUDE.md"),
     Surface("claude-code", "workspace", ROOT_WORKSPACE, "CLAUDE.md"),
     Surface("codex", "workspace", ROOT_WORKSPACE, "AGENTS.md"),
     Surface("hermes", "workspace", ROOT_WORKSPACE, "SOUL.md"),
+    Surface("gemini-cli", "workspace", ROOT_WORKSPACE, "GEMINI.md"),
+    Surface("copilot", "workspace", ROOT_WORKSPACE, ".github/copilot-instructions.md"),
+    Surface("cursor", "workspace", ROOT_WORKSPACE, ".cursor/rules/canon.mdc"),
 )
 
 
@@ -84,6 +93,23 @@ def assert_writable(path: str, *, home: str, workspace: str) -> None:
             f"path is not an allow-listed canon surface: {path!r}")
 
 
+def assert_no_link(path: str, root: str) -> None:
+    """Raise SurfaceError when `path`, or a directory between it and `root`,
+    is a symlink, junction or other reparse point. The allow-list check is
+    lexical; a link would carry the write outside the root. Only the part below
+    the root is checked, so a root that sits behind a link itself is fine. A
+    root that does not exist on disk (injected IO in a test) has nothing to
+    follow."""
+    if not os.path.isdir(root):
+        return
+    real = os.path.realpath(root)
+    try:
+        resolve_under_root(os.path.join(real, os.path.relpath(path, root)), root=real,
+                           reject_reparse=True)
+    except PathPolicyError as exc:
+        raise SurfaceError(f"path runs through a link: {exc}") from exc
+
+
 def write_surface(surface: Surface, pool: list[Record], *, home: str,
                   workspace: str, read_text, write_text) -> str:
     """Render `pool` at `surface.scope` into `surface`'s file and write it back,
@@ -98,6 +124,7 @@ def write_surface(surface: Surface, pool: list[Record], *, home: str,
             f"surface is not in the write allow-list: {surface!r}")
     path = resolve_surface_path(surface, home=home, workspace=workspace)
     assert_writable(path, home=home, workspace=workspace)
+    assert_no_link(path, _root_dir(surface, home=home, workspace=workspace))
     host = read_text(path)
     new = apply_surface(host, pool, surface.scope)
     if new != host:
@@ -107,8 +134,9 @@ def write_surface(surface: Surface, pool: list[Record], *, home: str,
 
 @dataclass(frozen=True, slots=True)
 class SurfaceResult:
-    """The outcome of rendering one surface: written, unchanged, or off-limits
-    (the host had no canon region and was left untouched)."""
+    """The outcome of rendering one surface: written, unchanged, off-limits
+    (the host had no canon region and was left untouched), or missing (read_text
+    returned None: the file does not exist, so there is nothing to opt in)."""
 
     surface: Surface
     path: str
@@ -168,7 +196,11 @@ def write_surfaces(pool: list[Record], *, home: str, workspace: str,
                 f"surface is not in the write allow-list: {surface!r}")
         path = resolve_surface_path(surface, home=home, workspace=workspace)
         assert_writable(path, home=home, workspace=workspace)
+        assert_no_link(path, _root_dir(surface, home=home, workspace=workspace))
         host = read_text(path)
+        if host is None:
+            results.append(SurfaceResult(surface, path, "missing", None))
+            continue
         if not extract_region(host).present:
             results.append(SurfaceResult(surface, path, "off-limits", None))
             continue

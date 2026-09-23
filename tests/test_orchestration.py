@@ -16,6 +16,7 @@ import os
 from canon.registry import (
     ROOT_HOME,
     ROOT_WORKSPACE,
+    SURFACE_CATALOG,
     Surface,
     resolve_surface_path,
     write_surfaces,
@@ -71,15 +72,10 @@ def _pool() -> list[Record]:
 
 
 def _seed_all() -> FakeFS:
+    """Every catalog surface opted in with an empty region of its own scope."""
     return FakeFS({
-        resolve_surface_path(CLAUDE_GLOBAL, home=HOME, workspace=WS):
-            _host("global"),
-        resolve_surface_path(CLAUDE_WS, home=HOME, workspace=WS):
-            _host("workspace"),
-        resolve_surface_path(AGENTS_WS, home=HOME, workspace=WS):
-            _host("workspace"),
-        resolve_surface_path(SOUL_WS, home=HOME, workspace=WS):
-            _host("workspace"),
+        resolve_surface_path(s, home=HOME, workspace=WS): _host(s.scope)
+        for s in SURFACE_CATALOG
     })
 
 
@@ -170,7 +166,7 @@ def test_a_mis_scope_on_the_last_surface_writes_nothing():
     from canon.surface import SurfaceError
 
     fs = _seed_all()
-    # mis-scope the LAST catalog surface (SOUL.md): the surfaces ahead of it are
+    # mis-scope a late catalog surface (SOUL.md): the surfaces ahead of it are
     # valid, so a mid-loop write would commit them before the refusal. A
     # fail-closed batch plans every host before committing any, so nothing is
     # written when a later surface refuses.
@@ -201,6 +197,17 @@ def test_a_commit_pass_io_error_leaves_earlier_writes_and_propagates():
         _run(fs)
     # exactly one file committed before the fault, and it was not rolled back.
     assert len(fs.writes) == 1
+
+
+def test_a_missing_host_file_is_reported_and_never_created():
+    fs = _seed_all()
+    gemini = next(s for s in SURFACE_CATALOG if s.relative_path == "GEMINI.md")
+    path = resolve_surface_path(gemini, home=HOME, workspace=WS)
+    del fs.files[path]
+    fs.read_text = lambda p: fs.files.get(p)
+    results = _run(fs)
+    assert {r.path: r.status for r in results}[path] == "missing"
+    assert path not in fs.files and path not in fs.writes
 
 
 def test_write_surfaces_refuses_a_non_catalog_surface():

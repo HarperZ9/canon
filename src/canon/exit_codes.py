@@ -25,6 +25,15 @@ _FAILURE_EXIT_CODES = {
     "tier_mislabeled": EX_UNSUPPORTED,
     "unsupported_lifecycle": EX_UNSUPPORTED,
     "io_error": EX_IO,
+    "isolation_refused": EX_SECURITY,
+    "store_invalid": EX_IO,
+    "store_busy": EX_CONFLICT,
+    "not_found": EX_USAGE,
+    "budget_too_small": EX_BUDGET,
+    "edits_pending": EX_CONFLICT,
+    "undeclared_loss": EX_GATE,
+    "unsupported_format": EX_UNSUPPORTED,
+    "shadowed": EX_CONFLICT,
 }
 
 

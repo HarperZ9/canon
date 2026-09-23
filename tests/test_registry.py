@@ -157,3 +157,26 @@ def test_write_surface_does_not_write_when_the_region_is_unchanged():
 
     assert second == first
     assert fs.writes == [path]  # the second call was a no-op
+
+
+def test_write_surfaces_refuses_a_path_through_a_link(tmp_path):
+    """The allow-list check is lexical, so a junction or symlink on the way to
+    a surface is refused before anything is read or written."""
+    import os
+    import sys
+
+    from canon.registry import write_surfaces
+
+    workspace, outside = tmp_path / "ws", tmp_path / "outside"
+    workspace.mkdir()
+    outside.mkdir()
+    if sys.platform == "win32":
+        import _winapi
+        _winapi.CreateJunction(str(outside), str(workspace / ".github"))
+    else:
+        os.symlink(outside, workspace / ".github", target_is_directory=True)
+    surface = next(s for s in SURFACE_CATALOG if s.harness == "copilot")
+    with pytest.raises(SurfaceError, match="link"):
+        write_surfaces([], home=str(tmp_path / "h"), workspace=str(workspace),
+                       read_text=lambda p: None, write_text=lambda p, t: None,
+                       surfaces=(surface,))

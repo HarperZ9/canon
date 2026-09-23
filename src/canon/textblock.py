@@ -18,6 +18,10 @@ create_ord, a duplicate id, or an empty / CR-bearing / marker-bearing id or sup
 -- rather than emit text the ingest leg would then reject. ingest additionally
 refuses a sentinel whose id/sup carries a marker token (its regex excludes '<'
 and '>', so '-->' cannot appear). Both fail loudly rather than silently mangle.
+
+W1 extends the grammar (canon.textblock/v1) with an optional `applies`
+attribute on the sentinel and a generated `Applies to:` line; see
+textblock_scope.py. A region with no scoped block is byte-identical to v0.
 """
 from __future__ import annotations
 
@@ -27,6 +31,7 @@ import re
 
 from canon.region import extract_region
 from canon.schema import KIND_PERSONALITY_BLOCK, Provenance, Record, Temporal
+from canon.textblock_scope import attribute, check_applies, strip_visible, visible_line
 from canon.validator import validate_record
 
 RESERVED_PREFIX = "<!-- canon:"
@@ -36,7 +41,8 @@ _HARNESS = "canon-text"
 _BLOCK_RE = re.compile(
     r'^<!-- canon:block id="([^"<>\n]+)"'
     r'(?: ord="([0-9]+)")?'
-    r'(?: sup="([^"<>\n]+)")? -->$'
+    r'(?: sup="([^"<>\n]+)")?'
+    r'(?: applies="([^"<>\n]+)")? -->$'
 )
 
 
@@ -59,13 +65,17 @@ class IngestRefused(Exception):
         self.reason = reason
 
 
-def recompute_source_hash(title: str, body: str) -> str:
+def recompute_source_hash(title: str, body: str,
+                          applies: list[str] | None = None) -> str:
     """The canonical content hash for a personality block. Injective on
     (title, body) via the keyed JSON envelope, stable across processes (sorted
     keys, no wall clock), and a locked format contract: layering tie-breaks read
-    it, so its bytes must not drift."""
-    payload = json.dumps({"v": 1, "title": title, "body": body},
-                         ensure_ascii=False, sort_keys=True)
+    it, so its bytes must not drift. A W1 scope joins the envelope only when a
+    block has one, so every block without a scope keeps its hash."""
+    envelope: dict = {"v": 1, "title": title, "body": body}
+    if applies:
+        envelope["applies_to"] = list(applies)
+    payload = json.dumps(envelope, ensure_ascii=False, sort_keys=True)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
@@ -94,9 +104,13 @@ def _check_render_record(rec: Record, scope: str, seen: set[str]) -> None:
         raise RenderRefused(rid, "record is non-current (valid_until set)")
     if not isinstance(rec.data, dict):
         raise RenderRefused(rid, f"data is not a dict: {type(rec.data).__name__}")
-    extra = set(rec.data) - {"title", "body"}
+    extra = set(rec.data) - {"title", "body", "applies_to"}
     if extra:
         raise RenderRefused(rid, f"unexpected data keys {sorted(extra)}")
+    if "applies_to" in rec.data:
+        reason = check_applies(rec.data["applies_to"])
+        if reason:
+            raise RenderRefused(rid, reason)
     title, body = rec.data.get("title"), rec.data.get("body")
     if not isinstance(title, str) or not isinstance(body, str):
         raise RenderRefused(rid, "title and body must be strings")
@@ -143,8 +157,13 @@ def _render_block(rec: Record) -> str:
         head += f' ord="{p.create_ord}"'
     if sup is not None:
         head += f' sup="{sup}"'
+    body = rec.data["body"]
+    globs = rec.data.get("applies_to")
+    if globs:
+        head += attribute(globs)
+        body = visible_line(globs) + "\n" + body
     head += " -->"
-    return f'{head}\n{_TITLE_PREFIX}{rec.data["title"]}\n{rec.data["body"]}\n'
+    return f'{head}\n{_TITLE_PREFIX}{rec.data["title"]}\n{body}\n'
 
 
 # ---- ingest -------------------------------------------------------------------
@@ -205,7 +224,7 @@ def _build_block(lines: list[str], si: int, end: int,
                  scope: str | None) -> Record:
     m = _BLOCK_RE.match(lines[si])
     assert m is not None  # si came from the sentinel scan
-    bid, ord_s, sup = m.group(1), m.group(2), m.group(3)
+    bid, ord_s, sup, applies = m.group(1), m.group(2), m.group(3), m.group(4)
     if end <= si + 1:
         raise IngestRefused(f"block {bid!r} has no title line")
     title_line = lines[si + 1]
@@ -216,9 +235,16 @@ def _build_block(lines: list[str], si: int, end: int,
     if end <= si + 2:
         raise IngestRefused(f"block {bid!r} has no body")
     title = title_line[len(_TITLE_PREFIX):]
-    body = "\n".join(lines[si + 2:end])
+    globs = applies.split("|") if applies is not None else None
+    body_lines = lines[si + 2:end]
+    if globs is not None:
+        try:
+            body_lines = strip_visible(bid, body_lines, globs)
+        except ValueError as exc:
+            raise IngestRefused(str(exc)) from exc
+    body = "\n".join(body_lines)
     ord_ = int(ord_s) if ord_s is not None else None
-    rec = _assemble(bid, title, body, ord_, sup, scope)
+    rec = _assemble(bid, title, body, ord_, sup, scope, globs)
     problems = validate_record(rec)
     if problems:
         raise IngestRefused(f"block {bid!r} failed validation: {problems}")
@@ -226,10 +252,11 @@ def _build_block(lines: list[str], si: int, end: int,
 
 
 def _assemble(bid: str, title: str, body: str, create_ord: int | None,
-              sup: str | None, scope: str | None) -> Record:
+              sup: str | None, scope: str | None,
+              applies: list[str] | None = None) -> Record:
     prov = Provenance(
         harness=_HARNESS,
-        source_hash=recompute_source_hash(title, body),
+        source_hash=recompute_source_hash(title, body, applies),
         native_id=f"{_HARNESS}:{scope}/{bid}",
         session_id=None,
         create_ord=create_ord,
@@ -237,9 +264,11 @@ def _assemble(bid: str, title: str, body: str, create_ord: int | None,
         model_slug=None)
     temporal = (Temporal(valid_until=None, supersedes=sup)
                 if sup is not None else None)
+    data = {"title": title, "body": body}
+    if applies:
+        data["applies_to"] = list(applies)
     return Record(kind=KIND_PERSONALITY_BLOCK, id=bid, scope=scope,
-                  data={"title": title, "body": body},
-                  provenance=prov, temporal=temporal)
+                  data=data, provenance=prov, temporal=temporal)
 
 
 def canonicalize_record(rec: Record) -> Record:
@@ -249,4 +278,5 @@ def canonicalize_record(rec: Record) -> Record:
     None. Built through _assemble so it can never drift from the ingest path."""
     sup = rec.temporal.supersedes if rec.temporal is not None else None
     return _assemble(rec.id, rec.data["title"], rec.data["body"],
-                     rec.provenance.create_ord, sup, rec.scope)
+                     rec.provenance.create_ord, sup, rec.scope,
+                     rec.data.get("applies_to"))
