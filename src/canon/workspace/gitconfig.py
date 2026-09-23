@@ -54,6 +54,19 @@ def _config_path(root: Path) -> Path:
     return git_dir / "config"
 
 
+def common_git_dir(root: Path) -> Path | None:
+    """The git directory the repository at `root` shares with its worktrees
+    (a worktree's common directory, else its own git directory), resolved.
+    None when `root` has no `.git` entry or it cannot be followed. Two
+    checkouts with the same common directory are one repository."""
+    if not (root / ".git").exists():
+        return None
+    try:
+        return _config_path(root).parent.resolve()
+    except (OSError, GitConfigError):
+        return None
+
+
 def parse_remotes(config_text: str) -> dict[str, str]:
     """Remote name to URL from a git config file's text. The first `url` in a
     remote section wins. `include` directives and `insteadOf` rewrites are not

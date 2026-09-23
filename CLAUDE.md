@@ -326,7 +326,8 @@ level up, in the stored row:
   importers read what the host wrote as the host's and compare projects by
   identity, D-133 back-flow reads a checkout against its own render and keeps
   every edit, D-134 switch checks the host as it is (links, override, budget
-  chain, line endings) and the brief is measured as it lands.
+  chain, line endings) and the brief is measured as it lands, D-135 the
+  project check resolves a working directory to its checkout first.
 
 Later phases (verifier, migration legs, region installation into an existing
 file, the global SOUL.md and the global GEMINI.md surfaces) aim at this same

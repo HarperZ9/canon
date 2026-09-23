@@ -456,12 +456,16 @@ finds the canaries.
 ### Project check
 
 A Codex rollout names its repository in `git.repository_url`; a Claude Code
-session names its working directory in `cwd`. A working directory is compared
-by project identity, not by path prefix: a nested repository or a submodule
-inside this checkout is another project, and a sibling worktree outside it is
-this one. The identity of a working directory is derived without writing a
-nonce into it; a directory that no longer exists falls back to containment,
-with a `.git` entry between it and the root counting as another project. When
+session names its working directory in `cwd`. A working directory is first
+resolved to the checkout it sits in: the nearest directory with a `.git` entry,
+or this project's root when it is inside a project folder with no `.git`. A
+checkout of this project's own repository (its root, or a sibling worktree
+that shares its git directory) is this project, under a `--remote` override
+too. Any other checkout is compared by project identity, not by path prefix,
+so a nested repository or a submodule inside this checkout is another project.
+That identity is derived without the override and without writing a nonce
+into it; a directory that no longer exists falls back to containment, with a
+`.git` entry between it and the root counting as another project. When
 the source names a different project than the one being imported into, the
 import is refused with `isolation_refused` unless `--accept-foreign-source` is
 given, and the report records the check either way. A source that names

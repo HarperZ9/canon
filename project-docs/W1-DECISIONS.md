@@ -426,3 +426,21 @@ digest. The footer promised a receipt no switch wrote; switch now writes one
 on request and keeps the last one, and the footer names the command that lists
 every left-out record. A CRLF host got a mixed file, and a byte-order mark hid
 the begin marker; both now read as the host wrote them.
+
+## D-135 The project check resolves a working directory to its checkout first
+
+D-132 compared the identity of each session directory with this project's.
+That refused two sessions the containment check had accepted. With `--remote`
+on a repository that has no remote of its own, the session directory's
+identity was derived without the override, so a session run at the repository
+root was another project. In a project folder with no `.git`, a session run in
+a subdirectory got the subdirectory's own path key.
+
+A session directory is now resolved to the checkout it sits in before any
+comparison: the nearest directory with a `.git` entry, or this project's root
+when the directory is inside a project folder with no `.git`. A checkout that
+is this project's root, or a sibling worktree sharing its git directory, is
+this project. That is the same answer as deriving the checkout's identity with
+the override, since the override names the repository and a worktree shares
+its config. Any other checkout is compared by identity without the override,
+so a nested repository and a submodule stay other projects.

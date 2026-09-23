@@ -3,11 +3,15 @@ files are this project's.
 
 The source names its repository (Codex `git.repository_url`) or its working
 directories (`cwd`). A repository URL is compared with this project's key. A
-working directory is compared by project identity, not by path prefix: a
-nested repository or a submodule sits inside this checkout's root but is its
-own project, and a sibling worktree sits outside the root but is this one. The
-identity of a working directory is derived without writing anything, so a
-nested repository with no remote gets no nonce from an import. A working
+working directory is first resolved to the checkout it sits in: the nearest
+directory with a `.git` entry, or this project's root when the directory is
+inside a project folder that has no `.git` at all. A checkout of this
+project's own repository (its root, or a sibling worktree that shares its git
+directory) is this project, and that holds under a `--remote` override too,
+because the override names that repository. Any other checkout is compared by
+identity, derived without the override and without writing anything, so a
+nested repository or a submodule sits inside the root but is its own project,
+and a nested repository with no remote gets no nonce from an import. A working
 directory that no longer exists falls back to containment, and a `.git` entry
 between it and the root makes it another project.
 """
@@ -16,11 +20,13 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from canon.workspace.gitconfig import common_git_dir
 from canon.workspace.identity import (
     METHOD_REMOTE,
     ProjectIdentity,
     ProjectIdentityError,
     derive_identity,
+    find_repo_root,
     normalize_remote,
 )
 
@@ -45,10 +51,35 @@ def _nested_repo_between(path: str, root: str) -> bool:
     return False
 
 
+def _checkout_root(directory: Path, identity: ProjectIdentity) -> Path:
+    """The root of the checkout `directory` sits in: the nearest directory with
+    a `.git` entry, else this project's root when `directory` is inside a
+    project folder with no `.git`, else `directory` itself."""
+    found = find_repo_root(directory)
+    if found is not None:
+        return found
+    root = Path(identity.root)
+    if not (root / ".git").exists() and _inside(_norm(directory), _norm(root)):
+        return root
+    return directory
+
+
+def _same_repository(checkout: Path, root: Path) -> bool:
+    """True for this project's root, and for a sibling worktree that shares
+    its git directory."""
+    if _norm(checkout) == _norm(root):
+        return True
+    mine, theirs = common_git_dir(root), common_git_dir(checkout)
+    return mine is not None and theirs is not None and _norm(mine) == _norm(theirs)
+
+
 def _cwd_status(cwd: str, identity: ProjectIdentity) -> str:
     if os.path.isdir(cwd):
+        checkout = _checkout_root(Path(cwd).resolve(), identity)
+        if _same_repository(checkout, Path(identity.root)):
+            return "match"
         try:
-            other = derive_identity(cwd, write_nonce=False)
+            other = derive_identity(checkout, write_nonce=False)
         except ProjectIdentityError:
             return "mismatch"
         return "match" if other.project_id == identity.project_id else "mismatch"
