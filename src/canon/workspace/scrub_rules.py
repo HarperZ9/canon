@@ -57,7 +57,16 @@ _VALUE = r"(\"[^\"\n]{4,}\"|'[^'\n]{4,}'|<[^<>\n]*>|[^\s\"'`,;(){}\[\]]{4,})"
 # inside a dotted or underscored run, and a URL scheme and a URL password
 # have a length cap, so a long run of text is scanned once, not once per
 # character.
-_NAME_START = r"(?<![A-Za-z0-9])(?<![A-Za-z0-9][_.\-])"
+# A `name=value` right after `?` or `&` is a URL query parameter, which has
+# its own rule whose value ends at the next `&` or `#`; the assignment rules
+# leave it alone. A name after `?` or `&` followed by `:` is still theirs.
+# Atomic, so a later failure never retries the lookahead after a plain start.
+_NOT_A_QUERY = r"(?>(?<![?&])|(?=[A-Za-z0-9_.\-]*+\s*:))"
+_NAME_START = r"(?<![A-Za-z0-9])(?<![A-Za-z0-9][_.\-])" + _NOT_A_QUERY
+# An assignment name starts after a character that cannot be in a name, or
+# after the `-` or `--` of a command-line flag (`--api-token=...`).
+_FLAG_START = (r"(?>(?<![A-Za-z0-9_.\-])|(?<=-)(?<![^\s\"'=]-)|(?<=--)(?<![^\s\"'=]--))"
+               + _NOT_A_QUERY)
 _SCHEME = r"\b[a-zA-Z][a-zA-Z0-9+.\-]{0,255}://"
 
 
@@ -179,9 +188,8 @@ RULES: tuple[tuple[str, re.Pattern[str], int, Check], ...] = (
      1, None),
     ("connection-string", _p(_SCHEME + r"([^\s:/@\"']+)@"), 1, userinfo_is_secret),
     ("url-credential", _p(
-        r"(?i)[?&](?:access_token|token|api_key|apikey|key|secret|sig|signature|password|auth|"
-        r"code|client_secret|x-amz-signature|x-amz-credential|x-amz-security-token)="
-        r"([^&\s#\"']{6,})"), 1, data_value_is_secret),
+        r"(?i)[?&]" + _segment_name(_SEGMENT_WORDS + ("sig", "signature", "code")) +
+        r"=([^&\s#\"']{4,})"), 2, data_value_is_secret),
     ("azure-key", _p(r"(?i)\b(?:AccountKey|SharedAccessSignature|SharedAccessKey)=([^;\s\"']{8,})"),
      1, None),
     ("npmrc-token", _p(r":_(?:authToken|auth|password)=([^\s\"']{8,})"), 1, None),
@@ -192,9 +200,9 @@ RULES: tuple[tuple[str, re.Pattern[str], int, Check], ...] = (
         r"(?i)" + _NAME_START + r"(?:[a-z0-9]+[_.\-])*(?:password|passwd|pwd|pass|passphrase)"
         r"\s*[:=]\s*" + _VALUE), 1, value_is_secret),
     ("env-assignment", _p(
-        r"\b(?=[A-Z0-9_]*" + _SECRET_WORD + r")[A-Z][A-Z0-9_]*+\s*[=:]\s*"
+        _NOT_A_QUERY + r"\b(?=[A-Z0-9_]*" + _SECRET_WORD + r")[A-Z][A-Z0-9_]*+\s*[=:]\s*"
         r"(\"[^\"\n]{4,}\"|'[^'\n]{4,}'|<[^<>\n]*>|[^\s\"']{4,})"), 1, value_is_secret),
     ("env-assignment", _p(
-        r"(?i)(?<![A-Za-z0-9_.\-])(?<!\$\{)" + _segment_name(_SEGMENT_WORDS) +
+        r"(?i)" + _FLAG_START + r"(?<!\$\{)" + _segment_name(_SEGMENT_WORDS) +
         r"\s*[=:]\s*" + _VALUE), 2, value_is_secret),
 )

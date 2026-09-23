@@ -335,7 +335,8 @@ level up, in the stored row:
   read where Codex reads its config (`CODEX_HOME`, else `~/.codex`), D-140
   the scrubber runs in time linear in its input, D-141 a value looks random by
   its runs, not by its character classes, D-142 the last secret word decides a
-  name, and a password keeps its suffix.
+  name, and a password keeps its suffix, D-143 a URL query parameter ends at
+  the next `&` or `#`.
 
 Later phases (verifier, migration legs, region installation into an existing
 file, the global SOUL.md and the global GEMINI.md surfaces) aim at this same

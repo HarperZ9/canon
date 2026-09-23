@@ -13,9 +13,11 @@ in `scrub_rules.py`: provider key formats (Anthropic, OpenAI, GitHub, GitLab,
 Slack, AWS, Google, Stripe, Hugging Face, npm, PyPI, DigitalOcean, Shopify,
 SendGrid, Twilio, Telegram), JSON web tokens, private key blocks (PEM, PGP,
 PuTTY), Slack and Discord webhook URLs, bearer, basic and API-key headers,
-cookies, a token query parameter in a URL, Azure account keys, `.npmrc`
-tokens, JSON secret fields, password fields in any case and after `=` or `:`,
-and assignments whose name says key, token, secret, pass, password or
+cookies, a URL query parameter whose name says key, token, secret, pass,
+password, credential, auth, sig or code (its value ends at the next `&` or
+`#`), Azure account keys, `.npmrc` tokens, JSON secret fields, password
+fields in any case and after `=` or `:`, and assignments and command-line
+flags (`--api-token=`) whose name says key, token, secret, pass, password or
 credential, in any case. A value after such a name is judged by its shape
 (`scrub_shape.py`): a number, a date, a path or a boolean is a setting, a
 short word is a setting after a key or token name, and a name that qualifies

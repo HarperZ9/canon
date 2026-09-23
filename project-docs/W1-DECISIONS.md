@@ -529,7 +529,7 @@ starts only where a name starts, a URL scheme is capped at 256 characters and
 a URL password at 512, and a rule pass reads the earlier markers once. A
 fuzz run of 160,000 generated texts gave the same output before and after,
 except for the exponential cases. `tests/test_workspace_scrub_time.py` runs
-the reported inputs and seven long runs in a child process under a timeout,
+the reported inputs and long name runs in a child process under a timeout,
 so a regression fails the suite instead of hanging it.
 
 ## D-141 A value looks random by its runs, not by its character classes
@@ -587,3 +587,25 @@ followed by a word that is not in the list (`first_pass_label` is fine,
 list is where that trade is tuned. A path under a password or token name
 that uses only letters, digits and slashes and mixes both cases with a digit
 (`API_KEY=/Users/dev/Project2`) reads as a base64 key and is redacted too.
+
+## D-143 A URL query parameter ends at the next `&` or `#`
+
+D-136 said a URL query parameter takes the same name and shape rules as an
+assignment. Only an exact list of names had a query rule, and the general
+assignment rule also matched a name after `?` or `&` with a value class that
+admits `&`, `=` and `#`. It judged the rest of the query string as one
+value: `?token=bearer&page=2` read `bearer&page=2` as a token, and
+`?key=main&v=a8f3k2j9x7m1` redacted `key` for the cache-buster after it.
+`canon workspace task "Check https://example.com/search?key=value123&page=2
+for the paging bug"` exited 4. A name the list lacked (`?db_password=`,
+`?private_token=`) fell to the assignment rule, whose redaction ran to the
+end of the query.
+
+The query rule now takes any name with a key, token, secret, pass, password,
+credential, auth, sig or code segment, and its value ends at the next `&` or
+`#`. The assignment rules skip a `name=` right after `?` or `&`. Shell text
+such as `make&&DB_PASSWORD=...` reads as a query parameter, which still
+redacts the value up to the next `&`. The general assignment rule also
+starts a name after the `-` or `--` of a command-line flag, so
+`--api-token=<token>` is redacted; before, a name had to start after a
+character that cannot be in a name, and the flag's dash blocked it.

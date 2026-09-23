@@ -439,8 +439,9 @@ bearer, basic, token and API-key headers and cookies; the password of any
 path, a query, a fragment or the end is not a password), and a user part with
 no password when, with its percent escapes decoded, it holds a random run (a
 run of eight or more letters and digits that is not a word followed by a
-number or a number followed by up to two letters); a token-named URL query
-parameter; Azure account
+number or a number followed by up to two letters); a URL query parameter
+whose name has a key, token, secret, pass, password, credential, auth, sig or
+code segment, whose value ends at the next `&` or `#`; Azure account
 keys and `.npmrc` tokens; JSON fields named like a secret, also inside escaped
 JSON; password fields in any case after `=` or `:` (`db_password=`,
 `password: x`, `password = "x"`); and assignments whose name has a key, token,
@@ -468,11 +469,13 @@ holds a token when it ends in another credential word, or in `key` after a
 word such as `api`, `access` or `secret`; a word of up to ten letters is a
 setting there (`token: bearer`) and anything else is a secret. After any
 other name (`token_type`, `GITHUB_TOKEN_CI`, `PASSWORD_MIN_LENGTH`,
-`KEY_PREFIX`, a bare `key` or `auth`, `MONKEY`) the value must look random: twelve or more characters with no space that hold
-a random run, or mix both cases with `+`, `/` or `=`. An AWS resource name
-(`arn:...`) is a setting after any name, like a number. A cookie header is a
-secret when one of its values is, and a URL query parameter and a JSON field
-take the same name and shape rules. A one-word name followed by a colon
+`KEY_PREFIX`, a bare `key` or `auth`, `MONKEY`) the value must look random:
+twelve or more characters with no space that hold a random run, or mix both
+cases with `+`, `/` or `=`. An AWS resource name (`arn:...`) is a setting
+after any name, like a number. A cookie header is a secret when one of its
+values is, a command-line flag (`--api-token=...`) is an assignment, and a
+URL query parameter and a JSON field take the same name and shape rules. A
+one-word name followed by a colon
 inside a sentence ("Refresh token: handle expiry") is prose unless its value
 has a digit, a symbol or twelve letters. Each match becomes
 `[REDACTED:<rule>]`. The report counts the hits by rule; it never stores the
