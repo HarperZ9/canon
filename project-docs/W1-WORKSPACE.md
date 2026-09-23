@@ -499,7 +499,12 @@ resolved to the checkout it sits in: the nearest directory with a `.git` entry,
 or this project's root when it is inside a project folder with no `.git`. A
 checkout of this project's own repository (its root, or a sibling worktree
 that shares its git directory) is this project, under a `--remote` override
-too. Any other checkout is compared by project identity, not by path prefix,
+too. A repository URL is compared with this project's key, except that a URL
+naming this checkout's own remote, under an override that names another
+repository, defers to the working directory check: Codex records the
+checkout's own origin, so a rollout at the root of a fork imported with
+`--remote <upstream>` matches as a Claude Code session there does. Any other
+checkout is compared by project identity, not by path prefix,
 so a nested repository or a submodule inside this checkout is another project.
 That identity is derived without the override and without writing a nonce
 into it; a directory that no longer exists falls back to containment, with a

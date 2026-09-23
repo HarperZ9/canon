@@ -2,8 +2,11 @@
 files are this project's.
 
 The source names its repository (Codex `git.repository_url`) or its working
-directories (`cwd`). A repository URL is compared with this project's key. A
-working directory is first resolved to the checkout it sits in: the nearest
+directories (`cwd`). A repository URL is compared with this project's key,
+except that a URL naming this checkout's own remote, under a `--remote`
+override that names another repository, defers to the working directory:
+Codex records the checkout's own origin, not the override. A working
+directory is first resolved to the checkout it sits in: the nearest
 directory with a `.git` entry, or this project's root when the directory is
 inside a project folder that has no `.git` at all. A checkout of this
 project's own repository (its root, or a sibling worktree that shares its git
@@ -20,7 +23,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from canon.workspace.gitconfig import common_git_dir
+from canon.workspace.gitconfig import GitConfigError, common_git_dir, read_remote_url
 from canon.workspace.identity import (
     METHOD_REMOTE,
     ProjectIdentity,
@@ -90,16 +93,30 @@ def _cwd_status(cwd: str, identity: ProjectIdentity) -> str:
     return "mismatch"
 
 
+def _own_remote_key(identity: ProjectIdentity) -> str | None:
+    """The normalized remote this checkout's own git config names, which is
+    what Codex records even when `--remote` names another repository."""
+    try:
+        url = read_remote_url(Path(identity.root))
+        return normalize_remote(url) if url else None
+    except (GitConfigError, ProjectIdentityError):
+        return None
+
+
 def project_check(identity: ProjectIdentity, extraction) -> dict:
     """Whether the source says it belongs to this project. The report names
-    the check and never a local path."""
+    the check and never a local path. A repository URL that names this
+    checkout's own remote, under a `--remote` override that names another,
+    defers to the working directory check."""
     url = extraction.repository_url
     if url and identity.method == METHOD_REMOTE:
         try:
             key = normalize_remote(url)
         except ProjectIdentityError:
             key = None
-        if key and not key.startswith("local:"):
+        own = bool(key and key != identity.key and extraction.cwds
+                   and key == _own_remote_key(identity))
+        if key and not key.startswith("local:") and not own:
             status = "match" if key == identity.key else "mismatch"
             return {"status": status, "by": "repository_url", "source_key": key}
     if extraction.cwds:

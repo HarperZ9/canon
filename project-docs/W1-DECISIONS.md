@@ -630,3 +630,22 @@ A bearer token of twenty identical letters, as the rule test uses, is still
 a token. The cost: a real token that is one lower-case word of fewer than
 twenty letters passes, and a number of up to 19 digits after `X-API-Key:`
 passes, as it does after any secret-named key.
+
+## D-145 A Codex URL that names this checkout's own remote defers to the directory
+
+D-135 says a checkout of this project's own repository is this project under
+a `--remote` override too. That held for a Claude Code session, which names
+only its working directory, and not for a Codex rollout, which also names
+`git.repository_url`. Codex records the checkout's own origin. With a fork
+as origin and `--remote` naming the upstream, a rollout at the repository
+root was compared by URL first, fork against upstream, and refused with
+`isolation_refused`, while a Claude Code session at the same root matched.
+The inconsistency predates D-135; D-135's text promised otherwise.
+
+A repository URL that names this checkout's own remote, when the override
+names another repository and the rollout names a working directory, now
+defers to the working directory check. The root and a sibling worktree
+match; another clone of the fork is compared by its own identity and stays
+another project; a URL that names neither the override nor this checkout's
+remote is refused as before. Without an override the URL and the key agree,
+so nothing changes there.

@@ -337,7 +337,8 @@ level up, in the stored row:
   its runs, not by its character classes, D-142 the last secret word decides a
   name, and a password keeps its suffix, D-143 a URL query parameter ends at
   the next `&` or `#`, D-144 a header value is judged by its shape and read on
-  its own line.
+  its own line, D-145 a Codex URL that names this checkout's own remote defers
+  to the directory under `--remote`.
 
 Later phases (verifier, migration legs, region installation into an existing
 file, the global SOUL.md and the global GEMINI.md surfaces) aim at this same
