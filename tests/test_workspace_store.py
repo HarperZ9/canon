@@ -191,3 +191,12 @@ def test_adoption_never_overwrites_this_projects_own_record(two_projects):
     with pytest.raises(StoreError, match="overwrite"):
         adopt(store_b, store_a.project_id, reason="merge")
     assert (store_b.project_dir() / "records.jsonl").read_bytes() == before
+
+
+def test_a_project_directory_that_names_another_project_is_refused(two_projects):
+    store_a, store_b = two_projects
+    manifest = store_b.project_dir() / "project.json"
+    manifest.write_text(json.dumps({"project_id": store_a.project_id}), encoding="utf-8")
+    fresh = ProjectStore(store_b.root, store_b.identity)
+    with pytest.raises(StoreError, match="names another project"):
+        fresh.put(block("late", "Late body.", 9))

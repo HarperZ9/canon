@@ -3,6 +3,9 @@
 ## Unreleased
 
 Canon starts to carry a project's working state between models and tools.
+The walkthrough and its limits are in `docs/switching-models.md`; the
+specification is `project-docs/W1-WORKSPACE.md`. Nothing below is released
+and the version is unchanged.
 
 - Adds a stable project identity (`canon workspace id`). A project with a
   remote is keyed on the normalized remote URL, so two clones or a moved

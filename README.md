@@ -12,6 +12,10 @@ shapes (`CLAUDE.md`, `AGENTS.md`, `SOUL.md`, `GEMINI.md`) plus per-tool memory
 stores that do not talk to each other. canon gives all of them one typed record
 to draw from and write back to, and renders each tool's file from that record.
 
+When you move one repository from one agent to the next, canon also carries
+that project's working state (focus, open work, decisions with the alternatives
+you dropped, environment quirks) and keeps it apart from every other project.
+
 ## What it does
 
 - **One envelope, eight kinds.** An authored personality block, a raw or
@@ -35,84 +39,63 @@ to draw from and write back to, and renders each tool's file from that record.
 Switching a repository from one agent to another usually means explaining the
 project again, and memory tools that key on a user rather than a project show
 one repository's history inside another. canon keeps a project's working state
-as records bound to that project and renders it for whichever tool comes next.
-
-- **One project, one store.** `canon workspace id` derives a stable id from the
-  repository's remote, or from its path when there is no remote. Every stored
-  row names its project, and a read that finds another project's row fails
-  instead of mixing the two.
-- **Global only on purpose.** New records belong to the project.
-  `canon workspace promote` is the only way to make one global, and
-  `canon workspace adopt` is the only way to copy another project's records in.
-  Both need a reason and both are logged.
-
-- **The state you would otherwise re-explain.** Record what you are doing,
-  what is still open, what you decided and which alternatives you dropped and
-  why, and the quirks of the environment. A dropped alternative cannot be
-  recorded without its reason.
+as records bound to that project and writes it into the file the next agent
+reads at startup.
 
 ```bash
-canon workspace id
-canon workspace focus --goal "Ship the handoff command" --area src/canon/workspace
-canon workspace task "Write the Codex importer" --status in-progress
-canon workspace decide --title "Row format" --decision "JSONL rows"     --context "Stores must diff in review" --reject SQLite "binary diffs"
-canon workspace constraint "Tests must pass on Windows and Linux" --quirk
-canon workspace list
-canon workspace promote decision-3 --reason "applies to every project"
-```
-
-- **A brief for the next agent.** `canon handoff --to codex` prints a resume
-  brief: focus first, then open work, recent decisions with the alternatives
-  dropped and why, then constraints. It fits the target's size budget, and when
-  something does not fit it is left out whole and named at the end rather than
-  cut silently. `--receipt` writes digests of the brief and the records behind
-  it.
-- **Switch in one command.** `canon switch --to claude-code` writes your
-  blocks and the brief into the target's own instruction file, between the
-  canon markers only, so the next agent reads it at startup without a paste.
-
-```bash
-canon handoff --to codex --receipt brief.receipt.json
-canon switch --to claude-code --dry-run
+cd your-repo
+canon workspace import --from claude-code path/to/session.jsonl   # or --from codex
+canon workspace list --proposed
+canon workspace accept imp-task-4de430285521
+canon workspace focus --goal "Ship the JSON export" --area src/export
+canon workspace decide --title "Keep the CSV writer" --decision "Add JSON beside CSV" \
+    --context "Downstream scripts parse CSV" --reject "Replace CSV" "breaks three scripts"
 canon switch --to codex --create
 ```
 
-- **Your edits come back.** If you or an agent edit inside canon's region (tick
-  a task, reword the goal, fix a block), the next `switch` does not overwrite
-  it. Each edit becomes a proposal, and the switch waits until you accept or
-  reject them. `canon workspace pull --from claude-code` does the same read on
-  demand.
-
-Targets: `claude-code`, `codex`, `gemini-cli`, `cursor`, `copilot`, and
-`markdown` for a brief to paste into a chat app or a local model.
-`canon workspace targets` prints each target's file, its budget, and what it
-cannot express: none of these files can load a block for some files only, so a
-block scoped with `applies_to` is written always-on with an `Applies to:` line,
-and that downgrade is declared rather than silent.
-
-- **Import what the last session knew.** `canon workspace import` reads a
-  Claude Code session or a Codex rollout and proposes the focus, the open
-  plan steps, `TODO` markers, decisions and failed approaches it can find by
-  fixed patterns. Each proposal names the file and line it came from, and
-  nothing reaches a brief until you accept it.
-- **Secrets stay out.** Keys, tokens, private keys, bearer headers, connection
-  string passwords and secret-named assignments are redacted before anything is
-  stored, the store refuses anything that still looks like one, and a brief
-  that would carry one is refused.
+- **One project, one store.** The project id comes from the repository's remote,
+  or from its path when there is no remote. Every stored record names its
+  project, and a read that finds another project's record fails instead of
+  mixing the two. Global scope is reached only by `canon workspace promote`,
+  and another project's records only by naming them; both are explicit.
+- **The state you would otherwise re-explain.** Focus, open work items,
+  decisions with the alternatives dropped and why, and constraints and
+  environment quirks are record kinds of their own. A dropped alternative cannot
+  be recorded without its reason.
+- **Import what the last session knew.** `canon workspace import` reads a Claude
+  Code session or a Codex rollout and proposes focus, open plan steps, `TODO`
+  markers, decisions and failed approaches by fixed patterns. Each proposal
+  names the file and line it came from, and nothing reaches a brief until you
+  accept it.
+- **Secrets stay out.** Keys, tokens, private keys, bearer headers,
+  connection-string passwords and secret-named assignments are redacted before
+  anything is stored, the store refuses anything that still looks like one, and
+  a brief that would carry one is refused.
 - **Losses are named.** Each importer lists what it drops and counts it. A
   session with content the importer has not seen is refused until you declare
   that drop, so a format change cannot lose data quietly.
+- **A brief that fits.** `canon handoff --to <target>` lists focus, open work,
+  recent decisions and constraints, in that order, inside the target's size
+  budget. What does not fit is left out whole and named at the end, and
+  `--receipt` writes digests of the brief and the records behind it.
+- **Switch in one command.** `canon switch --to <target>` writes your blocks and
+  the brief into the target's own instruction file, between canon's markers
+  only. If you or an agent edit inside that region, the next switch turns each
+  edit into a proposal and waits for your decision instead of overwriting it.
 
-```bash
-canon workspace import --from codex ~/.codex/sessions/2026/09/22/rollout-....jsonl
-canon workspace list --proposed
-canon workspace accept imp-task-4de430285521
-canon workspace reject imp-decision-8a1f0c2b9e77 --reason "quoted, not decided"
-```
+Targets: `claude-code` (`CLAUDE.md`), `codex` (`AGENTS.md`), `gemini-cli`
+(`GEMINI.md`), `copilot` (`.github/copilot-instructions.md`), `cursor`
+(`.cursor/rules/canon.mdc`), and `markdown` for a brief to paste into a chat app
+or a local model. `canon workspace targets` prints each target's budget and what
+its file cannot express: none of these files can load a block for some files
+only, so a block scoped with `applies_to` is written for every file with an
+`Applies to:` line, and that downgrade is declared rather than silent.
 
-The store lives in `~/.canon/store` unless `CANON_STORE` or `--store` says
-otherwise. `project-docs/W1-WORKSPACE.md` covers the identity rules, including
-what happens when a remote is renamed or a project with no remote moves.
+The walkthrough, every command, and the limits are in
+[`docs/switching-models.md`](docs/switching-models.md). The short version of
+the limits: the importers use fixed patterns rather than a model, the session
+formats they read are not stable interfaces, the scrubber recognises secrets by
+shape, and the brief knows only what was recorded or imported.
 
 ## How one record becomes the file each tool reads
 
@@ -130,7 +113,7 @@ in advance. Anything else fails the gate rather than logging a warning.
 
 ## What canon carries
 
-![A table of twelve rows: what canon carries, how many of it there are, and where each number is read from. Eight record kinds share one envelope: five under the v1 record tag and three workspace-state kinds under their own tag. Two scopes layer, workspace over global. Seven surfaces sit on the write allow-list: a global and a workspace file for Claude Code, an AGENTS.md for Codex, a workspace SOUL.md for Hermes, a GEMINI.md, the Copilot instructions file, and one Cursor rule. Four storage adapters implement the backend protocol, and five capability tokens describe what each one can carry. Twenty-two schema pins name the seams that carry a version. The aggregate check folds four legs, and four gate functions share the same zero or one exit code. 143 source modules hold 23,922 lines, and 63 test files hold 1232 tests. Two surfaces named in the roadmap are absent from the catalog, a global SOUL.md and a global GEMINI.md, so canon does not render them.](docs/art/record-table.svg)
+![A table of twelve rows: what canon carries, how many of it there are, and where each number is read from. Eight record kinds share one envelope: five under the v1 record tag and three workspace-state kinds under their own tag. Two scopes layer, workspace over global. Seven surfaces sit on the write allow-list: a global and a workspace file for Claude Code, an AGENTS.md for Codex, a workspace SOUL.md for Hermes, a GEMINI.md, the Copilot instructions file, and one Cursor rule. Four storage adapters implement the backend protocol, and five capability tokens describe what each one can carry. Twenty-two schema pins name the seams that carry a version. The aggregate check folds four legs, and four gate functions share the same zero or one exit code. 143 source modules hold 23,929 lines, and 63 test files hold 1233 tests. Two surfaces named in the roadmap are absent from the catalog, a global SOUL.md and a global GEMINI.md, so canon does not render them.](docs/art/record-table.svg)
 
 Every count is asserted against the module that defines it in
 `tests/test_repo_art.py`.
@@ -183,20 +166,34 @@ transform omissions and says what the export does not prove, including host
 enforcement. It does not import provider auth, private databases, ChatGPT web
 state, or Claude web state.
 
+W1 adds the workspace backend described under "Moving a project between
+models": a project identity and a store that refuses to mix projects, the
+workspace-state kinds, the handoff brief and `switch`, the two session
+importers with their secret scrubber and declared losses, three more surfaces
+(`GEMINI.md`, the Copilot instructions file, one Cursor rule) with the
+downgrades each declares, and the read-back of edits made inside a rendered
+region. It is specified in `project-docs/W1-WORKSPACE.md`.
+
 Installing a region into an existing file, the first migrator on the version seam,
 and the global SOUL.md and the global GEMINI.md surfaces are later phases. Everything
 shipped is proven by a full test suite and aims at the one envelope.
 
 ## Run it
 
-Canon 0.1.0 is prepared as a GitHub release candidate. Install from a reviewed
-GitHub release asset after publication, or from a local wheel during review:
+The latest release is on PyPI as `flywheel-canon` (the console script is
+`canon`):
 
 ```bash
-python -m pip install canon-0.1.0-py3-none-any.whl
+python -m pip install flywheel-canon
 ```
 
-No PyPI package ownership or publication is claimed here.
+The workspace commands above (`canon workspace`, `canon handoff`,
+`canon switch`) are not released yet; 0.2.0 does not have them. To use them,
+install from a checkout of this repository:
+
+```bash
+python -m pip install -e .
+```
 
 Serve the record set to a harness:
 
@@ -257,8 +254,13 @@ src/canon/
   capsule*.py, atom.py, adapter.py       the continuity capsule, atom and target contract
   cli_compile.py, cli_export.py          preview, stdout export and bundle export
   cli_artifacts.py, cli_publish.py       source hashes and confined artifact publishing
-  workspace/                             project identity, the per-project store, isolation
-  cli_workspace*.py                      the workspace commands
+  workspace/                             project identity, the store and its isolation,
+                                         authoring, briefs, switch, importers, the
+                                         scrubber, target downgrades, edit read-back
+  validator_workspace.py, versions_pin.py the workspace kinds' rules, the pin type
+  textblock_scope.py                     a block's glob scope in the region grammar
+  cli_workspace*.py, cli_handoff.py,     the workspace, handoff, switch, import and
+  cli_import.py                          pull commands
 tests/                                   round-trip, validator, layering, backend,
                                          fidelity, surface, orchestration, vault,
                                          drift, reconcile, continuity, and artwork proofs

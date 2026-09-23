@@ -95,6 +95,7 @@ class ProjectStore:
             raise StoreError(f"not a project id: {pid!r}")
         self.project_id: str = pid
         self.clock = clock
+        self._manifest_checked = False
 
     # ---- paths ------------------------------------------------------------
 
@@ -187,16 +188,22 @@ class ProjectStore:
         write_atomic(self.project_dir() / name, encode_rows(current + [row]))
 
     def ensure_manifest(self) -> None:
+        """Check (once per store object) that the project directory names this
+        project, writing the manifest on first use."""
+        if self._manifest_checked:
+            return
         path = self.project_dir() / PROJECT_FILE
         if path.is_file():
             stored = json.loads(path.read_text(encoding="utf-8"))
             if stored.get("project_id") != self.project_id:
                 raise StoreError("project directory names another project")
+            self._manifest_checked = True
             return
         if self.identity is None:
             raise StoreError("a store opened by id alone does not write")
         write_atomic(path, json.dumps(self.identity.to_public(),
                                        sort_keys=True, indent=2) + "\n")
+        self._manifest_checked = True
 
     def log(self, action: str, record: Record, detail: dict) -> None:
         append_log(self.project_dir() / LOG_FILE, action, record,

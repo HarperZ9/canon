@@ -289,6 +289,8 @@ level up, in the stored row:
   undecided; `canon workspace pull --from <target>` runs the read alone.
   Fixtures in `tests/fixtures/transcripts/` use placeholders; tests plant
   canaries built at run time.
+- `docs/switching-models.md` is the user-facing walkthrough with run-it-now
+  commands and the limits; keep it in step with the commands.
 - `project-docs/W1-WORKSPACE.md` is the spec (identity, collisions, renames,
   store layout, isolation); `project-docs/W1-DECISIONS.md` records D-101 the
   binding lives in the row, D-102 remote-keyed identity that splits on doubt,

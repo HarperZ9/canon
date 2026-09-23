@@ -407,7 +407,8 @@ canon workspace list [--proposed]       # this project's records
 canon workspace focus --goal "Ship the handoff" --area src/canon/workspace
 canon workspace task "Write the Codex importer" [--status in-progress]
 canon workspace set-status task-4 done
-canon workspace decide --title "Row format" --decision "JSONL rows"     --context "Stores must diff in review" --reject SQLite "binary diffs"
+canon workspace decide --title "Row format" --decision "JSONL rows" \
+    --context "Stores must diff in review" --reject SQLite "binary diffs"
 canon workspace constraint "CI runs on Windows and Linux" --quirk
 canon workspace promote <id> --reason "applies to every project"
 canon workspace adopt --from <prj_id> --reason "moved the checkout"
