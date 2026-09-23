@@ -309,7 +309,8 @@ level up, in the stored row:
   downgrades held by a verdict, D-125 a missing file is reported, D-126 the
   render ledger, D-127 in-place edits become proposals and switch waits,
   D-128 the review findings folded in (tagged removals, the anchor ceiling,
-  re-read before write, four-character minimum for name-based secret rules).
+  re-read before write, four-character minimum for name-based secret rules),
+  D-129 promote refuses a global id clash and accept refuses a stale base.
 
 Later phases (verifier, migration legs, region installation into an existing
 file, the global SOUL.md and the global GEMINI.md surfaces) aim at this same

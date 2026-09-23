@@ -61,7 +61,8 @@ def run_decide_cmd(parsed, ctx: WorkspaceContext, out: Output, command: str) -> 
     if not accept and not reason.strip():
         raise CommandFailure("invalid_args", "a rejection needs --reason")
     row = ctx.store.decide(parsed.record_id, accept=accept,
-                           reason=reason or "accepted without a stated reason")
+                           reason=reason or "accepted without a stated reason",
+                           force=accept and parsed.force)
     verb = "accepted" if accept else "rejected"
     return emit(out, command=command, message=f"{verb} {row.record.id}",
                 data={"row": row.to_dict(), "accepted": accept},

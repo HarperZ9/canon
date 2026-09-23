@@ -394,7 +394,14 @@ same bytes and two writers cannot interleave.
   let one silently override the other.
 - `canon workspace promote <id> --reason <text>` is the only path into global
   scope. It moves the record out of the project file, writes it to the global
-  file with `promoted_from` set, and logs the move in both logs.
+  file with `promoted_from` set, and logs the move in both logs. It refuses,
+  writing nothing, when global already holds a record with that id, because
+  ids are per-project ordinals and two projects meet on `constraint-1`. The
+  ordinal of a promoted record is never issued again in its project.
+- `accept` refuses a proposal whose accepted record changed after the proposal
+  was made (the proposal's origin carries `base_record_sha256`), so a later
+  `set-status` or a second accepted edit is not erased. `--force` accepts it
+  anyway.
 
 The contamination controls in `tests/test_workspace_store.py` write a phrase
 into project A and assert it never reaches project B's render or pool, that a
@@ -416,7 +423,7 @@ canon workspace constraint "CI runs on Windows and Linux" --quirk
 canon workspace promote <id> --reason "applies to every project"
 canon workspace adopt --from <prj_id> --reason "moved the checkout"
 canon workspace import --from codex rollout.jsonl [--dry-run] [--drop-type LABEL]
-canon workspace accept <id> | reject <id> --reason "not a real task"
+canon workspace accept <id> [--force] | reject <id> --reason "not a real task"
 canon handoff --to codex [--receipt brief.receipt.json] [--out BRIEF.md]
 canon switch --to claude-code [--dry-run] [--create]
 canon workspace targets                  # files, budgets and declared downgrades

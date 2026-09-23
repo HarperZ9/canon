@@ -133,6 +133,8 @@ def _pull_args(parser: argparse.ArgumentParser) -> None:
 def _decide_proposal_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("record_id", help="the proposed record id")
     parser.add_argument("--reason", default=None, help="why (required to reject)")
+    parser.add_argument("--force", action="store_true",
+                        help="accept even when the accepted record changed since the proposal")
 
 
 _SUBCOMMANDS = (

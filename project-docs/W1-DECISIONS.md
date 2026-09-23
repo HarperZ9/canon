@@ -283,3 +283,22 @@ An independent review of the band found three gaps and one tradeoff:
   including `RETRY_TOKEN_COUNT=5`. They now need a value of at least four
   characters. A secret shorter than that after such a key is not redacted; the
   provider-format rules are unaffected.
+
+## D-129 promote refuses a clash, and accept refuses a stale base
+
+Record ids are per-project ordinals, so project A's `constraint-1` and project
+B's `constraint-1` are different records with one id. `promote` used to replace
+any global row with the same id, and since the promoted record has already left
+its project file, the record another project put there survived nowhere. It now
+refuses before writing, the same rule `adopt` follows. `next_ord` also counts
+the records a project promoted, so the next `workspace task` never reissues a
+promoted id and a second promotion cannot meet the first.
+
+A proposal is a snapshot. Accepting it replaced the accepted record whole, so a
+`set-status` run between the proposal and the accept was erased with no
+warning. Each proposal now records the digest of the accepted record it was
+built from (null when there was none), and `accept` refuses with `conflict`
+when the current accepted record differs. `--force` accepts anyway, for the
+person who compared the two. The store's secret check now covers the whole row,
+provenance included, because an importer copies a session id from the source
+verbatim.

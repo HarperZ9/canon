@@ -31,7 +31,10 @@ def _require_reason(reason: str) -> None:
 def promote(store: ProjectStore, record_id: str, *, reason: str) -> ProjectRow:
     """Move an accepted workspace record to global scope. The record leaves the
     project file, lands in the global file with `promoted_from` set, and both
-    logs record the move and the reason."""
+    logs record the move and the reason. Refused, before anything is written,
+    when global already holds a record with the same id: ids are per-project
+    ordinals, so two projects meet on `constraint-1`, and replacing the global
+    record would destroy the one another project put there."""
     _require_reason(reason)
     with store.locked(), run_lock(store.root, "canon-global"):
         accepted = store.rows(STATE_ACCEPTED)
@@ -40,7 +43,12 @@ def promote(store: ProjectStore, record_id: str, *, reason: str) -> ProjectRow:
             raise StoreError(f"no accepted record with id {record_id!r}")
         record = replace(match[0].record, scope=SCOPE_GLOBAL)
         row = ProjectRow(None, STATE_ACCEPTED, record, None, store.project_id)
-        global_rows = [r for r in store.global_rows() if r.key != row.key]
+        global_rows = store.global_rows()
+        existing = next((r for r in global_rows if r.key == row.key), None)
+        if existing is not None:
+            raise StoreError(
+                f"global already holds {row.key[0]}/{row.key[1]} (promoted from "
+                f"{existing.promoted_from}); nothing written")
         write_atomic(store.global_dir() / RECORDS_FILE,
                      encode_rows(global_rows + [row]))
         rest = [r for r in accepted if r is not match[0]]

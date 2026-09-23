@@ -26,7 +26,7 @@ from canon.workspace.import_common import (
 )
 from canon.workspace.rows import STATE_ACCEPTED, STATE_PROPOSED
 from canon.workspace.scrub import scrub_value
-from canon.workspace.store import ProjectStore
+from canon.workspace.store import ProjectStore, record_digest
 
 
 def _sha(text: str) -> str:
@@ -109,7 +109,9 @@ def run_import(identity: ProjectIdentity, store: ProjectStore, extraction: Extra
             already.append(entry)
             continue
         if not dry_run:
-            store.put(record, state=STATE_PROPOSED, origin=origin, action="import")
+            base = {"base_record_sha256": record_digest(prior) if prior else None}
+            store.put(record, state=STATE_PROPOSED, origin={**origin, **base},
+                      action="import")
         written.append(entry)
     return _report(identity, extraction, source, importer, check, hits,
                    written, already, previously, dry_run)

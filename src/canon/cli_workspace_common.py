@@ -20,6 +20,7 @@ from .workspace.authoring import AuthoringError
 from .workspace.identity import ProjectIdentity, ProjectIdentityError, derive_identity
 from .workspace.rows import RowError
 from .workspace.store import (
+    AcceptConflict,
     IsolationError,
     ProjectStore,
     SecretRefused,
@@ -30,6 +31,7 @@ from .workspace.store import (
 _FAILURES: tuple[tuple[type[BaseException], str], ...] = (
     (IsolationError, "isolation_refused"),
     (SecretRefused, "secret_quarantine"),
+    (AcceptConflict, "conflict"),
     (RowError, "store_invalid"),
     (LockError, "store_busy"),
     (ProjectIdentityError, "invalid_args"),

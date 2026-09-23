@@ -68,6 +68,11 @@ class SecretRefused(StoreError):
     """A record offered to the store still carries a secret-shaped value."""
 
 
+class AcceptConflict(StoreError):
+    """The accepted record a proposal was built from has changed since, so
+    accepting the proposal would erase the newer version."""
+
+
 def default_store_root(environ: Mapping[str, str]) -> Path:
     configured = environ.get(STORE_ENV)
     return Path(configured) if configured else Path.home() / ".canon" / "store"
@@ -75,6 +80,11 @@ def default_store_root(environ: Mapping[str, str]) -> Path:
 
 def _sha256(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def record_digest(record: Record) -> str:
+    """The sha256 of a record's canonical JSON, the digest the log carries."""
+    return _sha256(record.to_json())
 
 
 def _utc_now() -> str:
@@ -130,8 +140,11 @@ class ProjectStore:
                 path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
     def next_ord(self) -> int:
-        ords = [r.record.provenance.create_ord
-                for r in self.rows(STATE_ACCEPTED) + self.rows(STATE_PROPOSED)]
+        """One past every ordinal this project has used, including the records
+        it promoted to global, so a promoted record's id is never issued again."""
+        promoted = [r for r in self.global_rows() if r.promoted_from == self.project_id]
+        ords = [r.record.provenance.create_ord for r in
+                self.rows(STATE_ACCEPTED) + self.rows(STATE_PROPOSED) + promoted]
         known = [o for o in ords if isinstance(o, int)]
         return (max(known) + 1) if known else 1
 
@@ -145,7 +158,7 @@ class ProjectStore:
             raise StoreError(
                 f"record {record.id!r} has scope {record.scope!r}; new records "
                 "are workspace records, and promote is the only way to global")
-        leaked = secrets_in([record.id, record.data, origin])
+        leaked = secrets_in([record.to_dict(), origin])
         if leaked:
             raise SecretRefused(
                 f"record {record.id!r} carries secret-shaped values {leaked}; "
@@ -157,15 +170,20 @@ class ProjectStore:
             self.log(action, record, {"state": state})
         return row
 
-    def decide(self, record_id: str, *, accept: bool, reason: str) -> ProjectRow:
+    def decide(self, record_id: str, *, accept: bool, reason: str,
+               force: bool = False) -> ProjectRow:
         """Accept a proposed row (move it to the accepted file) or reject it
-        (drop it from the proposed file). Both are logged."""
+        (drop it from the proposed file). Both are logged. An accept is refused
+        when the accepted record the proposal was built from has changed since,
+        unless `force` says to replace the newer version anyway."""
         with self.locked():
             proposed = self.rows(STATE_PROPOSED)
             match = [r for r in proposed if r.record.id == record_id]
             if not match:
                 raise StoreError(f"no proposed record with id {record_id!r}")
             row = match[0]
+            if accept and not force:
+                self._refuse_stale_base(row)
             rest = [r for r in proposed if r is not row]
             write_atomic(self.project_dir() / PROPOSED_FILE, encode_rows(rest))
             if accept:
@@ -174,6 +192,25 @@ class ProjectStore:
             action = "accept" if accept else "reject"
             self.log(action, row.record, {"reason": reason, "origin": row.origin})
         return row
+
+    def accepted_digest(self, record_id: str) -> str | None:
+        """The digest of the accepted record with this id, or None."""
+        for row in self.rows(STATE_ACCEPTED):
+            if row.record.id == record_id:
+                return record_digest(row.record)
+        return None
+
+    def _refuse_stale_base(self, row: ProjectRow) -> None:
+        origin = row.origin or {}
+        if "base_record_sha256" not in origin:
+            return
+        current = self.accepted_digest(row.record.id)
+        if current != origin["base_record_sha256"]:
+            state = "was created" if origin["base_record_sha256"] is None else "changed"
+            raise AcceptConflict(
+                f"the accepted record {row.record.id!r} {state} since this proposal "
+                "was made; accepting it would erase that version. Compare the two with "
+                "canon workspace list, then accept with --force or reject the proposal")
 
     # ---- helpers ----------------------------------------------------------
 

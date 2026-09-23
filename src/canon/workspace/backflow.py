@@ -33,7 +33,7 @@ from canon.workspace.backflow_brief import Edit, brief_edits
 from canon.workspace.import_write import seen_before
 from canon.workspace.rows import STATE_PROPOSED
 from canon.workspace.scrub import scrub_value
-from canon.workspace.store import ProjectStore
+from canon.workspace.store import ProjectStore, record_digest
 
 BRIEF_BLOCK_ID = "canon-workspace-brief"
 HARNESS = "canon-drift"
@@ -152,7 +152,8 @@ def propose_edits(store: ProjectStore, edits: RegionEdits, *, surface: str,
             continue
         if not dry_run:
             origin = {"importer": "drift", "source": surface, "source_sha256": file_sha256,
-                      "line": edit.line, "rule": edit.rule, "content_sha256": content}
+                      "line": edit.line, "rule": edit.rule, "content_sha256": content,
+                      "base_record_sha256": record_digest(prior) if prior else None}
             store.put(record, state=STATE_PROPOSED, origin=origin, action="pull")
         proposed.append(entry)
     return {"surface": surface, "proposed": proposed, "already_decided": decided,

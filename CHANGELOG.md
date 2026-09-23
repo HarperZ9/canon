@@ -19,7 +19,8 @@ and the version is unchanged.
   project's records are readable only when named.
 - New records are workspace records. `canon workspace promote` is the only way
   into global scope, and `canon workspace adopt` is the only way to copy another
-  project's records in; both need a reason and both are logged.
+  project's records in; both need a reason and both are logged. A promotion
+  that would replace a record global already holds is refused.
 - Adds three workspace-state record kinds under their own schema tag,
   `canon.workspace-state/v1`: `workspace-focus` (goal, active areas, branch),
   `work-item` (title and status), and `environment-constraint` (a constraint or
@@ -44,7 +45,8 @@ and the version is unchanged.
   work items (from the last plan tool call and `TODO` markers), decisions and
   failed approaches, each with an origin naming the file, its digest, the line
   and the rule. Proposals render nothing until `canon workspace accept`;
-  `reject` needs a reason and is remembered.
+  `reject` needs a reason and is remembered. `accept` refuses a proposal whose
+  record changed after the proposal was made, unless `--force` is given.
 - Each importer declares what it drops and counts it; content it has not seen
   refuses the import unless declared with `--drop-type`. A source that names a
   different repository or working directory is refused unless
