@@ -28,7 +28,7 @@ from canon.registry import (
 from canon.schema import KIND_PERSONALITY_BLOCK, Provenance, Record
 from canon.surface import SurfaceError, render_surface
 from canon.textblock import RenderRefused, recompute_source_hash
-from canon.workspace.brief import Brief, make_brief
+from canon.workspace.brief import Brief, make_brief, refuse_secrets
 from canon.workspace.hosts import new_host_text
 from canon.workspace.identity import ProjectIdentity
 from canon.workspace.pool import TaggedRecord, block_pool
@@ -143,6 +143,7 @@ def plan_switch(identity: ProjectIdentity, pool: list[TaggedRecord], target: Tar
     host, status = _host(path, target, read_text, create)
     _checked_region(host, path)
     interior = region_interior(pool, surface, brief)
+    refuse_secrets(interior, "instruction region")
     new_text = splice_region(host, interior)
     warnings = _limits(target, new_text)
     if status == "write" and new_text == host:

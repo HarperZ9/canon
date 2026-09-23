@@ -179,10 +179,10 @@ def test_five_capability_tokens_declare_what_an_adapter_carries():
         assert token in named
 
 
-def test_twenty_seams_each_carry_a_version_pin():
-    assert CARD["schema pins"]["value"] == "twenty seams"
-    assert len(versions.SEAM_PINS) == 20
-    assert len(versions.PIN_REGISTRY) == 20
+def test_twenty_one_seams_each_carry_a_version_pin():
+    assert CARD["schema pins"]["value"] == "twenty-one seams"
+    assert len(versions.SEAM_PINS) == 21
+    assert len(versions.PIN_REGISTRY) == 21
     assert set(versions.PIN_REGISTRY) == set(versions.SEAM_PINS)
 
 

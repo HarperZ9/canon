@@ -160,6 +160,99 @@ brief reaches it without a paste. The write follows the canon rules:
 
 A target with no instruction surface (`markdown`) prints the brief alone.
 
+## Importers
+
+`canon workspace import --from claude-code|codex <file>` reads one session file
+another tool wrote and proposes records from it. It never writes an accepted
+record: every result is a proposed row that `canon workspace accept <id>` or
+`canon workspace reject <id> --reason <text>` settles, and nothing renders
+until it is accepted.
+
+### Formats
+
+| source | file | what is read | confirmed against |
+|---|---|---|---|
+| Claude Code | a session `.jsonl` | `user` and `assistant` entries (`message.content` as text or blocks), `summary`, `sessionId`, `cwd`, `gitBranch`, `TodoWrite` inputs, `Edit`/`Write`/`MultiEdit`/`NotebookEdit` file paths | two public parsers of the format and Anthropic's note that the format is internal and changes between versions |
+| Codex CLI | a rollout `.jsonl` (Codex 0.32 or later) | `session_meta` (id, cwd, `git.repository_url`, `git.branch`), `response_item` messages (`input_text`, `output_text`), `update_plan` calls, file names in `apply_patch` | the openai/codex source |
+
+Both formats were read from public sources on 2026-09-23, and the test fixtures
+in `tests/fixtures/transcripts/` follow them. Neither is a stable public
+interface. A Codex rollout from before 0.32, where lines are bare items, is
+refused as `unsupported_format`.
+
+### Extraction rules
+
+Fixed patterns, not a model, so the same file always gives the same proposals:
+
+| rule | reads | proposes |
+|---|---|---|
+| `plan-tool` | the last `TodoWrite` (Claude Code) or `update_plan` (Codex) call | a work item per pending or in-progress step |
+| `todo-marker` | `TODO: ...` or an unchecked `- [ ] ...` in a message | an open work item |
+| `decision-phrase` | "we decided to X (because Y)", "we went with X" | a decision with status `proposed` |
+| `failed-phrase` | "I tried X but Y", "X did not work (because Y)" | a decision with status `rejected` and X as a rejected alternative with Y as its reason |
+| `session-summary` | Claude Code's summary line | the focus goal |
+| `first-prompt` | the first line of the first user prompt, when there is no summary | the focus goal |
+
+The focus proposal carries the session's branch and up to ten edited files as
+areas, as paths inside the project; an edited path outside the project is
+dropped and counted.
+
+### Declared loss
+
+Each importer names every category of content it drops, and the report counts
+every one, including the zero counts. Common categories: text that matched no
+rule, a repeated candidate, plan calls before the last, completed plan steps,
+paths outside the project, a truncated last line, a candidate that failed
+validation, images, tool calls and tool output. Claude Code adds thinking
+blocks, sidechain entries, `isMeta` messages, message metadata and the entry
+types that carry no conversation. Codex adds session state, `event_msg` lines,
+reasoning, injected environment context, developer and system messages, and the
+response items it does not read.
+
+Content no category covers (an entry type, content block or message role the
+importer has not seen) is an undeclared loss and refuses the import with
+`undeclared_loss`, naming the label and the lines. `--drop-type <label>`
+declares that drop for one run, and the report lists it under the drops the
+person declared. A malformed last line is a declared truncation; a malformed
+line anywhere else refuses the import.
+
+### Secrets
+
+Every string that becomes part of a proposal passes through
+`canon.workspace.scrub` first. It redacts provider key formats (Anthropic,
+OpenAI, GitHub, GitLab, Slack, AWS, Google, Stripe, Hugging Face, npm), JSON web
+tokens, private key blocks, bearer and API-key headers, the password in a
+connection URL, `password=` fields, JSON fields named like a secret, and
+`NAME=value` assignments whose name says key, token, secret, password or
+credential, and replaces each with `[REDACTED:<rule>]`. The report counts the
+hits by rule; it never stores the value or a digest of it. Two more checks sit
+behind the scrubber: the store refuses any record that still matches
+(`secret_quarantine`), and a brief or an instruction region that would carry a
+match is refused before it is written. The control test plants a canary for
+each rule in both fixtures and asserts none reaches the store files, the
+reports, the brief or the region; with all three checks removed the same test
+finds the canaries.
+
+### Project check
+
+A Codex rollout names its repository in `git.repository_url`; a Claude Code
+session names its working directory in `cwd`. When the source names a
+different project than the one being imported into, the import is refused with
+`isolation_refused` unless `--accept-foreign-source` is given, and the report
+records the check either way. A source that names neither is recorded as
+`unverified`.
+
+### Provenance
+
+A proposed record carries `harness` (`claude-code` or `codex`), `source_hash`
+(the sha256 of the source line), `native_id` (`<importer>:<file name>:<line>`)
+and the session id. Its row's `origin` names the importer, the file name, the
+file's sha256, the line, the rule and a hash of the proposed content. Ids are
+derived from the session, line and rule, so importing the same file again
+proposes the same ids; a proposal already accepted with the same content, or
+rejected before, is reported and not proposed again. The report is a
+`canon.import-report/v1` object.
+
 ## The store
 
 The store root defaults to `~/.canon/store` and can be set with `CANON_STORE`
@@ -226,6 +319,8 @@ canon workspace decide --title "Row format" --decision "JSONL rows"     --contex
 canon workspace constraint "CI runs on Windows and Linux" --quirk
 canon workspace promote <id> --reason "applies to every project"
 canon workspace adopt --from <prj_id> --reason "moved the checkout"
+canon workspace import --from codex rollout.jsonl [--dry-run] [--drop-type LABEL]
+canon workspace accept <id> | reject <id> --reason "not a real task"
 canon handoff --to codex [--receipt brief.receipt.json] [--out BRIEF.md]
 canon switch --to claude-code [--dry-run] [--create]
 ```

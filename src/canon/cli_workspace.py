@@ -19,6 +19,7 @@ from .cli_workspace_common import (
     emit,
     guarded,
 )
+from .cli_import import IMPORT_HANDLERS
 from .cli_workspace_author import AUTHOR_HANDLERS
 from .workspace.describe import summary
 from .workspace.moves import adopt, promote
@@ -92,4 +93,5 @@ _HANDLERS = {
     "promote": _promote,
     "adopt": _adopt,
     **AUTHOR_HANDLERS,
+    **IMPORT_HANDLERS,
 }

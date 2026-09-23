@@ -263,6 +263,17 @@ level up, in the stored row:
   `canon-workspace-brief`, through the allow-list, refusing a file Codex would
   truncate; `hosts.py` is the text of a file `--create` makes.
   `src/canon/cli_handoff.py` adds `canon handoff` and `canon switch`.
+- `src/canon/workspace/scrub.py` redacts secret-shaped values by rule and
+  counts hits (no values, no digests); the store refuses a record that still
+  matches (`SecretRefused`), and `brief.refuse_secrets` guards the brief and the
+  switch region. `extract.py` holds the fixed text rules; `import_common.py` the
+  JSONL reader, the declared-loss `Ledger`, the project check and the
+  `Collector`; `import_claude.py` and `import_codex.py` the two importers with
+  their `DECLARED_DROPS`; `import_write.py` turns candidates into scrubbed,
+  proposed rows with an origin and a `canon.import-report/v1` report.
+  `src/canon/cli_import.py` adds `canon workspace import|accept|reject`.
+  Fixtures in `tests/fixtures/transcripts/` use placeholders; tests plant
+  canaries built at run time.
 - `project-docs/W1-WORKSPACE.md` is the spec (identity, collisions, renames,
   store layout, isolation); `project-docs/W1-DECISIONS.md` records D-101 the
   binding lives in the row, D-102 remote-keyed identity that splits on doubt,
@@ -273,7 +284,10 @@ level up, in the stored row:
   the adapters keep the five v1 kinds, D-112 the pin type split, D-113 the
   strict-prefix brief with a report, D-114 the brief as a reserved region
   block, D-115 sourced budgets and the Codex refusal, D-116 `--create` for a
-  missing file only.
+  missing file only, D-117 importers propose and a person accepts, D-118
+  declared loss at the import boundary, D-119 scrub then check at store and
+  render, D-120 the source must name this project, D-121 public-format fixtures
+  with run-time canaries.
 
 Later phases (verifier, migration legs, region installation, the global SOUL.md
 and GEMINI.md surfaces) aim at this same envelope. Each lands on its own branch.

@@ -22,6 +22,7 @@ from canon.versions import PIN_HANDOFF_RECEIPT
 from canon.workspace.brief_items import SECTIONS, BriefItem, Exclusion, collect, one_line
 from canon.workspace.identity import ProjectIdentity
 from canon.workspace.pool import TaggedRecord
+from canon.workspace.scrub import find_secrets
 from canon.workspace.targets import Target
 
 RECEIPT_SCHEMA = PIN_HANDOFF_RECEIPT.kind_tag
@@ -38,6 +39,18 @@ DOES_NOT_PROVE = (
 
 class BudgetError(ValueError):
     """The budget cannot hold even the brief's header."""
+
+
+class SecretInRender(ValueError):
+    """Rendered text still carries a secret-shaped value. The store refuses one
+    on write, so this fires only for a store file edited by hand."""
+
+
+def refuse_secrets(text: str, what: str) -> None:
+    leaked = find_secrets(text)
+    if leaked:
+        raise SecretInRender(f"the {what} would carry secret-shaped values {leaked}; "
+                             "nothing was written")
 
 
 @dataclass(frozen=True, slots=True)
@@ -152,6 +165,7 @@ def make_brief(identity: ProjectIdentity, pool: list[TaggedRecord], target: Targ
     budget = _Budget(budget_bytes or target.brief_bytes, budget_lines or target.brief_lines)
     items, excluded = collect(pool, identity.project_id)
     n, text = _assemble(_header(identity, target, level), items, target, budget, level)
+    refuse_secrets(text, "brief")
     included, left_out = tuple(items[:n]), tuple(items[n:])
     receipt = _receipt(identity, pool, target, budget, text, included, left_out,
                        excluded, declared)

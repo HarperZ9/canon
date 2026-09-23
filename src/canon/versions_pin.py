@@ -51,6 +51,7 @@ SEAM_PINS: frozenset[str] = frozenset({
     "project-row",
     "workspace-state",
     "handoff-receipt",
+    "import-report",
 })
 
 _WAVE_ONE_NAMES: frozenset[str] = frozenset({

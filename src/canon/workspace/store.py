@@ -37,6 +37,7 @@ from typing import Iterator, Mapping
 from canon.concurrency import acquire_run_lock, release_run_lock
 from canon.schema import SCOPE_WORKSPACE, Record
 from canon.workspace.identity import ProjectIdentity, is_project_id
+from canon.workspace.scrub import secrets_in
 from canon.workspace.rows import (
     STATE_ACCEPTED,
     STATE_PROPOSED,
@@ -61,6 +62,10 @@ class IsolationError(Exception):
 class StoreError(Exception):
     """The store cannot complete a write: an unknown record, a global record
     offered to `put`, or a project directory that names another project."""
+
+
+class SecretRefused(StoreError):
+    """A record offered to the store still carries a secret-shaped value."""
 
 
 def default_store_root(environ: Mapping[str, str]) -> Path:
@@ -139,6 +144,11 @@ class ProjectStore:
             raise StoreError(
                 f"record {record.id!r} has scope {record.scope!r}; new records "
                 "are workspace records, and promote is the only way to global")
+        leaked = secrets_in([record.id, record.data, origin])
+        if leaked:
+            raise SecretRefused(
+                f"record {record.id!r} carries secret-shaped values {leaked}; "
+                "nothing was stored")
         row = ProjectRow(self.project_id, state, record, origin, None)
         with self.locked():
             self.ensure_manifest()

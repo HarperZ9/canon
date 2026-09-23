@@ -23,7 +23,7 @@ from .cli_workspace_common import (
     emit,
     guarded,
 )
-from .workspace.brief import BudgetError, make_brief
+from .workspace.brief import BudgetError, SecretInRender, make_brief
 from .workspace.pool import project_pool
 from .workspace.switch import SwitchRefused, commit_switch, plan_switch
 from .workspace.targets import UnknownTarget, target_for
@@ -44,6 +44,8 @@ def run_handoff_command(parsed: argparse.Namespace, *, stdout: TextIO, stderr: T
             raise CommandFailure("budget_too_small", str(exc)) from exc
         except SwitchRefused as exc:
             raise CommandFailure(exc.code, str(exc)) from exc
+        except SecretInRender as exc:
+            raise CommandFailure("secret_quarantine", str(exc)) from exc
 
     return guarded(parsed.command, out, action)
 

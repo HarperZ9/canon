@@ -112,6 +112,22 @@ def _constraint_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--applies-to", action="append", default=[], help="a path it applies to")
 
 
+def _import_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--from", dest="source_format", required=True,
+                        help="claude-code (session .jsonl) or codex (rollout .jsonl)")
+    parser.add_argument("path", help="the session file to read")
+    parser.add_argument("--accept-foreign-source", action="store_true",
+                        help="import even when the source names another project")
+    parser.add_argument("--drop-type", action="append", default=[],
+                        help="declare the drop of content the importer does not know")
+    parser.add_argument("--dry-run", action="store_true", help="report; write nothing")
+
+
+def _decide_proposal_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("record_id", help="the proposed record id")
+    parser.add_argument("--reason", default=None, help="why (required to reject)")
+
+
 _SUBCOMMANDS = (
     ("id", "show this project's identity", _no_args),
     ("list", "list this project's records", _list_args),
@@ -122,4 +138,7 @@ _SUBCOMMANDS = (
     ("set-status", "change a work item's status", _set_status_args),
     ("decide", "record a decision and the alternatives dropped", _decide_args),
     ("constraint", "record a constraint or an environment quirk", _constraint_args),
+    ("import", "propose records from a Claude Code or Codex session", _import_args),
+    ("accept", "accept a proposed record", _decide_proposal_args),
+    ("reject", "reject a proposed record (logged)", _decide_proposal_args),
 )

@@ -19,10 +19,17 @@ from .concurrency import LockError
 from .workspace.authoring import AuthoringError
 from .workspace.identity import ProjectIdentity, ProjectIdentityError, derive_identity
 from .workspace.rows import RowError
-from .workspace.store import IsolationError, ProjectStore, StoreError, default_store_root
+from .workspace.store import (
+    IsolationError,
+    ProjectStore,
+    SecretRefused,
+    StoreError,
+    default_store_root,
+)
 
 _FAILURES: tuple[tuple[type[BaseException], str], ...] = (
     (IsolationError, "isolation_refused"),
+    (SecretRefused, "secret_quarantine"),
     (RowError, "store_invalid"),
     (LockError, "store_busy"),
     (ProjectIdentityError, "invalid_args"),

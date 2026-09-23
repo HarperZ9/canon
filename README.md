@@ -80,6 +80,26 @@ canon switch --to codex --create
 Targets: `claude-code`, `codex`, `gemini-cli`, `cursor`, `copilot`, and
 `markdown` for a brief to paste into a chat app or a local model.
 
+- **Import what the last session knew.** `canon workspace import` reads a
+  Claude Code session or a Codex rollout and proposes the focus, the open
+  plan steps, `TODO` markers, decisions and failed approaches it can find by
+  fixed patterns. Each proposal names the file and line it came from, and
+  nothing reaches a brief until you accept it.
+- **Secrets stay out.** Keys, tokens, private keys, bearer headers, connection
+  string passwords and secret-named assignments are redacted before anything is
+  stored, the store refuses anything that still looks like one, and a brief
+  that would carry one is refused.
+- **Losses are named.** Each importer lists what it drops and counts it. A
+  session with content the importer has not seen is refused until you declare
+  that drop, so a format change cannot lose data quietly.
+
+```bash
+canon workspace import --from codex ~/.codex/sessions/2026/09/22/rollout-....jsonl
+canon workspace list --proposed
+canon workspace accept imp-task-4de430285521
+canon workspace reject imp-decision-8a1f0c2b9e77 --reason "quoted, not decided"
+```
+
 The store lives in `~/.canon/store` unless `CANON_STORE` or `--store` says
 otherwise. `project-docs/W1-WORKSPACE.md` covers the identity rules, including
 what happens when a remote is renamed or a project with no remote moves.
@@ -100,7 +120,7 @@ in advance. Anything else fails the gate rather than logging a warning.
 
 ## What canon carries
 
-![A table of twelve rows: what canon carries, how many of it there are, and where each number is read from. Eight record kinds share one envelope: five under the v1 record tag and three workspace-state kinds under their own tag. Two scopes layer, workspace over global. Four surfaces sit on the write allow-list: a global and a workspace file for Claude Code, an AGENTS.md for Codex, and a workspace SOUL.md for Hermes. Four storage adapters implement the backend protocol, and five capability tokens describe what each one can carry. Twenty schema pins name the seams that carry a version. The aggregate check folds four legs, and four gate functions share the same zero or one exit code. 131 source modules hold 22,049 lines, and 59 test files hold 1156 tests. Two surfaces named in the roadmap are absent from the catalog, a global SOUL.md and a GEMINI.md, so canon does not render them.](docs/art/record-table.svg)
+![A table of twelve rows: what canon carries, how many of it there are, and where each number is read from. Eight record kinds share one envelope: five under the v1 record tag and three workspace-state kinds under their own tag. Two scopes layer, workspace over global. Four surfaces sit on the write allow-list: a global and a workspace file for Claude Code, an AGENTS.md for Codex, and a workspace SOUL.md for Hermes. Four storage adapters implement the backend protocol, and five capability tokens describe what each one can carry. Twenty-one schema pins name the seams that carry a version. The aggregate check folds four legs, and four gate functions share the same zero or one exit code. 138 source modules hold 23,167 lines, and 61 test files hold 1198 tests. Two surfaces named in the roadmap are absent from the catalog, a global SOUL.md and a GEMINI.md, so canon does not render them.](docs/art/record-table.svg)
 
 Every count is asserted against the module that defines it in
 `tests/test_repo_art.py`.

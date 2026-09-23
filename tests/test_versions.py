@@ -17,6 +17,7 @@ from canon.versions import (
     PIN_DRIFT_VERDICT,
     PIN_FRONTMATTER,
     PIN_HANDOFF_RECEIPT,
+    PIN_IMPORT_REPORT,
     PIN_PERSONA_THESIS_PAYLOAD,
     PIN_PROJECT_ID,
     PIN_PROJECT_ROW,
@@ -368,6 +369,7 @@ def test_every_pin_constant_matches_its_registry_entry():
         "project-row": PIN_PROJECT_ROW,
         "workspace-state": PIN_WORKSPACE_STATE,
         "handoff-receipt": PIN_HANDOFF_RECEIPT,
+        "import-report": PIN_IMPORT_REPORT,
     }
     assert set(constants) == SEAM_PINS
     for name, pin in constants.items():

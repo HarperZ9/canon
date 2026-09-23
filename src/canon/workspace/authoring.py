@@ -43,13 +43,18 @@ def content_hash(kind: str, data: dict) -> str:
 
 
 def build(kind: str, rid: str, data: dict, create_ord: int, *,
-          harness: str = HARNESS) -> Record:
-    """A validated workspace record, or AuthoringError listing every problem."""
+          harness: str = HARNESS, source_hash: str | None = None,
+          native_id: str | None = None, session_id: str | None = None) -> Record:
+    """A validated workspace record, or AuthoringError listing every problem.
+    An importer passes the digest of the source line as `source_hash`; a record
+    written by hand is hashed over its own content."""
     clean = {k: v for k, v in data.items() if v is not None}
     record = Record(kind=kind, id=rid, scope=SCOPE_WORKSPACE, data=clean,
-                    provenance=Provenance(harness=harness,
-                                          source_hash=content_hash(kind, clean),
-                                          create_ord=create_ord))
+                    provenance=Provenance(
+                        harness=harness,
+                        source_hash=source_hash or content_hash(kind, clean),
+                        native_id=native_id, session_id=session_id,
+                        create_ord=create_ord))
     problems = validate_record(record)
     if problems:
         raise AuthoringError("; ".join(problems))

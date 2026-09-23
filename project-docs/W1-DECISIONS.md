@@ -159,3 +159,48 @@ budget can be overridden on the command line.
 The rule that a file is opted in by its owner adding the markers still holds.
 `switch --create` writes a new file only when none exists, holding an empty
 canon region; an existing file without a region is refused and left as it is.
+
+## D-117 An importer proposes; a person accepts
+
+A transcript is evidence of what was said, not a record of what was decided. A
+pattern that reads "we decided to X" cannot tell a decision from a quoted
+option or a joke. Every imported record is therefore a proposed row with an
+origin naming the file, its digest, the line and the rule, and nothing renders
+it until someone accepts it. A rejection is logged with a hash of the proposed
+content, so re-importing the same file does not offer the same proposal again.
+
+## D-118 Declared loss at the import boundary refuses what it cannot name
+
+The R0 gate fails a round-trip on a loss nobody declared. The importers apply
+the same rule at the boundary where content enters canon: each names every
+category it drops, counts each one, and refuses when it meets content no
+category covers. Both session formats change without notice, so the refusal is
+the signal that the importer needs updating. `--drop-type` lets a person
+declare the drop for one run, and the report says it was the person who
+declared it.
+
+## D-119 Scrub before storing, and check again at the store and at the render
+
+A transcript holds whatever passed through the terminal. The scrubber runs on
+every string before it becomes a record, and replaces a match with a marker
+naming the rule. It stores no value and no digest of one, since a digest of a
+short password can be reversed by guessing. The store refuses a record that
+still matches, which also covers a secret typed by hand, and the brief and the
+instruction region are checked once more, which covers a store file edited by
+hand. The scrubber is pattern-based and documented as such: a secret with no
+recognisable shape passes.
+
+## D-120 The source must name this project, or the person must say otherwise
+
+An import is the easiest place to mix projects: a rollout from one repository
+imported while standing in another. When the source names a repository or a
+working directory that is not this project, the import refuses unless
+`--accept-foreign-source` is given, and the report records the check.
+
+## D-121 Fixtures follow the public formats and plant canaries at run time
+
+The owner's own session files are not read. The fixtures were written from the
+formats as public sources describe them on 2026-09-23 (the openai/codex source
+for rollouts, two public parsers for Claude Code sessions), with placeholders
+for the project root and for secrets. The tests build each planted value at run
+time, so no committed file carries a string a secret scanner would flag.

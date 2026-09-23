@@ -31,6 +31,8 @@ _FAILURE_EXIT_CODES = {
     "not_found": EX_USAGE,
     "budget_too_small": EX_BUDGET,
     "edits_pending": EX_CONFLICT,
+    "undeclared_loss": EX_GATE,
+    "unsupported_format": EX_UNSUPPORTED,
 }
 
 

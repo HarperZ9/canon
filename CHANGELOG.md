@@ -36,8 +36,23 @@ Canon starts to carry a project's working state between models and tools.
   region with the project's blocks and the brief, through the write allow-list
   and only between the canon markers. `--dry-run` writes nothing, `--create`
   makes a missing file, and a file Codex would truncate is refused.
-- Registers four new version pins: `project-id`, `project-row`,
-  `workspace-state` and `handoff-receipt`.
+- Adds `canon workspace import --from claude-code|codex <file>`. It reads a
+  Claude Code session or a Codex rollout (0.32 or later) and proposes focus,
+  work items (from the last plan tool call and `TODO` markers), decisions and
+  failed approaches, each with an origin naming the file, its digest, the line
+  and the rule. Proposals render nothing until `canon workspace accept`;
+  `reject` needs a reason and is remembered.
+- Each importer declares what it drops and counts it; content it has not seen
+  refuses the import unless declared with `--drop-type`. A source that names a
+  different repository or working directory is refused unless
+  `--accept-foreign-source` is given.
+- Adds a secret scrubber in front of every import. Provider keys, tokens, JWTs,
+  private keys, bearer and API-key headers, connection-string passwords and
+  secret-named assignments are replaced with `[REDACTED:<rule>]`. The store
+  also refuses any record that still matches, including one typed by hand, and
+  a brief or instruction region that would carry one is refused.
+- Registers five new version pins: `project-id`, `project-row`,
+  `workspace-state`, `handoff-receipt` and `import-report`.
 
 Limits:
 
@@ -51,6 +66,14 @@ Limits:
   2026-09-23. Hosts change; the numbers are defaults and can be overridden.
 - The brief lists what was recorded. It does not know about work that happened
   in a session nobody recorded or imported.
+- The importers use fixed text patterns. A decision or task phrased another
+  way is not proposed, and a proposal is a candidate, not a fact.
+- Neither session format is a stable public interface. The importers were
+  checked against public sources on 2026-09-23 and refuse content they do not
+  recognise rather than guess.
+- The scrubber recognises secrets by shape. A secret with no recognisable shape
+  passes through; email addresses are not redacted.
+- Gemini CLI, Cursor, ChatGPT and Claude web exports have no importer yet.
 
 ## 0.2.0 - 2026-09-22
 
@@ -64,7 +87,7 @@ Limits:
   an import review policy.
 - Hardens Canon source reads.
 
-## 0.1.0 — 2026-09-07
+## 0.1.0 - 2026-09-07
 
 First GitHub release for Canon.
 
