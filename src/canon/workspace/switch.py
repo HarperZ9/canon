@@ -34,7 +34,13 @@ from canon.schema import KIND_PERSONALITY_BLOCK, Provenance, Record
 from canon.surface import SurfaceError, render_surface
 from canon.textblock import RenderRefused, recompute_source_hash, render_region
 from canon.workspace import switch_host
-from canon.workspace.brief import Brief, make_brief, refuse_secrets
+from canon.workspace.brief import (
+    Brief,
+    make_brief,
+    omitted_blocks,
+    omitted_note,
+    refuse_secrets,
+)
 from canon.workspace.hosts import cursor_frontmatter_problem, new_host_text
 from canon.workspace.identity import ProjectIdentity
 from canon.workspace.pool import TaggedRecord, block_pool
@@ -181,8 +187,9 @@ def plan_switch(identity: ProjectIdentity, pool: list[TaggedRecord], target: Tar
                        overhead=block_overhead() if surface else (0, 0),
                        receipt_hint=receipt_hint)
     if surface is None:
-        return SwitchPlan(target, brief, None, None, "no-surface", None, None, None, (),
-                          receipt=brief.receipt)
+        note = omitted_note(omitted_blocks(brief))
+        return SwitchPlan(target, brief, None, None, "no-surface", None, None, None,
+                          (note,) if note else (), receipt=brief.receipt)
     path = _surface_path(surface, identity, home)
     if check_limits and surface.harness == "codex":
         switch_host.refuse_shadow(Path(identity.root))

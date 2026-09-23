@@ -19,11 +19,23 @@ import json
 from dataclasses import dataclass, replace
 
 from canon.versions import PIN_HANDOFF_RECEIPT
-from canon.workspace.brief_items import SECTIONS, BriefItem, Exclusion, collect, one_line
+from canon.workspace.brief_items import (
+    NO_FILE_REASON,
+    SECTIONS,
+    BriefItem,
+    Exclusion,
+    collect,
+    one_line,
+)
 from canon.workspace.identity import ProjectIdentity
 from canon.workspace.pool import TaggedRecord
 from canon.workspace.scrub import find_secrets
-from canon.workspace.target_fidelity import IMPORT_HOSTS, quote_at_imports
+from canon.workspace.target_fidelity import (
+    DECLARED_DOWNGRADES,
+    IMPORT_HOSTS,
+    OMITTED,
+    quote_at_imports,
+)
 from canon.workspace.targets import Target
 
 RECEIPT_SCHEMA = PIN_HANDOFF_RECEIPT.kind_tag
@@ -191,6 +203,23 @@ def make_brief(identity: ProjectIdentity, pool: list[TaggedRecord], target: Targ
                        excluded, declared)
     refuse_secrets(json.dumps(receipt, ensure_ascii=False), "brief receipt")
     return Brief(text, receipt, included, left_out)
+
+
+def omitted_blocks(brief: Brief) -> dict:
+    """The instruction blocks a target with no instruction file cannot carry:
+    how many, their ids, and why (None when there are none)."""
+    ids = [e["id"] for e in brief.receipt["excluded"] if e["reason"] == NO_FILE_REASON]
+    target = brief.receipt["target"]["name"]
+    reason = DECLARED_DOWNGRADES.get(target, {}).get(OMITTED) if ids else None
+    return {"count": len(ids), "ids": ids, "reason": reason}
+
+
+def omitted_note(omitted: dict) -> str | None:
+    """One line saying what `omitted_blocks` found, or None."""
+    count = omitted["count"]
+    if not count:
+        return None
+    return f"{count} instruction block{'' if count == 1 else 's'} omitted: {omitted['reason']}"
 
 
 def _ref(project_id: str | None, record) -> dict:

@@ -216,7 +216,11 @@ surface reads as a match, and a reconcile carries the brief through instead of
 erasing it.
 
 A target with no instruction surface (`markdown`) prints the brief alone. It
-carries no instruction block, and the receipt says so for each one.
+carries no instruction block, and the receipt says so for each one. The
+command says it too: `handoff` prints the count and the reason on stderr
+beside a printed brief and on its result line beside a written one, `switch`
+adds it to its warnings, and both carry `omitted_blocks` (count, ids, reason)
+in `--json`.
 
 ## Targets and declared downgrades
 

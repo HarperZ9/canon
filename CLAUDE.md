@@ -328,7 +328,8 @@ level up, in the stored row:
   every edit, D-134 switch checks the host as it is (links, override, budget
   chain, line endings) and the brief is measured as it lands, D-135 the
   project check resolves a working directory to its checkout first, D-136 a
-  value after a secret-named key is judged by its shape.
+  value after a secret-named key is judged by its shape, D-137 a markdown
+  brief says on the command line what it left out.
 
 Later phases (verifier, migration legs, region installation into an existing
 file, the global SOUL.md and the global GEMINI.md surfaces) aim at this same

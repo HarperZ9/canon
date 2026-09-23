@@ -121,7 +121,9 @@ canon handoff --to markdown --out BRIEF.md --receipt brief.receipt.json
 ```
 
 The brief lists the focus first, then open work, then recent decisions with
-the alternatives dropped and why, then constraints and quirks. It fits the
+the alternatives dropped and why, then constraints and quirks. A markdown
+brief has no instruction file to carry your instruction blocks, so it leaves
+them out and says how many on stderr (in `--json`, as `omitted_blocks`). It fits the
 target's size budget; anything that does not fit is left out whole, counted,
 and named as far as the budget allows in a `Left out` section at the end, and
 the receipt names every one. The receipt also holds digests of the brief and

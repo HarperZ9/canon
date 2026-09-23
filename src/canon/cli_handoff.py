@@ -6,9 +6,12 @@ receipt beside it; both files are checked before either is written, and a
 failed second write removes the first. `switch` renders the target's workspace
 instruction region with the brief inside, through the allow-list, and writes
 it unless `--dry-run` is given; `--receipt` writes its receipt, and the store
-keeps the last one per checkout and surface. Both read only this project's pool
-plus any project named with `--include-project`. Every failure, file IO
-included, ends as a named failure code.
+keeps the last one per checkout and surface. A target with no instruction
+file (markdown) carries no instruction block; both commands say how many they
+left out and why, on stderr or the result line and as `omitted_blocks` in
+`--json`. Both read only this project's pool plus any project named with
+`--include-project`. Every failure, file IO included, ends as a named failure
+code.
 """
 from __future__ import annotations
 
@@ -28,7 +31,13 @@ from .cli_workspace_common import (
     guarded,
 )
 from .workspace.backflow import pending_edits
-from .workspace.brief import BudgetError, SecretInRender, make_brief
+from .workspace.brief import (
+    BudgetError,
+    SecretInRender,
+    make_brief,
+    omitted_blocks,
+    omitted_note,
+)
 from .workspace.ledger import record_render_unlocked
 from .workspace.pool import project_pool
 from .workspace.switch import SwitchRefused, commit_switch, plan_switch
@@ -76,12 +85,17 @@ def _handoff(parsed, ctx: WorkspaceContext, out: Output, environ) -> int:
     files = [(parsed.out, brief.text)] if parsed.out else []
     files += [(parsed.receipt, _receipt_text(brief.receipt))] if parsed.receipt else []
     write_new_files(files)
-    data = {"brief": brief.text, "receipt": brief.receipt}
+    omitted = omitted_blocks(brief)
+    data = {"brief": brief.text, "receipt": brief.receipt, "omitted_blocks": omitted}
     message = f"brief for {target.name}: {len(brief.included)} records, " \
               f"{len(brief.left_out)} left out"
+    note = omitted_note(omitted)
+    message += f"; {note}" if note else ""
     if parsed.out:
         return emit(out, command="handoff", message=message, data=data,
                     text=f"{message}; wrote {parsed.out}")
+    if note and not out.json_output:
+        out.stderr.write(f"note: {note}\n")
     return emit(out, command="handoff", message=message, data=data, text=brief.text)
 
 
@@ -151,5 +165,6 @@ def _switch(parsed, ctx: WorkspaceContext, out: Output, environ) -> int:
         lines += ["", plan.brief.text if plan.surface is None else plan.interior]
     data = {"target": target.name, "status": plan.status, "dry_run": parsed.dry_run,
             "surface": rel, "warnings": list(plan.warnings),
+            "omitted_blocks": omitted_blocks(plan.brief),
             "brief": plan.brief.text, "receipt": plan.receipt}
     return emit(out, command="switch", message=lines[0], data=data, text="\n".join(lines))

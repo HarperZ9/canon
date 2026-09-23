@@ -467,3 +467,18 @@ Cookies, URL query parameters and JSON fields take the same checks. Every
 form in the end-to-end secret test is still redacted, and both lists are
 tests. A numeric PIN after `password=` now passes through; that is the
 declared cost of reading a number as a setting.
+
+## D-137 A markdown brief says on the command line what it left out
+
+The markdown target has no instruction file, so its brief carries no
+instruction block (D-124 declares the downgrade). Only the receipt said so.
+`canon handoff --to markdown` printed "brief for markdown: 0 records, 0 left
+out" with nothing on stderr, so a person pasting the brief lost their blocks
+without being told.
+
+The command now says it where the person looks. Beside a printed brief the
+count and the reason go to stderr, so the brief on stdout stays clean to
+paste or pipe. Beside a written brief they join the result line. `switch
+--to markdown` adds the same line to its warnings. In `--json` both commands
+carry `omitted_blocks` with the count, the ids and the declared reason, and
+a target with an instruction file reports a count of zero.

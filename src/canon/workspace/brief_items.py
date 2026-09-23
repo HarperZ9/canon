@@ -40,6 +40,7 @@ _SECTION_OF = {
     KIND_ENVIRONMENT_CONSTRAINT: SECTION_CONSTRAINTS,
 }
 _STATUS_RANK = {"in-progress": 0, "blocked": 1, "open": 2}
+NO_FILE_REASON = "instruction block: the markdown target has no instruction file"
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,7 +80,7 @@ def _exclusion_reason(rec: Record, has_file: bool) -> str | None:
         return "not current"
     if rec.kind == KIND_PERSONALITY_BLOCK:
         return ("instruction block: rendered in the instruction region" if has_file
-                else "instruction block: the markdown target has no instruction file")
+                else NO_FILE_REASON)
     if rec.kind not in _SECTION_OF:
         return "not a brief kind"
     if rec.kind == KIND_WORK_ITEM and rec.data.get("status") not in OPEN_WORK_STATUSES:
