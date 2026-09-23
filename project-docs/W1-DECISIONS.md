@@ -580,8 +580,12 @@ token, secret, credential or key word, any following word still makes the
 name a description, since an issued token under `GITHUB_TOKEN_CI` still
 looks random and a helper or backend name under `credential.helper` is not
 a secret. After a name that holds a password or a token, a path needs two
-segments and must not be base64-shaped. `enabled` and `disabled` join the
-words that are never a secret. The cost: a value under a password name
+segments and must not be base64-shaped, and after any name a path segment
+of sixteen or more base64 characters that mixes both cases is not a path
+segment, so a digit-free stretch of a key does not read as a directory. Of
+20,000 random 40-character keys that start with `/`, none passes after
+`AWS_SECRET_ACCESS_KEY` and 2 pass after a bare `key`. `enabled` and
+`disabled` join the words that are never a secret. The cost: a value under a password name
 followed by a word that is not in the list (`first_pass_label` is fine,
 `pass_one: complete` is not) is redacted, and the store refuses it; the
 list is where that trade is tuned. A path under a password or token name

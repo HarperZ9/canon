@@ -458,7 +458,8 @@ earlier redaction to more text is still redacted. The rest is decided by the
 value's shape (`scrub_shape.py`). A number of at most 19 digits, a date or
 time, a path, or a boolean is a setting after any name (`KEY_COUNT=1000`,
 `second pass: 2026-10-01`, `private_key_path: ~/.ssh/id_ed25519`); a path
-segment that holds a random run is not a path. After a name that holds a
+segment that holds a random run, or is sixteen or more base64 characters
+mixing both cases, is not a path. After a name that holds a
 password or a token, a path also needs two segments (`DB_PASSWORD=/hunter2`
 is a password) and must not be base64-shaped (only letters, digits, `+`, `/`
 and `=`, with upper case, lower case and a digit). The last secret word in

@@ -37,6 +37,8 @@ PW = "Summer" + "2024!"
     ("DB_PASSWORD=/hunter" + "2", "hunter2"),
     ("DB_PASSWORD=/hunter" + "22", "hunter22"),
     ("AWS_SECRET_ACCESS_KEY=/wJalrXUtnFEMI/K7MDENG/bPxRfiCY" + "EXAMPLE", "wJalrXUtnFEMI"),
+    ("AWS_SECRET_ACCESS_KEY=/ggVbgxoXbOTYWulzQug" + "nxNX/gsamyKxkoVVFFKC", "ggVbgxoX"),
+    ("key=/ggVbgxoXbOTYWulzQug" + "nxNX/gsamyKxkoVVFFKC", "ggVbgxoX"),
 ])
 def test_a_secret_under_a_name_that_says_which_one_is_redacted(text, secret):
     result = scrub(text)

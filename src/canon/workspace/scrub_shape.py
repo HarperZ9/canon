@@ -9,11 +9,11 @@ name says what the value is for. The value's shape says whether it is one:
   `KEY_COUNT=1000`, `pass_rate=0.95`, `second pass: 2026-10-01`,
   `private_key_path: ~/.ssh/id_ed25519`. A path starts at `/`, `~/`, `./`,
   `../`, a drive letter or a variable, and no segment of it holds a random
-  run (below). After a name that holds a password or a token, a path also
-  needs two segments (`/hunter2` is a password) and must not be
-  base64-shaped (only letters, digits, `+`, `/` and `=`, with upper case,
-  lower case and a digit), so a base64 key that starts with `/` is not read
-  as a path.
+  run (below) or is sixteen or more base64 characters mixing both cases.
+  After a name that holds a password or a token, a path also needs two
+  segments (`/hunter2` is a password) and must not be base64-shaped (only
+  letters, digits, `+`, `/` and `=`, with upper case, lower case and a
+  digit), so a base64 key that starts with `/` is not read as a path.
 - A name holds a password when its last secret word is a password word and
   every word after it names which password (`DB_PASSWORD`, `smtp_pass`,
   `DB_PASSWORD_PROD`, `ADMIN_PASSWORD_2`, `password_confirmation`). Any
@@ -128,6 +128,15 @@ def name_class(name: str) -> str:
     return QUALIFIED
 
 
+def _random_segment(segment: str) -> bool:
+    """A path segment that holds a random run, or that is sixteen or more
+    base64 characters mixing both cases (a digit-free stretch of a key)."""
+    if random_run(segment):
+        return True
+    return bool(len(segment) >= 16 and _BASE64.fullmatch(segment)
+                and re.search(r"[a-z]", segment) and re.search(r"[A-Z]", segment))
+
+
 def _base64_shaped(value: str) -> bool:
     """Only base64 characters, with upper case, lower case and a digit."""
     return bool(_BASE64.fullmatch(value) and re.search(r"[a-z]", value)
@@ -136,13 +145,13 @@ def _base64_shaped(value: str) -> bool:
 
 def is_path(value: str, strict: bool = False) -> bool:
     """A path starts at `/`, `~/`, `./`, `../`, a drive letter or a variable,
-    and no segment of it holds a random run. `strict` (after a name that holds
+    and no segment of it is random (`_random_segment`). `strict` (after a name that holds
     a secret) also needs two segments, so `/hunter2` is not a path, and a value
     that is base64-shaped is not a path either."""
     if not _PATH.fullmatch(value):
         return False
     segments = [s for s in re.split(r"[\\/]", value) if s]
-    if any(random_run(s) for s in segments):
+    if any(_random_segment(s) for s in segments):
         return False
     return not strict or (len(segments) >= 2 and not _base64_shaped(value))
 
