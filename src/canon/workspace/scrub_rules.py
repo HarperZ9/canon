@@ -40,7 +40,7 @@ _NOT_SECRET = frozenset({
     "true", "false", "none", "null", "nil", "yes", "no", "on", "off", "empty",
     "required", "optional", "undefined", "string", "str", "number", "int",
     "integer", "float", "bool", "boolean", "bytes", "object", "any", "unknown",
-    "lambda",
+    "lambda", "enabled", "disabled",
 })
 _DOTTED = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+$")
 _NAME = re.compile(r"[A-Za-z0-9_.\-]+")

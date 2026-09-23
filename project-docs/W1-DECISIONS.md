@@ -557,3 +557,33 @@ the old test, which missed any value with no digit) and a 32-character one
 0.5% (0.3% before); a hex or base36 value of 20 characters or more is missed
 at most 0.3% of the time. A random value whose digits all come at the end reads as a
 word followed by a number and passes: a declared limit.
+
+## D-142 The last secret word decides a name, and a password keeps its suffix
+
+D-136 read a name as qualified whenever another word followed the secret
+word, and a qualified name redacts only a value that looks random. A
+human-chosen password never does, so `DB_PASSWORD_PROD=Summer2024!`,
+`PASSWORD_ADMIN=hunter2`, `ADMIN_PASSWORD_2=letmein` and
+`{"password_confirmation": "Summer2024!"}` reached the store in plain text,
+where the D-131 rules had redacted them. D-136 had also read any value that
+started at `/` as a path before it asked the name, so `DB_PASSWORD=/hunter2`
+passed, and a base64 key with short or digit-free segments
+(`AWS_SECRET_ACCESS_KEY=/wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLE`) read as a
+path.
+
+The class now comes from the last secret word in the name. After a password
+word, a word that names which password (`prod`, `staging`, `admin`, `2`,
+`confirmation`) keeps the name a password name, and only a word that
+describes the password (`type`, `path`, `min`, `max`, `policy`, `url`,
+`hint`, `ttl` and the rest of `_DESCRIPTORS`) makes it a description. After a
+token, secret, credential or key word, any following word still makes the
+name a description, since an issued token under `GITHUB_TOKEN_CI` still
+looks random and a helper or backend name under `credential.helper` is not
+a secret. After a name that holds a password or a token, a path needs two
+segments and must not be base64-shaped. `enabled` and `disabled` join the
+words that are never a secret. The cost: a value under a password name
+followed by a word that is not in the list (`first_pass_label` is fine,
+`pass_one: complete` is not) is redacted, and the store refuses it; the
+list is where that trade is tuned. A path under a password or token name
+that uses only letters, digits and slashes and mixes both cases with a digit
+(`API_KEY=/Users/dev/Project2`) reads as a base64 key and is redacted too.

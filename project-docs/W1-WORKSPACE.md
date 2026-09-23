@@ -454,13 +454,21 @@ earlier redaction to more text is still redacted. The rest is decided by the
 value's shape (`scrub_shape.py`). A number of at most 19 digits, a date or
 time, a path, or a boolean is a setting after any name (`KEY_COUNT=1000`,
 `second pass: 2026-10-01`, `private_key_path: ~/.ssh/id_ed25519`); a path
-segment that mixes both cases with a digit, or runs to sixteen mixed-case
-letters, is not a path. After a name that ends in a password word any other
-value is a secret. After a name that ends in another credential word, or in
-`key` after a word such as `api`, `access` or `secret`, a word of up to ten
-letters is a setting (`token: bearer`) and anything else is a secret. After
-any other name (`token_type`, `KEY_PREFIX`, a bare `key` or `auth`, `MONKEY`)
-the value must look random: twelve or more characters with no space that hold
+segment that holds a random run is not a path. After a name that holds a
+password or a token, a path also needs two segments (`DB_PASSWORD=/hunter2`
+is a password) and must not be base64-shaped (only letters, digits, `+`, `/`
+and `=`, with upper case, lower case and a digit). The last secret word in
+the name decides its class. A name holds a password when that word is a
+password word and each word after it names which password (`DB_PASSWORD`,
+`DB_PASSWORD_PROD`, `ADMIN_PASSWORD_2`, `password_confirmation`); any value
+that is not a setting is a secret there. A word that describes the password
+(`type`, `path`, `min`, `policy`, `url`, `hint` and the rest of
+`scrub_shape._DESCRIPTORS`) makes the name a description instead. A name
+holds a token when it ends in another credential word, or in `key` after a
+word such as `api`, `access` or `secret`; a word of up to ten letters is a
+setting there (`token: bearer`) and anything else is a secret. After any
+other name (`token_type`, `GITHUB_TOKEN_CI`, `PASSWORD_MIN_LENGTH`,
+`KEY_PREFIX`, a bare `key` or `auth`, `MONKEY`) the value must look random: twelve or more characters with no space that hold
 a random run, or mix both cases with `+`, `/` or `=`. An AWS resource name
 (`arn:...`) is a setting after any name, like a number. A cookie header is a
 secret when one of its values is, and a URL query parameter and a JSON field

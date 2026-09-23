@@ -190,10 +190,15 @@ edits back without switching.
   secret-named key, a value shorter than four characters, a value that reads
   as code (`get_token()`, `self.password`, `string`), a number, a date, a path
   and a boolean are left alone, so a numeric PIN after `password=` passes
-  through. A word of up to ten letters after a key or token name is left alone
-  (`token: bearer`), and a name where another word follows the secret word
-  (`token_type`, `KEY_COUNT`, `session_token_ttl`) keeps its value unless the
-  value looks random: twelve or more characters with no space that hold a run
+  through. A value after a password name is redacted even when another word
+  follows the password word (`DB_PASSWORD_PROD`, `password_confirmation`),
+  unless that word describes the password (`PASSWORD_MIN_LENGTH`,
+  `password_policy`). A path after a password or token name needs two
+  segments, so `DB_PASSWORD=/hunter2` is redacted. A word of up to ten
+  letters after a key or token name is left alone (`token: bearer`), and a
+  name where another word follows the key or token word (`token_type`,
+  `KEY_COUNT`, `session_token_ttl`) keeps its value unless the value looks
+  random: twelve or more characters with no space that hold a run
   of eight or more letters and digits that is not a word followed by a number
   (`a8f3k2j9x7m1`, a hex digest), or that mix both cases with `+`, `/` or
   `=`. An identifier such as `kv-prod-eastus2` or `release-2026-10` is left
