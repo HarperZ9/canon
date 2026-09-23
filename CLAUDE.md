@@ -254,6 +254,15 @@ level up, in the stored row:
   to `src/canon/versions_pin.py` (re-exported by `versions.py`).
 - `src/canon/cli_workspace*.py` add `canon workspace
   id|list|promote|adopt|focus|task|set-status|decide|constraint`.
+- `src/canon/workspace/targets.py` is the target catalog with sourced size
+  budgets; `brief_items.py` picks and orders what a brief shows (excluded
+  records are named with the rule); `brief.py` fits the brief as a strict
+  prefix of the priority order with a `Left out` report and a
+  `canon.handoff-receipt/v1` receipt; `switch.py` renders the target's
+  workspace region with the brief as the reserved block
+  `canon-workspace-brief`, through the allow-list, refusing a file Codex would
+  truncate; `hosts.py` is the text of a file `--create` makes.
+  `src/canon/cli_handoff.py` adds `canon handoff` and `canon switch`.
 - `project-docs/W1-WORKSPACE.md` is the spec (identity, collisions, renames,
   store layout, isolation); `project-docs/W1-DECISIONS.md` records D-101 the
   binding lives in the row, D-102 remote-keyed identity that splits on doubt,
@@ -261,7 +270,10 @@ level up, in the stored row:
   foreign reads never merge by id, D-106 global by promotion only, D-107 the
   store outside the repository, D-108 adoption answers a rename, D-109 the
   workspace-state tag, D-110 rejected alternatives as an additive field, D-111
-  the adapters keep the five v1 kinds, D-112 the pin type split.
+  the adapters keep the five v1 kinds, D-112 the pin type split, D-113 the
+  strict-prefix brief with a report, D-114 the brief as a reserved region
+  block, D-115 sourced budgets and the Codex refusal, D-116 `--create` for a
+  missing file only.
 
 Later phases (verifier, migration legs, region installation, the global SOUL.md
 and GEMINI.md surfaces) aim at this same envelope. Each lands on its own branch.

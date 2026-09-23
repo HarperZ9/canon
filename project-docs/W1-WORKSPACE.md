@@ -89,6 +89,77 @@ clock-free ordinal from the project's store), and writes a workspace record.
 not move when its status changes. `focus` reads the branch from the
 repository's `HEAD` file when `--branch` is not given, and runs no git command.
 
+## Handoff
+
+`canon handoff --to <target>` writes a resume brief for the next agent from the
+project's pool (`canon.workspace.brief.make_brief`). It has four sections, in
+priority order:
+
+1. **Focus**: the goal, the branch, the active areas and any notes.
+2. **Open work**: work items that are `in-progress`, `blocked` or `open`, in
+   that order.
+3. **Decisions**: current decisions, most recent first, each with the reason
+   (`Why:`) and every rejected alternative with the reason it was dropped.
+4. **Constraints and quirks**, oldest first.
+
+Inside a section this project's records come first, then global records marked
+`[global]`, then records of a named project marked `[from <project_id>]`. A
+closed work item, a superseded decision, a personality block (it goes in the
+instruction region instead) and any other kind are excluded by rule; the
+receipt names each one and the rule.
+
+### Budgets
+
+| target | brief budget | host limit it sits inside |
+|---|---|---|
+| `claude-code` | 12,000 bytes, 120 lines | docs advise a `CLAUDE.md` under 200 lines (high); a 40,000-character warning is user-reported (moderate) |
+| `codex` | 16,384 bytes, 400 lines | `AGENTS.md` files share a 32,768-byte budget and are truncated past it (high) |
+| `gemini-cli` | 16,384 bytes, 400 lines | no documented limit |
+| `cursor` | 16,384 bytes, 250 lines | docs advise a rule under 500 lines (high) |
+| `copilot` | 16,384 bytes, 400 lines | about 1,000 lines per instruction file at most (high) |
+| `markdown` | 16,384 bytes, 400 lines | none; a brief to paste |
+
+The host figures were read from each tool's public documentation or source on
+2026-09-23. The brief budgets are canon's choices inside them, leaving room for
+the personality blocks that share the file, and `--budget-bytes` and
+`--budget-lines` override them.
+
+### Truncation
+
+The brief is a strict prefix of the priority order. When the budget runs out,
+every record after the cut is left out whole, and the brief ends with a
+`Left out` section that counts them and names as many as fit, then
+`and N more`. A lower-priority record never appears while a higher-priority one
+is missing, and no record is shortened. A budget too small for the header and
+the truncation report is refused (`budget_too_small`).
+
+### Receipt
+
+`--receipt <file>` writes a `canon.handoff-receipt/v1` object: the path-clean
+project identity, the target and its budget with the basis for it, the brief's
+sha256, size in bytes and lines, a sha256 over the pool it was built from, the
+declared projects, every included and left-out record with its content hash,
+every record excluded by rule with the rule, and a `does_not_prove` list. No
+clock is read, so the same pool gives the same brief and the same receipt.
+
+### Switch
+
+`canon switch --to <target>` renders the target's workspace instruction file
+region: this project's personality blocks, by the same authored-split rule the
+rest of canon uses, followed by one generated block, `canon-workspace-brief`,
+holding the brief. The target reads its instruction file at startup, so the
+brief reaches it without a paste. The write follows the canon rules:
+
+- only the catalog surface for that target, resolved under the repository root;
+- only between the canon markers, every byte outside them kept;
+- a file with no canon region is refused, and a missing file is created only
+  with `--create`, holding an empty region;
+- a file the host would truncate (Codex past 32,768 bytes) is refused before
+  writing; a file past a host's line guidance writes with a warning;
+- `--dry-run` plans and prints the region without writing.
+
+A target with no instruction surface (`markdown`) prints the brief alone.
+
 ## The store
 
 The store root defaults to `~/.canon/store` and can be set with `CANON_STORE`
@@ -155,6 +226,8 @@ canon workspace decide --title "Row format" --decision "JSONL rows"     --contex
 canon workspace constraint "CI runs on Windows and Linux" --quirk
 canon workspace promote <id> --reason "applies to every project"
 canon workspace adopt --from <prj_id> --reason "moved the checkout"
+canon handoff --to codex [--receipt brief.receipt.json] [--out BRIEF.md]
+canon switch --to claude-code [--dry-run] [--create]
 ```
 
 Every command takes `--workspace` (default `.`), `--store`, and `--remote` to

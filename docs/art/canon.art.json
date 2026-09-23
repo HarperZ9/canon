@@ -164,7 +164,7 @@
         "how many",
         "where the number comes from"
       ],
-      "alt": "A table of twelve rows: what canon carries, how many of it there are, and where each number is read from. Eight record kinds share one envelope: five under the v1 record tag and three workspace-state kinds under their own tag. Two scopes layer, workspace over global. Four surfaces sit on the write allow-list: a global and a workspace file for Claude Code, an AGENTS.md for Codex, and a workspace SOUL.md for Hermes. Four storage adapters implement the backend protocol, and five capability tokens describe what each one can carry. Nineteen schema pins name the seams that carry a version. The aggregate check folds four legs, and four gate functions share the same zero or one exit code. 125 source modules hold 21,274 lines, and 57 test files hold 1134 tests. Two surfaces named in the roadmap are absent from the catalog, a global SOUL.md and a GEMINI.md, so canon does not render them.",
+      "alt": "A table of twelve rows: what canon carries, how many of it there are, and where each number is read from. Eight record kinds share one envelope: five under the v1 record tag and three workspace-state kinds under their own tag. Two scopes layer, workspace over global. Four surfaces sit on the write allow-list: a global and a workspace file for Claude Code, an AGENTS.md for Codex, and a workspace SOUL.md for Hermes. Four storage adapters implement the backend protocol, and five capability tokens describe what each one can carry. Twenty schema pins name the seams that carry a version. The aggregate check folds four legs, and four gate functions share the same zero or one exit code. 131 source modules hold 22,049 lines, and 59 test files hold 1156 tests. Two surfaces named in the roadmap are absent from the catalog, a global SOUL.md and a GEMINI.md, so canon does not render them.",
       "footnote": "Every count here was read from the module that defines it rather than typed in. The marked row is the honest null: the README names a global SOUL.md and a GEMINI.md as later phases, and the write allow-list does not carry them, so those two files are ones canon will not touch today.",
       "fields": [
         {
@@ -194,7 +194,7 @@
         },
         {
           "key": "schema pins",
-          "value": "nineteen seams",
+          "value": "twenty seams",
           "note": "SEAM_PINS in versions_pin.py. Each pin names a seam, its version, and the decision record behind it, so a shape change is a version change."
         },
         {
@@ -209,18 +209,18 @@
         },
         {
           "key": "source modules",
-          "value": "125 files",
+          "value": "131 files",
           "note": "Python modules under src/canon, including backends, transport, MCP, context capture/query and continuity export/bootstrap seams."
         },
         {
           "key": "source lines",
-          "value": "21,274 lines",
+          "value": "22,049 lines",
           "note": "Counted across those modules. No runtime dependencies: the record, codecs, context capture/query, continuity CLI and gates are standard library only."
         },
         {
           "key": "python tests",
-          "value": "1134 passing",
-          "note": "pytest over 57 files: 882 test functions plus their parametrized cases, covering records, backends, MCP, context, continuity export and every number here."
+          "value": "1156 passing",
+          "note": "pytest over 59 files: 899 test functions plus their parametrized cases, covering records, backends, MCP, context, continuity export and every number here."
         },
         {
           "key": "surfaces not rendered",

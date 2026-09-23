@@ -28,6 +28,8 @@ COMMANDS = (
     "undo",
     "bootstrap",
     "workspace",
+    "handoff",
+    "switch",
 )
 
 
@@ -103,10 +105,8 @@ def _run_parsed(
         from .cli_export import run_undo_command
 
         return run_undo_command(parsed, stdout=stdout, stderr=stderr, color=color)
-    if parsed.command == "workspace":
-        from .cli_workspace import run_workspace_command
-
-        return run_workspace_command(parsed, stdout=stdout, stderr=stderr, environ=environ, color=color)
+    if parsed.command in ("workspace", "handoff", "switch"):
+        return _run_workspace_family(parsed, stdout=stdout, stderr=stderr, environ=environ, color=color)
     if parsed.command == "rescue":
         from .cli_rescue import run_rescue_command
 
@@ -118,6 +118,17 @@ def _run_parsed(
         json_output=parsed.json_output,
         color=color,
     )
+
+
+def _run_workspace_family(parsed: argparse.Namespace, **streams) -> int:
+    """The W1 commands: `workspace ...`, `handoff` and `switch`."""
+    if parsed.command == "workspace":
+        from .cli_workspace import run_workspace_command
+
+        return run_workspace_command(parsed, **streams)
+    from .cli_handoff import run_handoff_command
+
+    return run_handoff_command(parsed, **streams)
 
 
 def _run_check(stdout: TextIO) -> int:

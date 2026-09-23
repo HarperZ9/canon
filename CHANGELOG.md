@@ -26,8 +26,18 @@ Canon starts to carry a project's working state between models and tools.
 - Adds `canon workspace focus`, `task`, `set-status`, `decide` (with
   `--reject OPTION REASON`) and `constraint` (with `--quirk`) to write that
   state by hand.
-- Registers three new version pins: `project-id`, `project-row` and
-  `workspace-state`.
+- Adds `canon handoff --to <target>`, a resume brief for `claude-code`,
+  `codex`, `gemini-cli`, `cursor`, `copilot` or plain `markdown`: focus, open
+  work, recent decisions with their rejected alternatives, then constraints.
+  The brief fits the target's budget as a strict prefix of that order and ends
+  with a `Left out` report; `--receipt` writes a `canon.handoff-receipt/v1`
+  receipt with digests of the brief and of the records it came from.
+- Adds `canon switch --to <target>`, which writes the target's instruction file
+  region with the project's blocks and the brief, through the write allow-list
+  and only between the canon markers. `--dry-run` writes nothing, `--create`
+  makes a missing file, and a file Codex would truncate is refused.
+- Registers four new version pins: `project-id`, `project-row`,
+  `workspace-state` and `handoff-receipt`.
 
 Limits:
 
@@ -37,6 +47,10 @@ Limits:
   The old records are kept and can be adopted; nothing merges them on its own.
 - The four storage adapters still hold only the five original kinds. The
   workspace-state kinds live in the per-project store.
+- The per-target budgets come from each host's public documentation, read on
+  2026-09-23. Hosts change; the numbers are defaults and can be overridden.
+- The brief lists what was recorded. It does not know about work that happened
+  in a session nobody recorded or imported.
 
 ## 0.2.0 - 2026-09-22
 

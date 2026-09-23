@@ -91,6 +91,8 @@ PIN_PROJECT_ROW = SchemaPin(
     "project-row", "v1", "canon.project-row/v1", "W1 D-101")
 PIN_WORKSPACE_STATE = SchemaPin(
     "workspace-state", "v1", "canon.workspace-state/v1", "W1 D-109")
+PIN_HANDOFF_RECEIPT = SchemaPin(
+    "handoff-receipt", "v1", "canon.handoff-receipt/v1", "W1 D-113")
 
 _DEFAULT_REGISTRY: dict[str, SchemaPin] = {
     p.name: p for p in (
@@ -101,6 +103,7 @@ _DEFAULT_REGISTRY: dict[str, SchemaPin] = {
         PIN_PERSONA_THESIS_PAYLOAD, PIN_RECONCILE_GATE_POLICY,
         PIN_RUN_WITNESS, PIN_TRANSPORT_SEAM, PIN_VAULT_FRONTEND,
         PIN_TEXTUTIL, PIN_PROJECT_ID, PIN_PROJECT_ROW, PIN_WORKSPACE_STATE,
+        PIN_HANDOFF_RECEIPT,
     )
 }
 assert set(_DEFAULT_REGISTRY) == SEAM_PINS, \

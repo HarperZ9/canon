@@ -17,6 +17,31 @@ def add_common(parser: argparse.ArgumentParser) -> None:
                         help="use this remote URL for the project identity")
 
 
+def _budget_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--to", required=True,
+                        help="claude-code, codex, gemini-cli, cursor, copilot or markdown")
+    parser.add_argument("--budget-bytes", type=int, default=None, help="override the brief byte budget")
+    parser.add_argument("--budget-lines", type=int, default=None, help="override the brief line budget")
+    parser.add_argument("--include-project", action="append", default=[],
+                        help="also read this project's records (named, labelled)")
+
+
+def add_handoff_args(parser: argparse.ArgumentParser) -> None:
+    add_common(parser)
+    _budget_args(parser)
+    parser.add_argument("--out", default=None, help="write the brief to this new file")
+    parser.add_argument("--receipt", default=None, help="write the receipt to this new file")
+
+
+def add_switch_args(parser: argparse.ArgumentParser) -> None:
+    add_common(parser)
+    _budget_args(parser)
+    parser.add_argument("--dry-run", action="store_true", help="plan and print; write nothing")
+    parser.add_argument("--create", action="store_true",
+                        help="create the instruction file if it does not exist")
+    parser.add_argument("--home", default=None, help="home directory for global surfaces")
+
+
 def _inherit(child: argparse.ArgumentParser, parent: argparse.ArgumentParser) -> None:
     child._canon_stdout = parent._canon_stdout  # type: ignore[attr-defined]
     child._canon_stderr = parent._canon_stderr  # type: ignore[attr-defined]

@@ -123,3 +123,39 @@ than stored under a contract that was never proved for it.
 The error classes, the closed `SEAM_PINS` vocabulary and `SchemaPin` moved to
 `versions_pin.py`, which imports nothing from canon, and `versions.py`
 re-exports every name, so no caller changes an import.
+
+## D-113 The brief is a strict prefix of the priority order, with a report
+
+A brief that fits its budget by dropping whatever is largest would show a
+constraint while hiding the current focus. The brief is built in priority order
+(focus, open work, recent decisions, constraints) and cut at one point: every
+record after the cut is left out whole and named in a `Left out` section and in
+the receipt. No record is shortened, because a half decision reads as a whole
+one. The receipt pins the budget, the brief's digest and a digest of the pool,
+so the same records give the same brief, and a reader can tell what was cut
+from what never existed.
+
+## D-114 The brief rides in the instruction region as one reserved block
+
+The point of a handoff is that the next agent reads it without being told to.
+Every target already loads its instruction file at startup, so `switch` puts
+the brief there, as one personality block with the reserved id
+`canon-workspace-brief`, after the project's own blocks. The region grammar
+carries it unchanged, so the region still round-trips through the R0 codec, and
+a stored block that tries to use the reserved id is refused.
+
+## D-115 Budgets come from the host's documentation, with a margin
+
+Each target's numbers were read from the host's own documentation or source and
+labelled with a confidence. Where the host truncates (Codex), `switch` refuses a
+file past the limit, because a truncated instruction file loses its tail without
+telling anyone. Where the host only advises (Claude Code, Cursor, Copilot), the
+write goes ahead with a warning. The brief budgets sit well inside those
+figures so the personality blocks that share the file still fit, and every
+budget can be overridden on the command line.
+
+## D-116 `--create` makes a missing file, never an existing one
+
+The rule that a file is opted in by its owner adding the markers still holds.
+`switch --create` writes a new file only when none exists, holding an empty
+canon region; an existing file without a region is refused and left as it is.
