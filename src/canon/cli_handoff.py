@@ -132,7 +132,7 @@ def _switch(parsed, ctx: WorkspaceContext, out: Output, environ) -> int:
                        budget_lines=parsed.budget_lines, declared=declared)
     _refuse_pending_edits(ctx, plan, parsed.dry_run)
     if not parsed.dry_run:
-        commit_switch(plan, _write_text)
+        commit_switch(plan, _write_text, _read_text)
         if plan.surface is not None:
             record_render(ctx.store, plan.surface.relative_path, target.name, plan.interior)
     rel = plan.surface.relative_path if plan.surface else None

@@ -141,3 +141,16 @@ def test_an_explicit_remote_overrides_the_config(tmp_path):
     repo = init_repo(tmp_path / "r", "https://github.com/o/old")
     moved = derive_identity(repo, remote_url="https://github.com/o/new")
     assert moved.key == "github.com/o/new"
+
+
+def test_the_drive_root_ceiling_holds_even_without_a_home_directory(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    from canon.workspace import identity
+
+    def no_home():
+        raise RuntimeError("no home directory")
+
+    monkeypatch.setattr(identity.Path, "home", staticmethod(no_home))
+    start = tmp_path.resolve()
+    assert Path(start.anchor) in identity.default_ceilings(start)

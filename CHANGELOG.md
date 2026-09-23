@@ -94,7 +94,10 @@ Limits:
   checked against public sources on 2026-09-23 and refuse content they do not
   recognise rather than guess.
 - The scrubber recognises secrets by shape. A secret with no recognisable shape
-  passes through; email addresses are not redacted.
+  passes through, a value shorter than four characters after a secret-named key
+  is not redacted, and email addresses are not redacted.
+- `switch` re-reads the file just before writing and refuses if it changed; the
+  short window between that read and the write is not locked.
 - Gemini CLI, Cursor, ChatGPT and Claude web exports have no importer yet.
 - Edit back-flow reads line shapes the brief itself writes. An edit in another
   shape is kept as a note to accept, not mapped to a record.

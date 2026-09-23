@@ -145,7 +145,8 @@ edits back without switching.
   recognise rather than guess. Gemini CLI, Cursor, ChatGPT and Claude web
   histories have no importer yet.
 - The scrubber recognises secrets by their shape. A secret with no recognisable
-  shape passes through, and email addresses are not redacted.
+  shape passes through, a value shorter than four characters after a
+  secret-named key is not redacted, and email addresses are not redacted.
 - None of the instruction files can load a rule for some files only. A block
   scoped to files with `applies_to` is written for every file, with an
   `Applies to:` line the model reads as advice.

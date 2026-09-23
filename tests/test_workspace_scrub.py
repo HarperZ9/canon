@@ -55,6 +55,8 @@ def test_each_rule_redacts_its_shape_and_leaves_nothing_behind(code, text):
     "Set the PASSWORD variable before running the suite.",
     "The key idea is a strict prefix.",
     "https://github.com/example/repo.git",
+    "RETRY_TOKEN_COUNT=5",
+    '{"max_tokens": "512"}',
 ])
 def test_placeholders_and_prose_are_left_alone(text):
     assert scrub(text).text == text

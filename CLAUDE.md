@@ -307,7 +307,9 @@ level up, in the stored row:
   with run-time canaries, D-122 scope in the sentinel plus a visible line,
   D-123 exact paths for the three new surfaces, D-124 declared per-target
   downgrades held by a verdict, D-125 a missing file is reported, D-126 the
-  render ledger, D-127 in-place edits become proposals and switch waits.
+  render ledger, D-127 in-place edits become proposals and switch waits,
+  D-128 the review findings folded in (tagged removals, the anchor ceiling,
+  re-read before write, four-character minimum for name-based secret rules).
 
 Later phases (verifier, migration legs, region installation into an existing
 file, the global SOUL.md and the global GEMINI.md surfaces) aim at this same

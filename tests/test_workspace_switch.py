@@ -136,3 +136,20 @@ def test_an_unknown_target_or_a_tiny_budget_is_a_stable_failure(project):
     base = ["--workspace", str(repo), "--store", str(store.root)]
     assert _run(["handoff", "--to", "notepad", *base])[0] == EX_USAGE
     assert _run(["handoff", "--to", "codex", "--budget-bytes", "30", *base])[0] == EX_BUDGET
+
+
+def test_a_file_changed_after_planning_is_not_overwritten(project):
+    repo, ident, store, home = project
+    path = str((repo / "CLAUDE.md").resolve())
+    files = {path: HOST}
+    plan = _plan(project, files=files)
+    files[path] = HOST.replace("Keep this.", "Edited meanwhile.")
+    with pytest.raises(SwitchRefused, match="changed while") as err:
+        commit_switch(plan, files.__setitem__, files.get)
+    assert err.value.code == "conflict"
+    assert "Edited meanwhile." in files[path]
+    created = _plan(project, "codex", create=True)
+    later = {created.path: "someone else's file\n"}
+    with pytest.raises(SwitchRefused, match="changed while"):
+        commit_switch(created, later.__setitem__, later.get)
+    assert later[created.path] == "someone else's file\n"

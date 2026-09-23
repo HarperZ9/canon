@@ -156,7 +156,9 @@ brief reaches it without a paste. The write follows the canon rules:
   with `--create`, holding an empty region;
 - a file the host would truncate (Codex past 32,768 bytes) is refused before
   writing; a file past a host's line guidance writes with a warning;
-- `--dry-run` plans and prints the region without writing.
+- `--dry-run` plans and prints the region without writing;
+- the file is read again just before the write, and the write is refused if it
+  changed since the plan read it.
 
 A target with no instruction surface (`markdown`) prints the brief alone.
 
@@ -315,7 +317,8 @@ OpenAI, GitHub, GitLab, Slack, AWS, Google, Stripe, Hugging Face, npm), JSON web
 tokens, private key blocks, bearer and API-key headers, the password in a
 connection URL, `password=` fields, JSON fields named like a secret, and
 `NAME=value` assignments whose name says key, token, secret, password or
-credential, and replaces each with `[REDACTED:<rule>]`. The report counts the
+credential (for these name-based rules the value must be at least four
+characters), and replaces each with `[REDACTED:<rule>]`. The report counts the
 hits by rule; it never stores the value or a digest of it. Two more checks sit
 behind the scrubber: the store refuses any record that still matches
 (`secret_quarantine`), and a brief or an instruction region that would carry a

@@ -47,9 +47,9 @@ _RULES: tuple[tuple[str, re.Pattern[str], int], ...] = (
     ("connection-string", re.compile(r"\b[a-zA-Z][a-zA-Z0-9+.\-]*://[^\s:/@\"']*:([^\s@/\"']+)@"), 1),
     ("password-field", re.compile(r"(?i)\b(?:password|passwd|pwd)\s*=\s*([^;\s\"'`]{4,})"), 1),
     ("json-secret", re.compile(
-        r"(?i)\"[a-z0-9_\-]*(?:api[_-]?key|token|secret|password|passwd|credential)[a-z0-9_\-]*\"\s*:\s*\"([^\"]+)\""), 1),
+        r"(?i)\"[a-z0-9_\-]*(?:api[_-]?key|token|secret|password|passwd|credential)[a-z0-9_\-]*\"\s*:\s*\"([^\"]{4,})\""), 1),
     ("env-assignment", re.compile(
-        rf"\b[A-Z][A-Z0-9_]*{_SECRET_WORD}[A-Z0-9_]*\s*[=:]\s*(\"[^\"\n]*\"|'[^'\n]*'|[^\s\"']+)"), 1),
+        rf"\b[A-Z][A-Z0-9_]*{_SECRET_WORD}[A-Z0-9_]*\s*[=:]\s*(\"[^\"\n]{{4,}}\"|'[^'\n]{{4,}}'|[^\s\"']{{4,}})"), 1),
 )
 
 

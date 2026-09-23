@@ -116,7 +116,9 @@ def _removed_work(removed: list[tuple[str, str]], mapped_ids: set, records: dict
     edits = []
     for section, text in removed:
         item = _ITEM_RE.match(text)
-        rid = item["id"] if item and section == "Open work" else None
+        if item is None or item["tag"]:
+            continue  # another scope's line: it never names this project's record
+        rid = item["id"] if section == "Open work" else None
         current = records.get(rid)
         if rid and rid not in mapped_ids and current is not None \
                 and current.kind == KIND_WORK_ITEM:

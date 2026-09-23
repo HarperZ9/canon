@@ -171,7 +171,14 @@ def plan_switch(identity: ProjectIdentity, pool: list[TaggedRecord], target: Tar
     return SwitchPlan(target, brief, surface, path, status, old, new_text, interior, warnings)
 
 
-def commit_switch(plan: SwitchPlan, write_text) -> None:
-    """Write the planned file when the plan changes it."""
-    if plan.status in ("write", "create"):
-        write_text(plan.path, plan.new_text)
+def commit_switch(plan: SwitchPlan, write_text, read_text=None) -> None:
+    """Write the planned file when the plan changes it. With `read_text`, the
+    file is read again first and the write is refused if it changed since the
+    plan read it (or appeared, for a create), so an edit made in between is not
+    overwritten. The window between that read and the write remains."""
+    if plan.status not in ("write", "create"):
+        return
+    if read_text is not None and read_text(plan.path) != plan.old_text:
+        raise SwitchRefused("conflict", f"{plan.path} changed while the switch was "
+                                        "planned; nothing was written, run it again")
+    write_text(plan.path, plan.new_text)

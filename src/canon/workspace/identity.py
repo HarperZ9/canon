@@ -80,16 +80,26 @@ def is_project_id(value: object) -> bool:
     return isinstance(value, str) and PROJECT_ID_RE.match(value) is not None
 
 
-def default_ceilings() -> frozenset[Path]:
-    """Directories whose `.git` never claims a workspace below them: the home
-    directory (a dotfiles repository often lives there) and filesystem roots."""
-    ceilings: set[Path] = set()
+def _home() -> Path | None:
+    """The resolved home directory, or None where the platform has none (a
+    minimal container with no HOME and no password entry). Without a home
+    there is no home ceiling; the filesystem-root ceiling still applies."""
     try:
-        home = Path.home().resolve()
-        ceilings.add(home)
-        ceilings.add(Path(home.anchor))
-    except (RuntimeError, OSError):
-        pass
+        return Path.home().resolve()
+    except (RuntimeError, KeyError, OSError):
+        return None
+
+
+def default_ceilings(start: Path | None = None) -> frozenset[Path]:
+    """Directories whose `.git` never claims a workspace below them: the home
+    directory (a dotfiles repository often lives there) and the filesystem root
+    of both the home directory and the workspace."""
+    ceilings: set[Path] = set()
+    home = _home()
+    if home is not None:
+        ceilings.update({home, Path(home.anchor)})
+    if start is not None and start.anchor:
+        ceilings.add(Path(start.anchor))
     return frozenset(ceilings)
 
 
@@ -102,7 +112,7 @@ def find_repo_root(start: Path, *,
     home directory would give every unversioned project below it one shared
     identity, which is the cross-project mixing this module exists to prevent.
     """
-    stops = default_ceilings() if ceilings is None else ceilings
+    stops = default_ceilings(start) if ceilings is None else ceilings
     current = start
     while True:
         if (current / ".git").exists():

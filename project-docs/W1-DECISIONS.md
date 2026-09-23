@@ -263,3 +263,23 @@ instead of being guessed at. `switch` refuses while any proposal from the
 region is undecided, and proceeds once each is accepted or rejected. Without a
 ledger entry only additions and changes count, so the first switch into a file
 never proposes to retire blocks canon did not write.
+
+## D-128 Findings from the branch review, folded in
+
+An independent review of the band found three gaps and one tradeoff:
+
+- A removed brief line labelled `[from <project>]` was mapped by id alone, so
+  deleting another project's `task-3` could propose dropping this project's
+  `task-3`. Removed lines with a scope label are now skipped, as added ones
+  already were; a test pins it.
+- The filesystem-root ceiling (D-103) was computed from the home directory, so
+  it vanished where the home directory cannot be resolved. It is now taken from
+  the workspace's own anchor as well, and a test removes the home directory.
+- `switch` wrote the plan's text without looking at the file again, so an edit
+  made between planning and writing was lost. The commit now re-reads the file
+  and refuses when it changed (or appeared, for a create). The window between
+  that read and the write remains and is disclosed.
+- The name-based secret rules redacted any value after a secret-named key,
+  including `RETRY_TOKEN_COUNT=5`. They now need a value of at least four
+  characters. A secret shorter than that after such a key is not redacted; the
+  provider-format rules are unaffected.
