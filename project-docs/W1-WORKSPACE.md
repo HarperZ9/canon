@@ -435,10 +435,11 @@ npm, PyPI, DigitalOcean, Shopify, SendGrid, Twilio, Telegram), with short
 minimum lengths after the prefix so a cut token is still caught; JSON web
 tokens; PEM, PGP and PuTTY private keys; Slack and Discord webhook URLs;
 bearer, basic, token and API-key headers and cookies; the password of any
-`user:password@` in a URL, and a user part with no password when it is shaped
-like a token (upper case, lower case and a digit in eight or more characters,
-letters and digits in twelve or more, or sixteen or more characters that are
-not a lower-case name such as `first.last`); a token-named URL query
+`user:password@` in a URL unless it is a placeholder (a port followed by a
+path, a query, a fragment or the end is not a password), and a user part with
+no password when, with its percent escapes decoded, it holds a random run (a
+run of eight or more letters and digits that is not a word followed by a
+number or a number followed by up to two letters); a token-named URL query
 parameter; Azure account
 keys and `.npmrc` tokens; JSON fields named like a secret, also inside escaped
 JSON; password fields in any case after `=` or `:` (`db_password=`,
@@ -459,8 +460,9 @@ value is a secret. After a name that ends in another credential word, or in
 `key` after a word such as `api`, `access` or `secret`, a word of up to ten
 letters is a setting (`token: bearer`) and anything else is a secret. After
 any other name (`token_type`, `KEY_PREFIX`, a bare `key` or `auth`, `MONKEY`)
-the value must look random: twelve or more characters with no space that mix
-letters and digits, or both cases with `+`, `/` or `=`. A cookie header is a
+the value must look random: twelve or more characters with no space that hold
+a random run, or mix both cases with `+`, `/` or `=`. An AWS resource name
+(`arn:...`) is a setting after any name, like a number. A cookie header is a
 secret when one of its values is, and a URL query parameter and a JSON field
 take the same name and shape rules. A one-word name followed by a colon
 inside a sentence ("Refresh token: handle expiry") is prose unless its value

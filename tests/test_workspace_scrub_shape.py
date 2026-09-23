@@ -24,6 +24,8 @@ HEX = "9f8e7d6c5b4a" * 4
     ["task", "Set session_token_ttl=3600 in prod"],
     ["constraint", "CI floor is pass_rate=0.95"],
     ["task", "Raise KEY_COUNT=1000 for the shard map"],
+    ["task", "Set KEY_VAULT_NAME=kv-prod-eastus2 in staging"],
+    ["task", "Rename key=feature_flag_v2 before release"],
 ])
 def test_a_hand_typed_setting_is_stored_as_written(tmp_path, argv):
     repo = init_repo(tmp_path / "r", "https://github.com/o/r")
@@ -79,3 +81,39 @@ def test_a_secret_shaped_value_is_still_redacted(text):
     for piece in (V, HEX, "value123", "letmein", "wJalrXUtnFEMI"):
         assert piece not in result.text
     assert find_secrets(result.text) == []
+
+
+UUID = "1234abcd-12ab-" + "34cd-56ef-1234567890ab"
+
+
+@pytest.mark.parametrize("text", [
+    "key=feature_flag_v2",
+    "KEY=release-2026-10",
+    "key: main-v2-branch",
+    "KEY_VAULT_NAME=kv-prod-eastus2",
+    "CACHE_KEY_PREFIX=v2_prod_cache",
+    "KEY_PAIR_NAME=deploy-keypair-2024",
+    "AUTH_DOMAIN=dev-abc123.us.auth0.com",
+    "cache_key: user:1234:profile",
+    "kms_key_id: arn:aws:kms:us-east-1:123456789012:key/" + UUID,
+    "Cookie: cookie_consent=granted_2024",
+    "Cookie: _ga=GA1.2.1234567890.1234567890",
+])
+def test_an_identifier_with_a_version_date_or_region_digit_is_not_random(text):
+    """Each run of letters and digits here is a word followed by a number, so
+    none of these values looks random."""
+    assert find_secrets(text) == [], text
+    assert scrub(text).text == text
+
+
+@pytest.mark.parametrize("text, secret", [
+    ("key=" + HEX, HEX),
+    ("auth: " + "a8f3k2j9" + "x7m1q5w4", "a8f3k2j9"),
+    ("KEY_PREFIX=" + UUID, "1234abcd"),
+    ("CACHE_KEY=build-" + "3f2a9c1b7e", "3f2a9c1b7e"),
+    ("Cookie: _session=" + V, V),
+])
+def test_a_run_that_is_not_a_word_and_a_number_is_random(text, secret):
+    result = scrub(text)
+    assert result.hits, text
+    assert secret not in result.text

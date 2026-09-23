@@ -105,12 +105,13 @@ secret-named assignments in any case (`DB_PASS=`, `aws_secret_access_key = `)
 are replaced with `[REDACTED:<rule>]`. The store also refuses any record that
 still looks like one.
 
-In a URL, the password in `https://user:password@host` is always redacted. A
-user part with no password (`https://NAME@host`) is redacted when it is shaped
-like a token: upper case, lower case and a digit in eight or more characters,
-letters and digits in twelve or more, or sixteen or more characters that are
-not a lower-case name such as `first.last`. A plain name such as `git@` or
-`deploy@`, a port, and a placeholder such as `${TOKEN}@` stay.
+In a URL, the password in `https://user:password@host` is redacted unless it
+is a placeholder such as `<password>` or `${DB_PASS}`. A user part with no
+password (`https://NAME@host`) is redacted when it holds a run of eight or
+more letters and digits that is not a word followed by a number, such as
+`a8f3k2j9x7` or a hex digest. A name such as `git@`, `deploy-bot-2024@` or
+`GitHubUser42@`, an email address, a placeholder such as `${TOKEN}@`, and a
+port followed by a path, a query or a fragment stay.
 
 Each importer lists what it drops (thinking blocks, tool output, system
 entries and more) and counts it in its report. A session with content the
@@ -192,7 +193,11 @@ edits back without switching.
   through. A word of up to ten letters after a key or token name is left alone
   (`token: bearer`), and a name where another word follows the secret word
   (`token_type`, `KEY_COUNT`, `session_token_ttl`) keeps its value unless the
-  value looks random: twelve or more characters that mix letters and digits.
+  value looks random: twelve or more characters with no space that hold a run
+  of eight or more letters and digits that is not a word followed by a number
+  (`a8f3k2j9x7m1`, a hex digest), or that mix both cases with `+`, `/` or
+  `=`. An identifier such as `kv-prod-eastus2` or `release-2026-10` is left
+  alone, and so is a random value whose digits all come at the end.
 - None of the instruction files can load a rule for some files only. A block
   scoped to files with `applies_to` is written for every file, with an
   `Applies to:` line the model reads as advice.

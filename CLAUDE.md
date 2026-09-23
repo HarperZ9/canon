@@ -333,7 +333,8 @@ level up, in the stored row:
   brief says on the command line what it left out, D-138 a URL user part is
   redacted by its shape, not by a length floor, D-139 the Codex budget is
   read where Codex reads its config (`CODEX_HOME`, else `~/.codex`), D-140
-  the scrubber runs in time linear in its input.
+  the scrubber runs in time linear in its input, D-141 a value looks random by
+  its runs, not by its character classes.
 
 Later phases (verifier, migration legs, region installation into an existing
 file, the global SOUL.md and the global GEMINI.md surfaces) aim at this same

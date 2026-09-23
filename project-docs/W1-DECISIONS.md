@@ -531,3 +531,29 @@ fuzz run of 160,000 generated texts gave the same output before and after,
 except for the exponential cases. `tests/test_workspace_scrub_time.py` runs
 the reported inputs and seven long runs in a child process under a timeout,
 so a regression fails the suite instead of hanging it.
+
+## D-141 A value looks random by its runs, not by its character classes
+
+D-136 read any value of twelve or more characters that mixed letters and a
+digit as random, and D-138 read a URL user part as a token at eight
+characters with both cases and a digit or twelve with letters and digits.
+Those are character-class tests. An identifier that carries a version, a
+date or a region (`KEY_VAULT_NAME=kv-prod-eastus2`, `key=feature_flag_v2`,
+`Cookie: _ga=GA1.2.1234567890.1234567890`) was redacted, and so was a
+service account in a URL (`ssh://deploy-bot-2024@git.example.com`,
+`https://GitHubUser42@github.com`). The store refused each such record with
+exit 4. The port rule exempted a port only before `/` or the end, so
+`http://localhost:8080?next=user@example.com` read `8080?next=user` as a
+password.
+
+A value now looks random when a run of eight or more letters and digits in
+it is not a word followed by a number and not a number followed by up to two
+letters (`scrub_shape.random_run`), or, as before, when it mixes both cases
+with `+`, `/` or `=`. A URL user part is a token when, decoded, it holds such
+a run. An AWS resource name is a setting like a number, and a port followed
+by `?` or `#` is a port. On 20,000 random values per shape, a 20-character
+base62 value after a qualified name is missed 3.7% of the time (3.2% under
+the old test, which missed any value with no digit) and a 32-character one
+0.5% (0.3% before); a hex or base36 value of 20 characters or more is missed
+at most 0.3% of the time. A random value whose digits all come at the end reads as a
+word followed by a number and passes: a declared limit.

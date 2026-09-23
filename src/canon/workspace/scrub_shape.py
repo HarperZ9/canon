@@ -4,8 +4,9 @@ The name-based rules match a name that carries a credential word (`password`,
 `token`, `secret`, `key` and the rest) followed by `=` or `:` and a value. The
 name says what the value is for. The value's shape says whether it is one:
 
-- A number (at most 19 digits), a date or a time, a path, or a boolean or null
-  word is a setting after any name: `KEY_COUNT=1000`, `pass_rate=0.95`,
+- A number (at most 19 digits), a date or a time, a path, an AWS resource
+  name (`arn:...`), or a boolean or null word is a setting after any name:
+  `KEY_COUNT=1000`, `pass_rate=0.95`,
   `second pass: 2026-10-01`, `private_key_path: ~/.ssh/id_ed25519`. A path
   starts at `/`, `~/`, `./`, `../`, a drive letter or a variable, and none of
   its segments mixes upper case, lower case and a digit or runs to sixteen
@@ -22,8 +23,11 @@ name says what the value is for. The value's shape says whether it is one:
 - After any other matching name, where a word follows the credential word
   (`token_type`, `KEY_PREFIX`, `session_token_ttl`) or the name is a bare
   `key` or `auth`, the value is a secret only when it looks random: twelve or
-  more characters with no space that mix letters and digits, or mix both
-  cases with `+`, `/` or `=`.
+  more characters with no space that hold a run of eight or more letters and
+  digits that is not a word followed by a number (`a8f3k2j9x7m1`, a hex
+  digest), or that mix both cases with `+`, `/` or `=`. An identifier with a
+  version, date or region digit (`kv-prod-eastus2`, `feature_flag_v2`) does
+  not look random.
 
 A number is a setting after a password word too, so a numeric PIN after
 `password=` passes through: a declared limit.
@@ -31,6 +35,7 @@ A number is a setting after a password word too, so a numeric PIN after
 from __future__ import annotations
 
 import re
+from urllib.parse import unquote
 
 PASSWORD = "password"
 CREDENTIAL = "credential"
@@ -48,9 +53,13 @@ _DATE = re.compile(r"\d{4}[-/]\d{2}[-/]\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)
                    r"(?:Z|[+-]\d{2}:?\d{2})?)?|\d{1,2}:\d{2}(?::\d{2})?")
 _PATH = re.compile(r"(?:~|\.{1,2}|[A-Za-z]:|\$\{?[A-Za-z_][A-Za-z0-9_]*\}?|%[A-Za-z_]\w*%)?"
                    r"[\\/](?:[\w.\-~@+]+[\\/])*[\w.\-~@+]*")
+_ARN = re.compile(r"arn:[a-z0-9-]+:[a-z0-9-]+:[a-z0-9-]*:\d*:\S+")
 _WORD = re.compile(r"[A-Za-z][a-z]{0,9}")
 _URL = re.compile(r"[a-zA-Z][a-zA-Z0-9+.\-]*://")
-_USERNAME = re.compile(r"[a-z]+(?:[._\-][a-z]+)*")
+_RUN = re.compile(r"[A-Za-z0-9]+")
+# A word, a number, or a word followed by a number (`eastus2`, `v2`, `2024`,
+# `GitHubUser42`), or a number followed by up to two letters (`64k`, `1st`).
+_PLAIN_RUN = re.compile(r"[A-Za-z]*\d*|\d+[A-Za-z]{1,2}")
 _BOOLEAN_WORDS = frozenset({"true", "false", "yes", "no", "on", "off", "none", "null", "nil"})
 
 
@@ -89,19 +98,31 @@ def is_path(value: str) -> bool:
 
 
 def ordinary(value: str) -> bool:
-    """A number, a date or time, a path, or a boolean or null word."""
+    """A number, a date or time, a path, an AWS resource name, or a boolean or
+    null word."""
     if value.lower() in _BOOLEAN_WORDS or _DATE.fullmatch(value) or is_path(value):
+        return True
+    if _ARN.fullmatch(value):
         return True
     digits = sum(c.isdigit() for c in value)
     return 0 < digits <= 19 and _NUMBER.fullmatch(value) is not None
 
 
+def random_run(value: str) -> bool:
+    """True when a run of eight or more letters and digits in `value` is not
+    a word followed by a number: digits sit between letters (`a8f3k2j9`,
+    `canaryV4lue`, a hex digest) or before more than two letters (`550e8400`).
+    `kv-prod-eastus2`, `GitHubUser42` and `release-2026-10` have no such run."""
+    return any(len(run) >= 8 and not _PLAIN_RUN.fullmatch(run) for run in _RUN.findall(value))
+
+
 def looks_random(value: str) -> bool:
     """Twelve or more characters with no space, not a URL or an ordinary
-    value, that mix letters and digits, or both cases with `+`, `/` or `=`."""
+    value, that hold a random run (`random_run`), or mix both cases with `+`,
+    `/` or `=`."""
     if len(value) < 12 or re.search(r"\s", value) or _URL.match(value) or ordinary(value):
         return False
-    if re.search(r"[A-Za-z]", value) and re.search(r"\d", value):
+    if random_run(value):
         return True
     return bool(re.search(r"[a-z]", value) and re.search(r"[A-Z]", value)
                 and re.search(r"[+/=]", value))
@@ -119,18 +140,11 @@ def shape_is_secret(value: str, kind: str) -> bool:
 
 
 def userinfo_is_token(value: str) -> bool:
-    """A URL user part with no password is a token when it is shaped like
-    one: upper case, lower case and a digit in eight or more characters,
-    letters and digits in twelve or more, or sixteen or more characters that
-    are not a lower-case name (`first.last`, `github-actions-bot`). A plain
-    name such as `git` or `deploy` is not."""
-    letters, digit = re.search(r"[A-Za-z]", value), re.search(r"\d", value)
-    mixed = re.search(r"[a-z]", value) and re.search(r"[A-Z]", value)
-    if len(value) >= 8 and mixed and digit:
-        return True
-    if len(value) >= 12 and letters and digit:
-        return True
-    return len(value) >= 16 and _USERNAME.fullmatch(value) is None
+    """A URL user part with no password is a token when, with its percent
+    escapes decoded, it holds a random run (`random_run`). A name such as
+    `git`, `first.last`, `deploy-bot-2024`, `GitHubUser42` or an email address
+    is not."""
+    return random_run(unquote(value))
 
 
 def cookie_is_secret(pairs: str) -> bool:

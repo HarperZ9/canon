@@ -175,7 +175,7 @@ RULES: tuple[tuple[str, re.Pattern[str], int, Check], ...] = (
      cookie_value_is_secret),
     ("api-key-header", _p(r"(?i)\b(?:x-api-key|api-key|x-auth-token)\s*[:=]\s*[\"']?([^\s\"',;]{8,})"),
      1, None),
-    ("connection-string", _p(_SCHEME + r"[^\s:/@\"']*:(?!\d+(?:/|$))([^\s@\"']{1,512})@"),
+    ("connection-string", _p(_SCHEME + r"[^\s:/@\"']*:(?!\d+(?:[/?#]|$))([^\s@\"']{1,512})@"),
      1, None),
     ("connection-string", _p(_SCHEME + r"([^\s:/@\"']+)@"), 1, userinfo_is_secret),
     ("url-credential", _p(
