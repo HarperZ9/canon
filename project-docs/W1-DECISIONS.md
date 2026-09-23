@@ -482,3 +482,18 @@ paste or pipe. Beside a written brief they join the result line. `switch
 --to markdown` adds the same line to its warnings. In `--json` both commands
 carry `omitted_blocks` with the count, the ids and the declared reason, and
 a target with an instruction file reports a count of zero.
+
+## D-138 A URL user part is redacted by its shape, not by a length floor
+
+D-131 redacted a URL user part with no password only at sixteen characters or
+more. A fifteen-character token as the user (`https://<token>@github.com`)
+passed through, and an eighteen-character name such as `github-actions-bot`
+was redacted. A length floor got both wrong.
+
+The rule now reads the shape. The password of any `user:password@` is
+redacted whatever it holds, unless it is a placeholder. A user part with no
+password is a token when it mixes both cases with a digit in eight or more
+characters, mixes letters and digits in twelve or more, or runs to sixteen or
+more characters without being a lower-case name. `git`, `deploy`,
+`first.last` and `x-access-token` stay. `scrub.py` and the walkthrough state
+the rule in those terms.

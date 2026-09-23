@@ -50,6 +50,7 @@ _PATH = re.compile(r"(?:~|\.{1,2}|[A-Za-z]:|\$\{?[A-Za-z_][A-Za-z0-9_]*\}?|%[A-Z
                    r"[\\/](?:[\w.\-~@+]+[\\/]?)*")
 _WORD = re.compile(r"[A-Za-z][a-z]{0,9}")
 _URL = re.compile(r"[a-zA-Z][a-zA-Z0-9+.\-]*://")
+_USERNAME = re.compile(r"[a-z]+(?:[._\-][a-z]+)*")
 _BOOLEAN_WORDS = frozenset({"true", "false", "yes", "no", "on", "off", "none", "null", "nil"})
 
 
@@ -115,6 +116,21 @@ def shape_is_secret(value: str, kind: str) -> bool:
     if kind == CREDENTIAL:
         return _WORD.fullmatch(value) is None
     return looks_random(value)
+
+
+def userinfo_is_token(value: str) -> bool:
+    """A URL user part with no password is a token when it is shaped like
+    one: upper case, lower case and a digit in eight or more characters,
+    letters and digits in twelve or more, or sixteen or more characters that
+    are not a lower-case name (`first.last`, `github-actions-bot`). A plain
+    name such as `git` or `deploy` is not."""
+    letters, digit = re.search(r"[A-Za-z]", value), re.search(r"\d", value)
+    mixed = re.search(r"[a-z]", value) and re.search(r"[A-Z]", value)
+    if len(value) >= 8 and mixed and digit:
+        return True
+    if len(value) >= 12 and letters and digit:
+        return True
+    return len(value) >= 16 and _USERNAME.fullmatch(value) is None
 
 
 def cookie_is_secret(pairs: str) -> bool:

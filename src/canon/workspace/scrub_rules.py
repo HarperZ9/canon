@@ -20,7 +20,12 @@ from __future__ import annotations
 import re
 from typing import Callable
 
-from canon.workspace.scrub_shape import cookie_is_secret, name_class, shape_is_secret
+from canon.workspace.scrub_shape import (
+    cookie_is_secret,
+    name_class,
+    shape_is_secret,
+    userinfo_is_token,
+)
 
 REDACTED = "[REDACTED:{code}]"
 MARKER_RE = re.compile(r"\[REDACTED:[a-z0-9-]+\]")
@@ -109,6 +114,13 @@ def cookie_value_is_secret(match: re.Match[str], group: int) -> bool:
     return cookie_is_secret(match.group(group))
 
 
+def userinfo_is_secret(match: re.Match[str], group: int) -> bool:
+    """A URL user part with no password, unless it is a placeholder or a
+    plain user name (`scrub_shape.userinfo_is_token`)."""
+    value = match.group(group)
+    return not _PLACEHOLDER.match(value) and userinfo_is_token(value)
+
+
 def _p(pattern: str, flags: int = 0) -> re.Pattern[str]:
     return re.compile(pattern, flags)
 
@@ -148,7 +160,8 @@ RULES: tuple[tuple[str, re.Pattern[str], int, Check], ...] = (
      1, None),
     ("connection-string", _p(r"\b[a-zA-Z][a-zA-Z0-9+.\-]*://[^\s:/@\"']*:(?!\d+(?:/|$))([^\s@\"']+)@"),
      1, None),
-    ("connection-string", _p(r"\b[a-zA-Z][a-zA-Z0-9+.\-]*://([^\s:/@\"']{16,})@"), 1, None),
+    ("connection-string", _p(r"\b[a-zA-Z][a-zA-Z0-9+.\-]*://([^\s:/@\"']+)@"), 1,
+     userinfo_is_secret),
     ("url-credential", _p(
         r"(?i)[?&](?:access_token|token|api_key|apikey|key|secret|sig|signature|password|auth|"
         r"code|client_secret|x-amz-signature|x-amz-credential|x-amz-security-token)="

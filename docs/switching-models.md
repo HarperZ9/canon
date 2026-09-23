@@ -105,6 +105,13 @@ secret-named assignments in any case (`DB_PASS=`, `aws_secret_access_key = `)
 are replaced with `[REDACTED:<rule>]`. The store also refuses any record that
 still looks like one.
 
+In a URL, the password in `https://user:password@host` is always redacted. A
+user part with no password (`https://NAME@host`) is redacted when it is shaped
+like a token: upper case, lower case and a digit in eight or more characters,
+letters and digits in twelve or more, or sixteen or more characters that are
+not a lower-case name such as `first.last`. A plain name such as `git@` or
+`deploy@`, a port, and a placeholder such as `${TOKEN}@` stay.
+
 Each importer lists what it drops (thinking blocks, tool output, system
 entries and more) and counts it in its report. A session with content the
 importer has not seen is refused until you declare that drop with
