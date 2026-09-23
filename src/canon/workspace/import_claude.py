@@ -96,7 +96,7 @@ def _entry(obj: dict, line: int, col: Collector, ex: Extraction) -> None:
         return
     if kind == "summary":
         if isinstance(obj.get("summary"), str) and obj["summary"].strip():
-            col.summary = (line, obj["summary"])
+            col.set_summary(line, obj["summary"])
         return
     if kind not in ("user", "assistant"):
         col.ledger.unknown(f"entry type {kind!r}", line)
@@ -131,7 +131,7 @@ def extract(source: Source, identity: ProjectIdentity, *,
     if source.truncated_tail:
         ledger.drop("truncated-tail")
     ex = Extraction([], ledger)
-    col = Collector(identity, ledger)
+    col = Collector(identity, ledger, hits=ex.hits)
     for line, obj, _raw in source.lines:
         _entry(obj, line, col, ex)
     ex.candidates = col.finish()

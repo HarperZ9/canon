@@ -266,8 +266,9 @@ level up, in the stored row:
   `canon-workspace-brief`, through the allow-list, refusing a file Codex would
   truncate; `hosts.py` is the text of a file `--create` makes.
   `src/canon/cli_handoff.py` adds `canon handoff` and `canon switch`.
-- `src/canon/workspace/scrub.py` redacts secret-shaped values by rule and
-  counts hits (no values, no digests); the store refuses a record that still
+- `src/canon/workspace/scrub.py` redacts secret-shaped values by the rules in
+  `scrub_rules.py` and counts hits (no values, no digests); importers scrub each
+  source string whole before extraction; the store refuses a record that still
   matches (`SecretRefused`), and `brief.refuse_secrets` guards the brief and the
   switch region. `extract.py` holds the fixed text rules; `import_common.py` the
   JSONL reader, the declared-loss `Ledger`, the project check and the
@@ -315,7 +316,8 @@ level up, in the stored row:
   re-read before write, four-character minimum for name-based secret rules),
   D-129 promote refuses a global id clash and accept refuses a stale base,
   D-130 a non-default port splits, a nonce keys a repository with no remote,
-  and a new checkout is announced.
+  and a new checkout is announced, D-131 the scrubber covers the everyday
+  forms, scrubs before extraction, and anchors placeholders.
 
 Later phases (verifier, migration legs, region installation into an existing
 file, the global SOUL.md and the global GEMINI.md surfaces) aim at this same

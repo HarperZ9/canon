@@ -162,7 +162,7 @@ def extract(source: Source, identity: ProjectIdentity, *,
     if source.truncated_tail:
         ledger.drop("truncated-tail")
     ex = Extraction([], ledger)
-    col = Collector(identity, ledger)
+    col = Collector(identity, ledger, hits=ex.hits)
     for line, obj, _raw in source.lines:
         _line(obj, line, col, ex)
     ex.candidates = col.finish()

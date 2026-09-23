@@ -1,0 +1,142 @@
+"""scrub_rules.py -- the shapes the secret scrubber recognises, in the order
+it applies them.
+
+Each rule is (code, pattern, group, check). `group` holds the secret (0 means
+the whole match). `check` is None for a shape that is a secret by itself (a
+provider key format, a private key block, a webhook URL) and a function for a
+shape that is a secret only when its value looks like one (a value after a
+secret-named key). The name-based rules skip a value that is a placeholder, a
+call or attribute access, a dotted name, or a word such as `true` or
+`string`, so code and prose that mention a password are left alone.
+
+Provider prefixes carry short minimum lengths on purpose: a token cut short by
+a line wrap or a length cap is still a secret, and the prefix alone carries
+almost no false-positive risk.
+"""
+from __future__ import annotations
+
+import re
+from typing import Callable
+
+REDACTED = "[REDACTED:{code}]"
+MARKER_RE = re.compile(r"\[REDACTED:[a-z0-9-]+\]")
+_SECRET_WORD = r"(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|PASSPHRASE|PASS|PWD|CREDENTIALS?)"
+# A placeholder is the WHOLE value, never a prefix of it, so a value such as
+# `[REDACTED:aws-access-key]:<secret>` or `$2b$12$...` is not skipped.
+_PLACEHOLDER = re.compile(
+    r"^(?:<[^<>]*>|\$\{[A-Za-z_][A-Za-z0-9_]*(?::?[-=?+][^{}]*)?\}|(?-i:\$[A-Z_][A-Z0-9_]*)|"
+    r"%[A-Za-z_][A-Za-z0-9_]*%|\{\{[^{}]*\}\}|\{[A-Za-z_][A-Za-z0-9_]*\}|x+|\*+|\.+|"
+    r"changeme|your[_-][A-Za-z0-9_-]*|\[REDACTED:[a-z0-9-]+\])$", re.IGNORECASE)
+_NOT_SECRET = frozenset({
+    "true", "false", "none", "null", "nil", "yes", "no", "on", "off", "empty",
+    "required", "optional", "undefined", "string", "str", "number", "int",
+    "integer", "float", "bool", "boolean", "bytes", "object", "any", "unknown",
+    "lambda",
+})
+_DOTTED = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+$")
+_WEAK_WORDS = frozenset({"key", "auth"})
+_SEGMENT_WORDS = ("key", "token", "secret", "password", "passwd", "pwd", "pass",
+                  "passphrase", "credential", "credentials", "apikey", "auth")
+# A cut token is still a secret; a lower-case word after the prefix (hf_transfer,
+# npm_lifecycle_event) is a name, unless it is as long as a real token.
+_RANDOM_TAIL = r"(?:[A-Za-z0-9]{30,}|(?=[A-Za-z0-9]*[A-Z0-9])[A-Za-z0-9]{8,})(?![A-Za-z0-9_])"
+_VALUE = r"(\"[^\"\n]{4,}\"|'[^'\n]{4,}'|<[^<>\n]*>|[^\s\"'`,;(){}\[\]]{4,})"
+
+
+def beyond_markers(value: str) -> str:
+    """What is left of a value once earlier markers and the punctuation around
+    them are removed; empty when the value is only an earlier redaction."""
+    return MARKER_RE.sub("", value).strip(" .,;:!?\"'()[]{}<>")
+
+
+def value_is_secret(match: re.Match[str], group: int) -> bool:
+    """A value after a secret-named key is a secret unless it is a
+    placeholder, a code reference or an ordinary word."""
+    raw = match.group(group)
+    quoted = raw[:1] in "\"'" and raw[-1:] == raw[:1]
+    value = raw[1:-1] if quoted else raw
+    if _PLACEHOLDER.match(value.strip()):
+        return False
+    if MARKER_RE.search(value):
+        return bool(beyond_markers(value))  # a marker plus more: the rest is secret
+    if value.lower() in _NOT_SECRET:
+        return False
+    if not quoted:
+        after = match.string[match.end(group):match.end(group) + 1]
+        if after in ("(", "[", ".") or _DOTTED.match(value):
+            return False
+    return True
+
+
+def _named_value(match: re.Match[str], group: int) -> bool:
+    """The lower-case name rule: a weak word (`key`, `auth`) alone needs a
+    value that looks random, so `key=lambda` or `sort_key: name` stay prose."""
+    if not value_is_secret(match, group):
+        return False
+    segments = re.split(r"[_.\-]", match.group(1).lower())
+    if any(s in _SEGMENT_WORDS and s not in _WEAK_WORDS for s in segments):
+        return True
+    value = match.group(group).strip("\"'")
+    return len(value) >= 12 and re.search(r"[A-Za-z]", value) is not None \
+        and re.search(r"[0-9]", value) is not None
+
+
+def _p(pattern: str, flags: int = 0) -> re.Pattern[str]:
+    return re.compile(pattern, flags)
+
+
+Check = Callable[[re.Match[str], int], bool] | None
+RULES: tuple[tuple[str, re.Pattern[str], int, Check], ...] = (
+    ("private-key", _p(
+        r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----"
+        r"(?:.*?-----END [A-Z0-9 ]*PRIVATE KEY(?: BLOCK)?-----|.*\Z)", re.DOTALL), 0, None),
+    ("private-key", _p(r"PuTTY-User-Key-File-\d+:.*?(?:Private-MAC:[^\n]*|\Z)", re.DOTALL), 0, None),
+    ("anthropic-key", _p(r"\bsk-ant-[A-Za-z0-9_\-]{4,}"), 0, None),
+    ("openai-key", _p(r"\bsk-(?:proj|svcacct|admin)-[A-Za-z0-9_\-]{4,}|\bsk-[A-Za-z0-9]{20,}"), 0, None),
+    ("github-token", _p(r"\b(?:gh[pousr]_[A-Za-z0-9]{8,}|github_pat_[A-Za-z0-9_]{8,})"), 0, None),
+    ("gitlab-token", _p(r"\bglpat-[A-Za-z0-9_\-]{8,}"), 0, None),
+    ("slack-token", _p(r"\bx(?:ox[abposr]|app)-[A-Za-z0-9\-]{8,}"), 0, None),
+    ("slack-webhook", _p(r"https://hooks\.slack\.com/services/\S+"), 0, None),
+    ("discord-webhook", _p(r"https://(?:canary\.|ptb\.)?discord(?:app)?\.com/api/webhooks/\S+"), 0, None),
+    ("aws-access-key", _p(r"\b(?:AKIA|ASIA)[0-9A-Z]{12,}"), 0, None),
+    ("google-api-key", _p(r"\bAIza[0-9A-Za-z_\-]{20,}|\bGOCSPX-[A-Za-z0-9_\-]{8,}"
+                          r"|\bya29\.[A-Za-z0-9_\-]{8,}"), 0, None),
+    ("stripe-key", _p(r"\b(?:sk|rk)_(?:live|test)_[0-9A-Za-z]{8,}|\bwhsec_[A-Za-z0-9]{8,}"), 0, None),
+    ("huggingface-token", _p(r"\bhf_" + _RANDOM_TAIL), 0, None),
+    ("npm-token", _p(r"\bnpm_" + _RANDOM_TAIL), 0, None),
+    ("pypi-token", _p(r"\bpypi-AgE[A-Za-z0-9_\-]{8,}"), 0, None),
+    ("provider-token", _p(
+        r"\bdo[por]_v1_[a-f0-9]{8,}|\bshp(?:at|ca|pa|ss)_[a-fA-F0-9]{8,}"
+        r"|\bSG\.[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}|\bSK[0-9a-fA-F]{32}\b"
+        r"|\b\d{8,10}:AA[A-Za-z0-9_\-]{30,}"), 0, None),
+    ("jwt", _p(r"\beyJ[A-Za-z0-9_\-]{8,}\.eyJ[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}"), 0, None),
+    ("bearer-header", _p(r"(?i)\bbearer\s+([A-Za-z0-9._~+/\-]{8,}=*)"), 1, None),
+    ("auth-header", _p(r"(?i)\bauthorization\s*:\s*(?:basic|token|digest)\s+([A-Za-z0-9._~+/=\-]{8,})"),
+     1, None),
+    ("cookie-header", _p(r"(?i)\b(?:set-)?cookie\s*:\s*([A-Za-z0-9_.\-]+=[^\s;\"']*"
+                         r"(?:;\s*[A-Za-z0-9_.\-]+(?:=[^\s;\"']*)?)*)"), 1, None),
+    ("api-key-header", _p(r"(?i)\b(?:x-api-key|api-key|x-auth-token)\s*[:=]\s*[\"']?([^\s\"',;]{8,})"),
+     1, None),
+    ("connection-string", _p(r"\b[a-zA-Z][a-zA-Z0-9+.\-]*://[^\s:/@\"']*:(?!\d+(?:/|$))([^\s@\"']+)@"),
+     1, None),
+    ("connection-string", _p(r"\b[a-zA-Z][a-zA-Z0-9+.\-]*://([^\s:/@\"']{16,})@"), 1, None),
+    ("url-credential", _p(
+        r"(?i)[?&](?:access_token|token|api_key|apikey|key|secret|sig|signature|password|auth|"
+        r"code|client_secret|x-amz-signature|x-amz-credential|x-amz-security-token)="
+        r"([^&\s#\"']{6,})"), 1, None),
+    ("azure-key", _p(r"(?i)\b(?:AccountKey|SharedAccessSignature|SharedAccessKey)=([^;\s\"']{8,})"),
+     1, None),
+    ("npmrc-token", _p(r":_(?:authToken|auth|password)=([^\s\"']{8,})"), 1, None),
+    ("json-secret", _p(
+        r"(?i)\\?\"[a-z0-9_\-]*(?:api[_-]?key|token|secret|password|passwd|credential)"
+        r"[a-z0-9_\-]*\\?\"\s*:\s*\\?\"([^\"\\\n]{4,})\\?\""), 1, None),
+    ("password-field", _p(
+        r"(?i)(?<![A-Za-z0-9])(?:[a-z0-9]+[_.\-])*(?:password|passwd|pwd|pass|passphrase)"
+        r"\s*[:=]\s*" + _VALUE), 1, value_is_secret),
+    ("env-assignment", _p(
+        r"\b(?:[A-Z][A-Z0-9_]*)?" + _SECRET_WORD + r"[A-Z0-9_]*\s*[=:]\s*"
+        r"(\"[^\"\n]{4,}\"|'[^'\n]{4,}'|<[^<>\n]*>|[^\s\"']{4,})"), 1, value_is_secret),
+    ("env-assignment", _p(
+        r"(?i)(?<![A-Za-z0-9_.\-])(?<!\$\{)((?:[a-z0-9]+[_.\-])*(?:" + "|".join(_SEGMENT_WORDS) +
+        r")(?:[_.\-][a-z0-9]+)*)\s*[=:]\s*" + _VALUE), 2, _named_value),
+)

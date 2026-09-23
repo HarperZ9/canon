@@ -321,3 +321,28 @@ notice. `git config canon.project <name>` names a project explicitly and wins
 over the remote, so a split survives every command without a flag. Writing the
 nonce is the one place identity derivation writes a file; a git directory canon
 cannot write falls back to the path key.
+
+## D-131 The scrubber covers the everyday forms, runs before extraction, and anchors placeholders
+
+The first rule set named its categories correctly and missed their everyday
+spellings: `db_password=`, `password: x` in YAML, a quoted password, a
+lower-case `aws_secret_access_key` from `~/.aws/credentials`, `DB_PASS=`, a PGP
+key block, a URL password holding `/`, a token as a URL's user, escaped JSON.
+Common carriers had no rule at all (basic auth, cookies, URL query tokens,
+Azure keys, PyPI tokens, webhooks, `.npmrc`). An end-to-end run found each one
+in the store and in all five rendered files. The rules now cover those forms,
+and a new test runs every form through import, accept and switch and asserts
+on the rendered files.
+
+A broader name rule risks redacting code. The name-based rules therefore skip
+a value that reads as code or as a type name, and a name whose only secret
+segment is `key` or `auth` needs a value that looks random. A false positive
+here is a redaction, which loses a word; a false negative publishes a secret,
+so where the two conflict the rule redacts.
+
+Scrubbing ran on the captured fragment, so a 200-character cap or a line break
+could cut a token below its rule's minimum and store most of it. Each source
+string is now scrubbed whole before extraction, and the prefix rules take short
+minimums so a cut token is still caught. A placeholder test that matched a
+prefix skipped `$2b$12$...` and a value that joined an earlier redaction to
+more text; placeholders are now matched against the whole value.

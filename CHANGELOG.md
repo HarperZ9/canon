@@ -53,9 +53,11 @@ and the version is unchanged.
   refuses the import unless declared with `--drop-type`. A source that names a
   different repository or working directory is refused unless
   `--accept-foreign-source` is given.
-- Adds a secret scrubber in front of every import. Provider keys, tokens, JWTs,
-  private keys, bearer and API-key headers, connection-string passwords and
-  secret-named assignments are replaced with `[REDACTED:<rule>]`. The store
+- Adds a secret scrubber in front of every import. It scrubs each source string
+  whole before extraction. Provider keys and tokens, JWTs, PEM, PGP and PuTTY
+  private keys, webhook URLs, bearer, basic and API-key headers, cookies,
+  passwords and tokens in URLs, Azure and `.npmrc` keys, password fields and
+  secret-named assignments in any case are replaced with `[REDACTED:<rule>]`. The store
   also refuses any record that still matches, including one typed by hand, and
   a brief or instruction region that would carry one is refused.
 - Adds three surfaces to the write allow-list: `GEMINI.md`,
@@ -102,7 +104,8 @@ Limits:
   recognise rather than guess.
 - The scrubber recognises secrets by shape. A secret with no recognisable shape
   passes through, a value shorter than four characters after a secret-named key
-  is not redacted, and email addresses are not redacted.
+  is not redacted, a value that reads as code or a type name after such a key
+  is left alone, and email addresses are not redacted.
 - `switch` re-reads the file just before writing and refuses if it changed; the
   short window between that read and the write is not locked.
 - Gemini CLI, Cursor, ChatGPT and Claude web exports have no importer yet.

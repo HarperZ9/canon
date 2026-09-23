@@ -337,16 +337,31 @@ line anywhere else refuses the import.
 
 ### Secrets
 
-Every string that becomes part of a proposal passes through
-`canon.workspace.scrub` first. It redacts provider key formats (Anthropic,
-OpenAI, GitHub, GitLab, Slack, AWS, Google, Stripe, Hugging Face, npm), JSON web
-tokens, private key blocks, bearer and API-key headers, the password in a
-connection URL, `password=` fields, JSON fields named like a secret, and
-`NAME=value` assignments whose name says key, token, secret, password or
-credential (for these name-based rules the value must be at least four
-characters), and replaces each with `[REDACTED:<rule>]`. The report counts the
-hits by rule; it never stores the value or a digest of it. Two more checks sit
-behind the scrubber: the store refuses any record that still matches
+Every source string an importer reads (message text, plan steps, the session
+summary) passes through `canon.workspace.scrub` whole, before any extraction
+rule sees it, so a 200-character capture cap or a line break cannot cut a
+secret below the length its rule needs. Every candidate is scrubbed again after
+extraction. The rules (`scrub_rules.py`) redact provider key formats
+(Anthropic, OpenAI, GitHub, GitLab, Slack, AWS, Google, Stripe, Hugging Face,
+npm, PyPI, DigitalOcean, Shopify, SendGrid, Twilio, Telegram), with short
+minimum lengths after the prefix so a cut token is still caught; JSON web
+tokens; PEM, PGP and PuTTY private keys; Slack and Discord webhook URLs;
+bearer, basic, token and API-key headers and cookies; a password or a bare
+token in a URL's user part and a token-named URL query parameter; Azure account
+keys and `.npmrc` tokens; JSON fields named like a secret, also inside escaped
+JSON; password fields in any case after `=` or `:` (`db_password=`,
+`password: x`, `password = "x"`); and assignments whose name has a key, token,
+secret, pass, password or credential segment, in any case
+(`aws_secret_access_key = ...`, `DB_PASS=`). A name-based value must be at
+least four characters, and one that reads as code (a call, an index, an
+attribute, a dotted name, a type name such as `string`) or as a placeholder
+(`<...>`, `${VAR}`, an all-caps `$VAR`, `%VAR%`, `{{...}}`) is left alone; a
+placeholder has to be the whole value, so `$2b$12$...` or a value that joins an
+earlier redaction to more text is still redacted. A name whose only secret
+segment is `key` or `auth` needs a value that looks random, so
+`key=lambda r: r.id` stays as written. Each match becomes
+`[REDACTED:<rule>]`. The report counts the hits by rule; it never stores the
+value or a digest of it. Two more checks sit behind the scrubber: the store refuses any record that still matches
 (`secret_quarantine`), and a brief or an instruction region that would carry a
 match is refused before it is written. The control test plants a canary for
 each rule in both fixtures and asserts none reaches the store files, the

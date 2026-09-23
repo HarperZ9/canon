@@ -53,7 +53,7 @@ def _refuse_early(identity: ProjectIdentity, extraction: Extraction,
 
 def build_proposals(store: ProjectStore, extraction: Extraction, source: Source, *,
                     importer: str) -> tuple[list[tuple[Record, dict]], dict[str, int]]:
-    hits: dict[str, int] = {}
+    hits: dict[str, int] = dict(extraction.hits)
     key = extraction.session_id or source.name
     raw = {n: line for n, _obj, line in source.lines}
     slots: dict[tuple[int, str], int] = {}

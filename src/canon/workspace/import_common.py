@@ -9,8 +9,10 @@ rules hold for every importer:
    never seen) is an undeclared loss and refuses the import, unless the person
    running it declares that drop by name with `--drop-type`, which the report
    records.
-2. Scrubbing. Every string that becomes part of a record passes through the
-   secret scrubber first, and the store refuses anything that still matches.
+2. Scrubbing. Every source string is scrubbed whole before any extraction rule
+   reads it, so a length cap or a line break cannot cut a secret below the
+   length its rule needs. Every candidate is scrubbed again after extraction,
+   and the store refuses anything that still matches.
 3. Project check. When the source names its repository or working directory,
    it must be this project, or the person must say `--accept-foreign-source`.
 4. Proposals only. Imported records are written as proposed rows with an origin
@@ -35,6 +37,7 @@ from canon.workspace.extract import (
     plan_candidates,
     text_candidates,
 )
+from canon.workspace.scrub import merge_hits, scrub
 from canon.workspace.identity import (
     METHOD_REMOTE,
     ProjectIdentity,
@@ -141,6 +144,7 @@ class Extraction:
     session_id: str | None = None
     repository_url: str | None = None
     cwds: list[str] = field(default_factory=list)
+    hits: dict[str, int] = field(default_factory=dict)
 
 
 def project_check(identity: ProjectIdentity, extraction: Extraction) -> dict:
@@ -199,8 +203,16 @@ class Collector:
     summary: tuple | None = None
     first_prompt: tuple | None = None
     branch: str | None = None
+    hits: dict = field(default_factory=dict)
+
+    def clean(self, text: str) -> str:
+        """`text` scrubbed whole, its hits counted for the report."""
+        result = scrub(text)
+        merge_hits(self.hits, result.hits)
+        return result.text
 
     def add_text(self, text: str, line: int, *, role: str) -> None:
+        text = self.clean(text)
         if role == "user" and self.first_prompt is None and text.strip():
             self.first_prompt = (line, text.strip().splitlines()[0])
         found = text_candidates(text, line, self.seen)
@@ -210,7 +222,10 @@ class Collector:
             self.ledger.drop("unmatched-text")
 
     def add_plan(self, line: int, steps: list) -> None:
-        self.plans.append((line, steps))
+        self.plans.append((line, [(self.clean(str(text)), status) for text, status in steps]))
+
+    def set_summary(self, line: int, text: str) -> None:
+        self.summary = (line, self.clean(text))
 
     def add_edit(self, path: str) -> None:
         self.edits[path] = self.edits.get(path, 0) + 1

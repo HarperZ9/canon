@@ -92,10 +92,11 @@ later) and proposes the session's focus, the open steps of its last plan,
 approaches like "I tried X but Y". Every proposal names the file and line it
 came from, and nothing reaches a brief until you accept it.
 
-Before anything is stored, API keys and tokens, private keys, bearer headers,
-connection-string passwords and secret-named assignments are replaced with
-`[REDACTED:<rule>]`. The store also refuses any record that still looks like
-one.
+Before anything is stored, API keys and tokens, private keys, auth headers and
+cookies, passwords and tokens in URLs, password fields in config files, and
+secret-named assignments in any case (`DB_PASS=`, `aws_secret_access_key = `)
+are replaced with `[REDACTED:<rule>]`. The store also refuses any record that
+still looks like one.
 
 Each importer lists what it drops (thinking blocks, tool output, system
 entries and more) and counts it in its report. A session with content the
@@ -156,7 +157,9 @@ edits back without switching.
   histories have no importer yet.
 - The scrubber recognises secrets by their shape. A secret with no recognisable
   shape passes through, a value shorter than four characters after a
-  secret-named key is not redacted, and email addresses are not redacted.
+  secret-named key is not redacted, a value that reads as code (`get_token()`,
+  `self.password`, `string`) after such a key is left alone, and email
+  addresses are not redacted.
 - None of the instruction files can load a rule for some files only. A block
   scoped to files with `applies_to` is written for every file, with an
   `Applies to:` line the model reads as advice.
