@@ -39,9 +39,14 @@ and the version is unchanged.
   with a `Left out` report; `--receipt` writes a `canon.handoff-receipt/v1`
   receipt with digests of the brief and of the records it came from.
 - Adds `canon switch --to <target>`, which writes the target's instruction file
-  region with the project's blocks and the brief, through the write allow-list
-  and only between the canon markers. `--dry-run` writes nothing, `--create`
-  makes a missing file, and a file Codex would truncate is refused.
+  region with the project's blocks and the brief, through the write allow-list,
+  through no symlink or junction, and only between the canon markers.
+  `--dry-run` writes nothing, `--create` makes a missing file, `--receipt`
+  writes the receipt, a file Codex would truncate is refused (at the limit
+  Codex's own config sets), and a switch to Codex beside an
+  `AGENTS.override.md` is refused. `@path` tokens in the brief are quoted for
+  hosts that would import them, and the drift check and reconcile keep the
+  brief.
 - Adds `canon workspace import --from claude-code|codex <file>`. It reads a
   Claude Code session or a Codex rollout (0.32 or later) and proposes focus,
   work items (from the last plan tool call and `TODO` markers), decisions and
@@ -103,8 +108,10 @@ Limits:
   `git config canon.project <name>` splits them.
 - The four storage adapters still hold only the five original kinds. The
   workspace-state kinds live in the per-project store.
-- The per-target budgets come from each host's public documentation, read on
-  2026-09-23. Hosts change; the numbers are defaults and can be overridden.
+- The brief budgets are canon's defaults and can be overridden with
+  `--budget-bytes` and `--budget-lines`. The host file limits come from each
+  host's public documentation, read on 2026-09-23, and hosts change; the Codex
+  limit follows `project_doc_max_bytes` in the Codex config.
 - The brief lists what was recorded. It does not know about work that happened
   in a session nobody recorded or imported.
 - The importers use fixed text patterns. A decision or task phrased another

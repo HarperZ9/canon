@@ -19,8 +19,9 @@ not an edit, whichever checkout wrote it or whichever branch restored it.
 `owners` names the project (or `global`) each rendered block belongs to, so an
 edit of a block another project owns is never proposed as this project's.
 `seq` numbers renders, so a decision on an edit is tied to the render it was
-made against. The interior is canon's own render of records that already
-passed the secret checks.
+made against. `receipt` is the switch receipt for that render, which names
+every record the brief left out. The interior is canon's own render of records
+that already passed the secret checks.
 """
 from __future__ import annotations
 
@@ -84,15 +85,18 @@ def known_renders(store: ProjectStore, relative_path: str) -> list[str]:
 
 
 def record_render_unlocked(store: ProjectStore, relative_path: str, target: str,
-                           interior: str, *, checkout: str, owners: dict) -> None:
-    """Record a render. The caller holds the project lock, so the file write
-    and this ledger write happen under one lock."""
+                           interior: str, *, checkout: str, owners: dict,
+                           receipt: dict | None = None) -> None:
+    """Record a render and, when given, the switch receipt that lists what the
+    brief left out. The caller holds the project lock, so the file write and
+    this ledger write happen under one lock."""
     store.ensure_manifest()
     data = _load(store)
     data["seq"] = int(data["seq"]) + 1
     data["surfaces"][f"{checkout}:{relative_path}"] = {
         "target": target, "seq": data["seq"], "sha256": _sha(interior),
-        "interior": interior, "owners": dict(sorted(owners.items()))}
+        "interior": interior, "owners": dict(sorted(owners.items())),
+        "receipt": receipt}
     history = [h for h in data["history"].get(relative_path, []) if h["interior"] != interior]
     history.append({"sha256": _sha(interior), "interior": interior})
     data["history"][relative_path] = history[-HISTORY_LIMIT:]
@@ -101,7 +105,7 @@ def record_render_unlocked(store: ProjectStore, relative_path: str, target: str,
 
 
 def record_render(store: ProjectStore, relative_path: str, target: str, interior: str,
-                  *, checkout: str, owners: dict) -> None:
+                  *, checkout: str, owners: dict, receipt: dict | None = None) -> None:
     with store.locked():
         record_render_unlocked(store, relative_path, target, interior,
-                               checkout=checkout, owners=owners)
+                               checkout=checkout, owners=owners, receipt=receipt)

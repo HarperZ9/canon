@@ -74,11 +74,12 @@ def _tag(project_id: str | None, own: str) -> str:
     return " [global]" if project_id is None else f" [from {project_id}]"
 
 
-def _exclusion_reason(rec: Record) -> str | None:
+def _exclusion_reason(rec: Record, has_file: bool) -> str | None:
     if not is_current(rec):
         return "not current"
     if rec.kind == KIND_PERSONALITY_BLOCK:
-        return "instruction block: rendered in the instruction region"
+        return ("instruction block: rendered in the instruction region" if has_file
+                else "instruction block: the markdown target has no instruction file")
     if rec.kind not in _SECTION_OF:
         return "not a brief kind"
     if rec.kind == KIND_WORK_ITEM and rec.data.get("status") not in OPEN_WORK_STATUSES:
@@ -148,14 +149,15 @@ _FORMAT = {
 }
 
 
-def collect(pool: list[TaggedRecord], own: str
+def collect(pool: list[TaggedRecord], own: str, *, has_file: bool = True
             ) -> tuple[list[BriefItem], list[Exclusion]]:
     """The brief items in priority order, and every pool record excluded by
-    rule with the rule that excluded it."""
+    rule with the rule that excluded it. `has_file` is False for a target with
+    no instruction file, where an instruction block goes nowhere."""
     kept: list[TaggedRecord] = []
     excluded: list[Exclusion] = []
     for item in pool:
-        reason = _exclusion_reason(item.record)
+        reason = _exclusion_reason(item.record, has_file)
         if reason is None:
             kept.append(item)
         else:

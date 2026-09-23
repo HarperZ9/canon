@@ -33,6 +33,7 @@ _FAILURE_EXIT_CODES = {
     "edits_pending": EX_CONFLICT,
     "undeclared_loss": EX_GATE,
     "unsupported_format": EX_UNSUPPORTED,
+    "shadowed": EX_CONFLICT,
 }
 
 

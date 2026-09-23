@@ -396,3 +396,33 @@ project's record, and accepting it blocked every later `--include-project`
 switch. The ledger records each rendered block's owner, and such an edit is
 kept in the note, naming the owner. A retired copy of a block no longer counts
 in the collision check.
+
+## D-134 switch checks the host as it is, and the brief is measured as it lands
+
+The allow-list check was lexical, so a `.cursor` junction or a `GEMINI.md`
+symlink carried the write outside the repository, and a `CLAUDE.md` linked to
+`AGENTS.md` let one target bypass the other's size refusal. Every directory on
+the way to a surface is now checked for a link, at plan time and again at write
+time, and a created file is opened in exclusive mode. The batch writer gets
+the same check where its root exists.
+
+Codex reads `AGENTS.override.md` instead of `AGENTS.md`, so a switch that
+writes `AGENTS.md` beside an override is refused rather than reported as a
+success Codex never reads. Codex applies one budget to all AGENTS files from
+the root down, and a user can raise it; canon reads the budget from the Codex
+config and names a nested file the chain would cut.
+
+Claude Code, Gemini CLI and Cursor read `@path` as an import or as context,
+bare names included. The brief was never checked, so a work item that
+mentioned `@config/prod.yaml` turned into a file import. Brief lines for those
+hosts now put every such token in a code span, which the hosts read as text,
+and the detector matches the hosts' parsers and skips code spans.
+
+A switched surface always read as drift, and reconcile then erased the brief,
+because neither knew the reserved block. Both now carry it through. The brief
+was fitted without its sentinel line, so the block that landed overran its
+budget; it is now measured as it lands and the receipt names the block's
+digest. The footer promised a receipt no switch wrote; switch now writes one
+on request and keeps the last one, and the footer names the command that lists
+every left-out record. A CRLF host got a mixed file, and a byte-order mark hid
+the begin marker; both now read as the host wrote them.

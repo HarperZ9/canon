@@ -49,11 +49,14 @@ Every stored record names its project. A read that finds another project's
 record in this project's file fails rather than mixing the two, and another
 project's records appear in a brief only when you name that project with
 `--include-project`. Promoting a record to global scope, where every project
-reads it, is an explicit, logged command:
+reads it, is an explicit, logged command; copy the id from
+`canon workspace list`:
 
 ```bash
-canon workspace promote decision-7 --reason "house rule for every repository"
+canon workspace promote <record-id> --reason "house rule for every repository"
 ```
+
+A promotion is refused when global already holds a record with that id.
 
 If you rename the remote, its id changes. The old records stay in the store;
 copy them over with
@@ -82,9 +85,13 @@ an option with no recorded reason is the one the next agent tries again.
 canon workspace import --from claude-code path/to/session.jsonl
 canon workspace import --from codex path/to/rollout.jsonl
 canon workspace list --proposed
-canon workspace accept imp-task-4de430285521
-canon workspace reject imp-decision-8a1f0c2b9e77 --reason "quoted, not decided"
+canon workspace accept <proposal-id>
+canon workspace reject <proposal-id> --reason "quoted, not decided"
 ```
+
+Proposal ids are digests, so copy them from `canon workspace list --proposed`.
+`accept` refuses a proposal whose record changed after the proposal was made;
+compare the two and pass `--force` to accept it anyway.
 
 The importer reads a Claude Code session file or a Codex rollout (Codex 0.32 or
 later) and proposes the session's focus, the open steps of its last plan,
@@ -115,16 +122,25 @@ canon handoff --to markdown --out BRIEF.md --receipt brief.receipt.json
 
 The brief lists the focus first, then open work, then recent decisions with
 the alternatives dropped and why, then constraints and quirks. It fits the
-target's size budget; anything that does not fit is left out whole and named
-in a `Left out` section at the end. The receipt holds digests of the brief and
+target's size budget; anything that does not fit is left out whole, counted,
+and named as far as the budget allows in a `Left out` section at the end, and
+the receipt names every one. The receipt also holds digests of the brief and
 of the records behind it.
 
 ## Switch in one command
 
 ```bash
-canon switch --to claude-code --dry-run
+canon switch --to claude-code --create --dry-run
 canon switch --to codex --create
 canon workspace targets
+```
+
+`--create` makes a missing file. To let canon write into a file you already
+have, add these two lines where canon may write, then switch:
+
+```
+<!-- canon:begin scope=workspace -->
+<!-- canon:end -->
 ```
 
 `switch` writes your blocks and the brief into the target's own instruction
@@ -141,7 +157,10 @@ file, between canon's markers only, so the agent reads it at startup:
 
 A file with no canon region is left alone until you add the markers, and
 `--create` makes a missing file with an empty region. canon refuses to write an
-`AGENTS.md` larger than Codex reads, because Codex would cut its tail.
+`AGENTS.md` larger than Codex reads, because Codex would cut its tail, and it
+refuses a switch to Codex while an `AGENTS.override.md` sits beside it, because
+Codex would read the override instead. `--receipt FILE` writes the list of
+every record the brief left out.
 
 If you or an agent edit inside canon's region, the next `switch` does not
 overwrite the edit. Each edit becomes a proposal and the switch waits until
@@ -164,8 +183,11 @@ edits back without switching.
 - None of the instruction files can load a rule for some files only. A block
   scoped to files with `applies_to` is written for every file, with an
   `Applies to:` line the model reads as advice.
-- The size budgets come from each tool's public documentation and can change.
-  Override them with `--budget-bytes` and `--budget-lines`.
+- The brief budgets are canon's defaults; `--budget-bytes` and `--budget-lines`
+  override them. The host file limits come from each tool's public
+  documentation and can change. For Codex, canon reads `project_doc_max_bytes`
+  from `~/.codex/config.toml`, so a limit you raised there is the one canon
+  refuses at.
 - The store trusts the local filesystem. Isolation keeps projects from mixing;
   it does not defend against someone who can write the store directly.
 - The brief shows what was recorded or imported. It does not know about work in

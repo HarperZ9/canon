@@ -154,10 +154,15 @@ the personality blocks that share the file, and `--budget-bytes` and
 
 The brief is a strict prefix of the priority order. When the budget runs out,
 every record after the cut is left out whole, and the brief ends with a
-`Left out` section that counts them and names as many as fit, then
-`and N more`. A lower-priority record never appears while a higher-priority one
-is missing, and no record is shortened. A budget too small for the header and
-the truncation report is refused (`budget_too_small`).
+`Left out` section that counts them, names as many as fit, then `and N more`,
+and says how to get the full list: for `handoff` with `--receipt`, "The
+receipt lists every one."; without it, the command to run; for `switch`, the
+`--dry-run --receipt FILE` command that writes the same receipt. A
+lower-priority record never appears while a higher-priority one is missing,
+and no record is shortened. Inside an instruction region the budget is
+measured on the block as it lands, sentinel line included. A budget too small
+for the header and the truncation report is refused (`budget_too_small`); a
+budget below one byte or one line is a usage error.
 
 ### Receipt
 
@@ -165,8 +170,15 @@ the truncation report is refused (`budget_too_small`).
 project identity, the target and its budget with the basis for it, the brief's
 sha256, size in bytes and lines, a sha256 over the pool it was built from, the
 declared projects, every included and left-out record with its content hash,
-every record excluded by rule with the rule, and a `does_not_prove` list. No
-clock is read, so the same pool gives the same brief and the same receipt.
+every record excluded by rule with the rule, and a `does_not_prove` list. A
+switch receipt adds `rendered_block` (the sha256, bytes and lines of the brief
+block as written) and `interior` (the sha256 and bytes of the whole region
+interior), so it can be checked against the file. `handoff` checks both of its
+destinations before writing either and removes the first if the second fails;
+`switch --receipt <file>` writes its receipt the same way, and every switch
+keeps its last receipt in the render ledger. The receipt passes the same
+secret check as the brief, since it carries a label for every left-out record.
+No clock is read, so the same pool gives the same brief and the same receipt.
 
 ### Switch
 
@@ -176,17 +188,35 @@ rest of canon uses, followed by one generated block, `canon-workspace-brief`,
 holding the brief. The target reads its instruction file at startup, so the
 brief reaches it without a paste. The write follows the canon rules:
 
-- only the catalog surface for that target, resolved under the repository root;
-- only between the canon markers, every byte outside them kept;
-- a file with no canon region is refused, and a missing file is created only
-  with `--create`, holding an empty region;
-- a file the host would truncate (Codex past 32,768 bytes) is refused before
-  writing; a file past a host's line guidance writes with a warning;
+- only the catalog surface for that target, resolved under the repository root,
+  and never through a symlink, junction or other reparse point on the way to it
+  (`unsafe_path`); the check runs again at write time, and a created file is
+  opened in exclusive mode;
+- only between the canon markers, every byte outside them kept; a host whose
+  begin marker ends in CRLF gets a CRLF interior, a difference in line endings
+  alone is no change, and a byte-order mark an editor adds is kept;
+- a file with no canon region is refused with the two marker lines to add, and
+  a missing file is created only with `--create`, holding an empty region;
+- a file the host would truncate is refused before writing. For Codex the
+  limit is `project_doc_max_bytes` from `~/.codex/config.toml` under `--home`,
+  32,768 by default, and a nested `AGENTS.md` the combined chain from the root
+  would cut is named in a warning. A file past a host's line guidance writes
+  with a warning;
+- Codex reads `AGENTS.override.md` instead of `AGENTS.md` in the same folder,
+  so a switch to codex with an override present is refused (`shadowed`);
 - `--dry-run` plans and prints the region without writing;
 - the file is read again just before the write, and the write is refused if it
-  changed since the plan read it.
+  changed since the plan read it;
+- a file canon cannot read as UTF-8, or a folder that is a file, ends with a
+  named failure code (`conflict`, `unsafe_path` or `io_error`), never a
+  traceback.
 
-A target with no instruction surface (`markdown`) prints the brief alone.
+The drift check and the reconcile writer know the brief block: a switched
+surface reads as a match, and a reconcile carries the brief through instead of
+erasing it.
+
+A target with no instruction surface (`markdown`) prints the brief alone. It
+carries no instruction block, and the receipt says so for each one.
 
 ## Targets and declared downgrades
 
@@ -210,7 +240,8 @@ files and not others, so each target declares what it does instead:
 | feature | targets | what happens |
 |---|---|---|
 | `activation.glob` | all five | the block is written always-on; the patterns stay in the block's sentinel and reach the model as an `Applies to:` line, which is advice rather than a rule |
-| `text.at-import` | `claude-code`, `gemini-cli` | a line with an `@path` token is read by the host as a file import, so the same text means more there than in `AGENTS.md` |
+| `text.at-import` | `claude-code`, `gemini-cli`, `cursor` | an `@path` token after a space or at a line start, outside a code span, bare names included (`@README`), is read by the host as a file import or as context, so the same text means more there than in `AGENTS.md`; in the brief canon writes for these hosts every such token is put in a code span, which they read as text |
+| `instruction.omitted` | `markdown` | the pasted brief has no instruction file to carry blocks, so none is included |
 
 `canon.workspace.target_fidelity.target_roundtrip` renders a block set into a
 new host file for a target, runs the R0 round-trip verdict on it, checks the

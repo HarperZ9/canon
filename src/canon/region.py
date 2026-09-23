@@ -18,7 +18,9 @@ Three properties the rest of R0 leans on:
   read as utf-8 with newline='' (never utf-8-sig, never universal-newline
   translation), so a CRLF host keeps its `\r\n` and a leading BOM stays an
   ordinary prefix character. A marker is recognized only as a full physical
-  line; a mid-line occurrence in prose is not a boundary.
+  line; a mid-line occurrence in prose is not a boundary. A byte-order mark an
+  editor adds before a marker on the first line is ignored for recognition
+  and kept in the prefix.
 
 - Loud on deformation. An indented marker, a bad scope, or any illegal marker
   count (zero handled as off-limits; anything but exactly one begin + one end)
@@ -112,6 +114,8 @@ def extract_region(file_text: str) -> RegionSlice:
     begins: list[_Marker] = []
     ends: list[_Marker] = []
     for start, raw_end, body in _iter_lines(file_text):
+        if start == 0 and body.startswith("\ufeff"):
+            body = body[1:]  # an editor's byte-order mark stays in the prefix
         kind = _classify(body)
         if kind == "begin":
             scope = _BEGIN_RE.match(body).group(1)  # type: ignore[union-attr]

@@ -79,11 +79,11 @@ def test_an_undeclared_downgrade_fails_the_verdict(target):
     assert [d.declared for d in verdict.downgrades] == [False]
 
 
-def test_an_at_path_line_is_an_import_on_claude_code_and_gemini_only():
+def test_an_at_path_line_is_an_import_on_claude_code_gemini_and_cursor_only():
     rec = block("setup", "Read @docs/setup.md before a release.", 1)
-    for target in ("claude-code", "gemini-cli"):
+    for target in ("claude-code", "gemini-cli", "cursor"):
         assert [d.feature for d in target_roundtrip([rec], target).downgrades] == [AT_IMPORT]
-    for target in ("codex", "copilot", "cursor"):
+    for target in ("codex", "copilot"):
         assert target_roundtrip([rec], target).downgrades == ()
     mail = block("mail", "Mail release@example.com first.", 1)
     assert target_roundtrip([mail], "claude-code").downgrades == ()

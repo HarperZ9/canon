@@ -264,8 +264,11 @@ level up, in the stored row:
   `canon.handoff-receipt/v1` receipt; `switch.py` renders the target's
   workspace region with the brief as the reserved block
   `canon-workspace-brief`, through the allow-list, refusing a file Codex would
-  truncate; `hosts.py` is the text of a file `--create` makes.
-  `src/canon/cli_handoff.py` adds `canon handoff` and `canon switch`.
+  truncate; `switch_host.py` holds the host checks (links, the region, line
+  endings, the Codex override and budget chain); `hosts.py` is the text of a
+  file `--create` makes. `src/canon/cli_handoff.py` adds `canon handoff` and
+  `canon switch`; `src/canon/cli_files.py` is their file IO with named
+  failures.
 - `src/canon/workspace/scrub.py` redacts secret-shaped values by the rules in
   `scrub_rules.py` and counts hits (no values, no digests); importers scrub each
   source string whole before extraction; the store refuses a record that still
@@ -322,7 +325,8 @@ level up, in the stored row:
   forms, scrubs before extraction, and anchors placeholders, D-132 the
   importers read what the host wrote as the host's and compare projects by
   identity, D-133 back-flow reads a checkout against its own render and keeps
-  every edit.
+  every edit, D-134 switch checks the host as it is (links, override, budget
+  chain, line endings) and the brief is measured as it lands.
 
 Later phases (verifier, migration legs, region installation into an existing
 file, the global SOUL.md and the global GEMINI.md surfaces) aim at this same

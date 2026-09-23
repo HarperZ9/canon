@@ -72,7 +72,7 @@ def run_decide_cmd(parsed, ctx: WorkspaceContext, out: Output, command: str) -> 
 def run_pull_cmd(parsed, ctx: WorkspaceContext, out: Output, command: str) -> int:
     from pathlib import Path
 
-    from .cli_handoff import _read_text
+    from .cli_files import read_text
     from .workspace.backflow import pending_edits
     from .workspace.pool import project_pool
     from .workspace.switch import SwitchRefused, plan_switch
@@ -80,12 +80,18 @@ def run_pull_cmd(parsed, ctx: WorkspaceContext, out: Output, command: str) -> in
 
     try:
         target = target_for(parsed.target)
+        if target.harness is None:
+            raise CommandFailure("invalid_args", f"{target.name} has no instruction file "
+                                                 "to read back")
         plan = plan_switch(ctx.identity, project_pool(ctx.store), target,
-                           home=parsed.home or str(Path.home()), read_text=_read_text,
+                           home=parsed.home or str(Path.home()), read_text=read_text,
                            check_limits=False)
     except UnknownTarget as exc:
         raise CommandFailure("invalid_args", str(exc)) from exc
     except SwitchRefused as exc:
+        if exc.code == "not_found":
+            raise CommandFailure("not_found", f"nothing to read back: the {target.display} "
+                                              "instruction file does not exist") from exc
         raise CommandFailure(exc.code, str(exc)) from exc
     report = pending_edits(ctx.store, plan, dry_run=parsed.dry_run) or {
         "surface": plan.surface.relative_path if plan.surface else None,

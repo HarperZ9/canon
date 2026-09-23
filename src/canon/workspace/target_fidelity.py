@@ -9,9 +9,16 @@ tracked:
                     The block is written always-on, with the patterns kept in
                     the sentinel and shown to the model as an `Applies to:`
                     line. That is a downgrade from a rule to advice.
-  text.at-import    a line with an `@path` token. Claude Code and Gemini CLI
-                    read `@path` in their instruction files as a file import,
-                    so the same text means more there than in AGENTS.md.
+  instruction.omitted  the markdown target has no instruction file, so its
+                    pasted brief carries no block at all.
+  text.at-import    an `@path` token after a space or at a line start, outside
+                    a code span or fence, bare names included (`@README`,
+                    `@package.json`). Claude Code and Gemini CLI read it in
+                    their instruction files as a file import, and Cursor
+                    includes an `@file` named in a rule as context, so the same
+                    text means more there than in AGENTS.md. In the brief canon
+                    writes for those hosts, each such token is put in a code
+                    span, which all three read as text.
 
 Each target declares, in advance, which of these it cannot keep and what it
 does instead. `target_roundtrip` renders a block set into a new host file for
@@ -34,7 +41,10 @@ from canon.workspace.targets import target_for
 
 GLOB = "activation.glob"
 AT_IMPORT = "text.at-import"
-_AT_IMPORT_RE = re.compile(r"(?:^|\s)@(?:~/|\.{1,2}/|/|[A-Za-z0-9_\-]+/)\S*", re.MULTILINE)
+OMITTED = "instruction.omitted"
+_AT_IMPORT_RE = re.compile(r"(?:^|(?<=\s))@[./~A-Za-z][^\s`]*", re.MULTILINE)
+_CODE_RE = re.compile(r"^```.*?^```[^\n]*$|(`+)[^`]*?\1", re.MULTILINE | re.DOTALL)
+_TRAILING = ".,;:!?)]}'\""
 _ALWAYS_ON = "the host loads the file for every request; the block is written " \
              "always-on and its patterns reach the model as an Applies to line"
 
@@ -47,9 +57,13 @@ DECLARED_DOWNGRADES: dict[str, dict[str, str]] = {
     "copilot": {GLOB: _ALWAYS_ON + "; path-specific .github/instructions files "
                 "are not on the write allow-list"},
     "cursor": {GLOB: "canon's one rule is alwaysApply: true, which ignores globs; "
-               "the patterns reach the model as an Applies to line"},
+               "the patterns reach the model as an Applies to line",
+               AT_IMPORT: "Cursor includes an @file named in a rule as context"},
+    "markdown": {OMITTED: "the markdown target has no instruction file, so a pasted "
+                          "brief carries no instruction block; paste the blocks yourself"},
 }
-_IMPORT_HOSTS = frozenset({"claude-code", "gemini-cli"})
+IMPORT_HOSTS = frozenset({"claude-code", "gemini-cli", "cursor"})
+NO_FILE_TARGETS = frozenset({"markdown"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,15 +83,56 @@ class TargetVerdict:
     host_problems: tuple[str, ...]
 
 
+def _outside_code(text: str) -> list[tuple[str, bool]]:
+    """`text` cut into (piece, is_code) runs; code spans and fences are code."""
+    pieces, last = [], 0
+    for match in _CODE_RE.finditer(text):
+        pieces += [(text[last:match.start()], False), (match.group(0), True)]
+        last = match.end()
+    return pieces + [(text[last:], False)]
+
+
+def has_at_import(text: str) -> bool:
+    """True when `text` holds an `@path` token a host would import."""
+    return any(not code and _AT_IMPORT_RE.search(piece)
+               for piece, code in _outside_code(text))
+
+
+def _quote(match: re.Match[str]) -> str:
+    token = match.group(0)
+    core = token.rstrip(_TRAILING)
+    return f"`{core}`{token[len(core):]}" if len(core) > 1 else token
+
+
+def quote_at_imports(text: str) -> str:
+    """`text` with every importable `@path` token put in a code span, which
+    Claude Code, Gemini CLI and Cursor all read as text."""
+    return "".join(piece if code else _AT_IMPORT_RE.sub(_quote, piece)
+                   for piece, code in _outside_code(text))
+
+
 def requested_features(record: Record, target_name: str) -> list[str]:
-    """The features a block asks for that `target_name` handles differently."""
+    """The features a block asks for that `target_name` handles differently.
+    A target with no instruction file drops the whole block, which is the one
+    difference that matters there."""
+    if target_name in NO_FILE_TARGETS:
+        return [OMITTED]
     features = []
     if record.data.get("applies_to"):
         features.append(GLOB)
     body = f"{record.data.get('title', '')}\n{record.data.get('body', '')}"
-    if target_name in _IMPORT_HOSTS and _AT_IMPORT_RE.search(body):
+    if target_name in IMPORT_HOSTS and has_at_import(body):
         features.append(AT_IMPORT)
     return features
+
+
+def brief_downgrades(text: str, target_name: str) -> list[Downgrade]:
+    """An `@path` token that survives in a brief, which quoting should prevent."""
+    if target_name not in IMPORT_HOSTS or not has_at_import(text):
+        return []
+    table = DECLARED_DOWNGRADES.get(target_name, {})
+    return [Downgrade("canon-workspace-brief", AT_IMPORT, AT_IMPORT in table,
+                      table.get(AT_IMPORT))]
 
 
 def downgrades_for(records: list[Record], target_name: str,

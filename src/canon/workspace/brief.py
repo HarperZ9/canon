@@ -16,13 +16,14 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from canon.versions import PIN_HANDOFF_RECEIPT
 from canon.workspace.brief_items import SECTIONS, BriefItem, Exclusion, collect, one_line
 from canon.workspace.identity import ProjectIdentity
 from canon.workspace.pool import TaggedRecord
 from canon.workspace.scrub import find_secrets
+from canon.workspace.target_fidelity import IMPORT_HOSTS, quote_at_imports
 from canon.workspace.targets import Target
 
 RECEIPT_SCHEMA = PIN_HANDOFF_RECEIPT.kind_tag
@@ -63,12 +64,16 @@ class Brief:
 
 @dataclass(frozen=True, slots=True)
 class _Budget:
+    """A budget for the text as it lands: `overhead` is what the caller adds
+    around the brief (a sentinel line when it becomes a region block)."""
+
     bytes: int
     lines: int
+    overhead: tuple[int, int] = (0, 0)
 
     def fits(self, text: str) -> bool:
-        return (len(text.encode("utf-8")) <= self.bytes
-                and text.count("\n") <= self.lines)
+        return (len(text.encode("utf-8")) + self.overhead[0] <= self.bytes
+                and text.count("\n") + self.overhead[1] <= self.lines)
 
 
 def _sha256(text: str) -> str:
@@ -97,11 +102,10 @@ def _sections(included: list[BriefItem], every: list[BriefItem], level: int) -> 
 
 
 def _footer(rest: list[BriefItem], target: Target, budget: _Budget,
-            used: str, level: int) -> list[str] | None:
+            used: str, level: int, hint: str) -> list[str] | None:
     head = ["", f"{'#' * (level + 1)} Left out",
             f"{len(rest)} records did not fit the {target.display} budget "
-            f"({budget.bytes} bytes, {budget.lines} lines). The receipt lists "
-            "every one."]
+            f"({budget.bytes} bytes, {budget.lines} lines). {hint}"]
     if not budget.fits(used + "\n".join(head) + "\n"):
         return None
     listed: list[str] = []
@@ -136,7 +140,7 @@ def _largest_fitting_prefix(body, total: int, budget: _Budget) -> int:
 
 
 def _assemble(header: list[str], items: list[BriefItem], target: Target,
-              budget: _Budget, level: int) -> tuple[int, str]:
+              budget: _Budget, level: int, hint: str) -> tuple[int, str]:
     def body(n: int) -> str:
         return "\n".join(header + _sections(items[:n], items, level)) + "\n"
 
@@ -146,7 +150,7 @@ def _assemble(header: list[str], items: list[BriefItem], target: Target,
     start = _largest_fitting_prefix(body, len(items), budget)
     for n in range(min(start, len(items) - 1), -1, -1):
         text = body(n)
-        footer = _footer(items[n:], target, budget, text, level)
+        footer = _footer(items[n:], target, budget, text, level, hint)
         if footer is not None:
             text += "\n".join(footer) + "\n"
             if budget.fits(text):
@@ -156,19 +160,36 @@ def _assemble(header: list[str], items: list[BriefItem], target: Target,
         "the brief header and its truncation report")
 
 
+def _hint(target: Target, receipt_hint: str | None) -> str:
+    return receipt_hint or (f"Run canon handoff --to {target.name} --receipt FILE to "
+                            "list every one.")
+
+
 def make_brief(identity: ProjectIdentity, pool: list[TaggedRecord], target: Target, *,
                budget_bytes: int | None = None, budget_lines: int | None = None,
-               declared: tuple[str, ...] = (), level: int = 1) -> Brief:
+               declared: tuple[str, ...] = (), level: int = 1,
+               overhead: tuple[int, int] = (0, 0), receipt_hint: str | None = None) -> Brief:
     """The brief for `target`, fitted to its budget (or the override), and its
     receipt. `level` is the heading depth of the title (1 standalone, 2 inside
-    an instruction region)."""
-    budget = _Budget(budget_bytes or target.brief_bytes, budget_lines or target.brief_lines)
-    items, excluded = collect(pool, identity.project_id)
-    n, text = _assemble(_header(identity, target, level), items, target, budget, level)
+    an instruction region); `overhead` is what the caller adds around the text
+    as it lands; `receipt_hint` is the sentence that says where the full list
+    of left-out records is. On a host that reads `@path` as an import, every
+    such token in a record line is quoted so it stays text."""
+    budget = _Budget(target.brief_bytes if budget_bytes is None else budget_bytes,
+                     target.brief_lines if budget_lines is None else budget_lines, overhead)
+    if budget.bytes < 1 or budget.lines < 1:
+        raise BudgetError("a budget must be at least one byte and one line")
+    items, excluded = collect(pool, identity.project_id, has_file=target.harness is not None)
+    if target.name in IMPORT_HOSTS:
+        items = [replace(i, lines=tuple(quote_at_imports(line) for line in i.lines))
+                 for i in items]
+    n, text = _assemble(_header(identity, target, level), items, target, budget, level,
+                        _hint(target, receipt_hint))
     refuse_secrets(text, "brief")
     included, left_out = tuple(items[:n]), tuple(items[n:])
     receipt = _receipt(identity, pool, target, budget, text, included, left_out,
                        excluded, declared)
+    refuse_secrets(json.dumps(receipt, ensure_ascii=False), "brief receipt")
     return Brief(text, receipt, included, left_out)
 
 

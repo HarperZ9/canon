@@ -21,10 +21,28 @@ from canon.schema import Record
 from canon.textblock import render_region
 
 
+# Blocks a region may carry that no record in the pool renders: `canon switch`
+# writes the resume brief as this reserved block. The drift check and the batch
+# writer carry it through, so a switched surface reads as a match and a
+# reconcile keeps the brief instead of erasing it.
+CARRIED_BLOCK_IDS = frozenset({"canon-workspace-brief"})
+
+
 class SurfaceError(Exception):
     """The host file cannot receive this render: it carries no canon region
     (off-limits) or its region's declared scope does not match the target
     scope. Refused loudly so a mis-scoped write never reaches the file."""
+
+
+def carried_blocks(host_text: str) -> list[Record]:
+    """The reserved blocks the host's region holds now, read back as records.
+    A region that does not parse carries nothing."""
+    from canon.region import RegionError
+    from canon.textblock import IngestRefused, ingest_region
+    try:
+        return [r for r in ingest_region(host_text) if r.id in CARRIED_BLOCK_IDS]
+    except (IngestRefused, RegionError):
+        return []
 
 
 def render_surface(pool: list[Record], scope: str) -> str:
@@ -50,5 +68,5 @@ def apply_surface(host_text: str, pool: list[Record], scope: str) -> str:
     if s.scope != scope:
         raise SurfaceError(
             f"region scope {s.scope!r} does not match target scope {scope!r}")
-    interior = render_surface(pool, scope)
+    interior = render_surface(pool + carried_blocks(host_text), scope)
     return splice_region(host_text, interior)

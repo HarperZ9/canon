@@ -6,18 +6,23 @@ uses) followed by one generated block holding the resume brief. The target
 loads its instruction file at startup, so the brief reaches it without a paste.
 
 The write goes through the same allow-list and region rules as every other
-canon write: only a catalog surface, only between the canon markers, and only
-into a file that already carries a region, or into a file that does not exist
-yet when the caller asks for it to be created. A target whose host truncates
-the instruction file past a fixed size is refused before writing rather than
-cut. IO is injected, so planning reads and commit writes are separate steps.
+canon write: only a catalog surface, reached through no link, only between the
+canon markers, and only into a file that already carries a region, or into a
+file that does not exist yet when the caller asks for it to be created. The
+host checks (links, the region, line endings, Codex's override file and byte
+budget) are in `switch_host.py`. The brief is fitted to its budget as the block
+that lands in the file, sentinel included, and the receipt carries the digest
+of that block and of the whole region interior. IO is injected, so planning
+reads and commit writes are separate steps.
 """
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from canon.layering import LayeringError
-from canon.region import RegionError, extract_region, splice_region
+from canon.region import splice_region
 from canon.registry import (
     SURFACE_CATALOG,
     Surface,
@@ -27,24 +32,18 @@ from canon.registry import (
 )
 from canon.schema import KIND_PERSONALITY_BLOCK, Provenance, Record
 from canon.surface import SurfaceError, render_surface
-from canon.textblock import RenderRefused, recompute_source_hash
+from canon.textblock import RenderRefused, recompute_source_hash, render_region
+from canon.workspace import switch_host
 from canon.workspace.brief import Brief, make_brief, refuse_secrets
 from canon.workspace.hosts import cursor_frontmatter_problem, new_host_text
 from canon.workspace.identity import ProjectIdentity
 from canon.workspace.pool import TaggedRecord, block_pool
-from canon.workspace.target_fidelity import downgrades_for
+from canon.workspace.switch_host import SwitchRefused  # noqa: F401  (re-exported)
+from canon.workspace.target_fidelity import brief_downgrades, downgrades_for
 from canon.workspace.targets import Target
 
 BRIEF_BLOCK_ID = "canon-workspace-brief"
 BRIEF_HARNESS = "canon-handoff"
-
-
-class SwitchRefused(Exception):
-    """The switch cannot write this target; `code` is the CLI failure code."""
-
-    def __init__(self, code: str, message: str) -> None:
-        super().__init__(message)
-        self.code = code
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,6 +58,7 @@ class SwitchPlan:
     interior: str | None
     warnings: tuple[str, ...]
     owners: dict = field(default_factory=dict)
+    receipt: dict = field(default_factory=dict)
 
 
 def workspace_surface(target: Target) -> Surface | None:
@@ -85,16 +85,26 @@ def block_owners(pool: list[TaggedRecord], surface: Surface) -> dict:
     return {rid: owner for rid, owner in owners.items() if rid in rendered}
 
 
-def brief_record(brief: Brief) -> Record:
+def brief_record(brief: Brief | str) -> Record:
     """The brief as a personality block: its heading becomes the block title and
     the rest its body, so the region grammar carries it unchanged."""
-    lines = brief.text.rstrip("\n").split("\n")
+    text = brief if isinstance(brief, str) else brief.text
+    lines = text.rstrip("\n").split("\n")
     title = lines[0].lstrip("#").strip()
     body = "\n".join(lines[2:])
     return Record(kind=KIND_PERSONALITY_BLOCK, id=BRIEF_BLOCK_ID, scope="workspace",
                   data={"title": title, "body": body},
                   provenance=Provenance(harness=BRIEF_HARNESS,
                                         source_hash=recompute_source_hash(title, body)))
+
+
+def block_overhead() -> tuple[int, int]:
+    """Bytes and lines the brief block adds to the brief text: its sentinel
+    line, less the blank line under the heading that the block drops."""
+    sample = "## T\n\nbody\n"
+    rendered = render_region([brief_record(sample)], "workspace")
+    return (len(rendered.encode("utf-8")) - len(sample.encode("utf-8")),
+            rendered.count("\n") - sample.count("\n"))
 
 
 def region_interior(pool: list[TaggedRecord], surface: Surface, brief: Brief) -> str:
@@ -117,38 +127,14 @@ def _host(path: str, target: Target, read_text, create: bool) -> tuple[str, str]
     return new_host_text(target.name), "create"
 
 
-def _checked_region(host: str, path: str) -> None:
-    try:
-        region = extract_region(host)
-    except RegionError as exc:
-        raise SwitchRefused("conflict", f"{path}: deformed canon region: {exc}") from exc
-    if not region.present:
-        raise SwitchRefused("conflict", f"{path} has no canon region; add the "
-                                        "canon markers to opt this file in")
-    if region.scope != "workspace":
-        raise SwitchRefused("conflict", f"{path}: region scope is {region.scope!r}, "
-                                        "not workspace")
-
-
-def _limits(target: Target, text: str) -> tuple[str, ...]:
-    size = len(text.encode("utf-8"))
-    if target.file_bytes_limit is not None and size > target.file_bytes_limit:
-        raise SwitchRefused(
-            "budget_too_small", f"the file would be {size} bytes; {target.display} "
-            f"reads at most {target.file_bytes_limit} and truncates the rest")
-    lines = text.count("\n")
-    if target.file_lines_advice is not None and lines > target.file_lines_advice:
-        return (f"the file is {lines} lines; {target.display} guidance is under "
-                f"{target.file_lines_advice}",)
-    return ()
-
-
 def _host_warnings(target: Target, pool: list[TaggedRecord], surface: Surface,
-                   text: str) -> tuple[str, ...]:
-    """What the target will do differently from what the blocks asked for, and
-    a Cursor rule file Cursor would not load on every request."""
+                   text: str, brief: Brief) -> tuple[str, ...]:
+    """What the target will do differently from what the blocks and the brief
+    asked for, and a Cursor rule file Cursor would not load on every request."""
     warnings = []
-    for down in downgrades_for(pool_for(surface, block_pool(pool)), target.name):
+    downs = downgrades_for(pool_for(surface, block_pool(pool)), target.name) + \
+        brief_downgrades(brief.text, target.name)
+    for down in downs:
         state = "declared" if down.declared else "UNDECLARED"
         warnings.append(f"block {down.record_id}: {down.feature} ({state}): {down.note}")
     if target.name == "cursor":
@@ -158,36 +144,62 @@ def _host_warnings(target: Target, pool: list[TaggedRecord], surface: Surface,
     return tuple(warnings)
 
 
-def plan_switch(identity: ProjectIdentity, pool: list[TaggedRecord], target: Target, *,
-                home: str, read_text, create: bool = False,
-                budget_bytes: int | None = None, budget_lines: int | None = None,
-                declared: tuple[str, ...] = (), check_limits: bool = True) -> SwitchPlan:
-    """Read the target's surface and plan the rewrite. Writes nothing.
-    `check_limits=False` skips the host size refusal, for a caller that only
-    reads the region (pulling edits back) and will not write it."""
-    brief = make_brief(identity, pool, target, budget_bytes=budget_bytes,
-                       budget_lines=budget_lines, declared=declared, level=2)
-    surface = workspace_surface(target)
-    if surface is None:
-        return SwitchPlan(target, brief, None, None, "no-surface", None, None, None, ())
+def _sha(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _rendered(brief: Brief, interior: str) -> dict:
+    block = render_region([brief_record(brief)], "workspace")
+    return {**brief.receipt,
+            "rendered_block": {"sha256": _sha(block), "bytes": len(block.encode("utf-8")),
+                               "lines": block.count("\n")},
+            "interior": {"sha256": _sha(interior), "bytes": len(interior.encode("utf-8"))}}
+
+
+def _surface_path(surface: Surface, identity: ProjectIdentity, home: str) -> str:
     workspace = str(identity.root)
     path = resolve_surface_path(surface, home=home, workspace=workspace)
     try:
         assert_writable(path, home=home, workspace=workspace)
     except SurfaceError as exc:
         raise SwitchRefused("unsafe_path", str(exc)) from exc
+    switch_host.safe_path(path, workspace)
+    return path
+
+
+def plan_switch(identity: ProjectIdentity, pool: list[TaggedRecord], target: Target, *,
+                home: str, read_text, create: bool = False,
+                budget_bytes: int | None = None, budget_lines: int | None = None,
+                declared: tuple[str, ...] = (), check_limits: bool = True,
+                receipt_hint: str | None = None) -> SwitchPlan:
+    """Read the target's surface and plan the rewrite. Writes nothing.
+    `check_limits=False` skips the host size refusal, for a caller that only
+    reads the region (pulling edits back) and will not write it."""
+    surface = workspace_surface(target)
+    brief = make_brief(identity, pool, target, budget_bytes=budget_bytes,
+                       budget_lines=budget_lines, declared=declared, level=2,
+                       overhead=block_overhead() if surface else (0, 0),
+                       receipt_hint=receipt_hint)
+    if surface is None:
+        return SwitchPlan(target, brief, None, None, "no-surface", None, None, None, (),
+                          receipt=brief.receipt)
+    path = _surface_path(surface, identity, home)
+    if check_limits and surface.harness == "codex":
+        switch_host.refuse_shadow(Path(identity.root))
     host, status = _host(path, target, read_text, create)
-    _checked_region(host, path)
+    region = switch_host.checked_region(host, path)
     interior = region_interior(pool, surface, brief)
     refuse_secrets(interior, "instruction region")
-    new_text = splice_region(host, interior)
-    limits = _limits(target, new_text) if check_limits else ()
-    warnings = limits + _host_warnings(target, pool, surface, new_text)
-    if status == "write" and new_text == host:
-        status = "unchanged"
+    eol = switch_host.host_newline(region)
+    new_text = splice_region(host, interior.replace("\n", eol))
+    if status == "write" and region.inner.replace("\r\n", "\n") == interior:
+        status, new_text = "unchanged", host
+    limits = switch_host.limits(target, new_text, root=Path(identity.root),
+                                home=home) if check_limits else ()
+    warnings = limits + _host_warnings(target, pool, surface, new_text, brief)
     old = None if status == "create" else host
     return SwitchPlan(target, brief, surface, path, status, old, new_text, interior, warnings,
-                      block_owners(pool, surface))
+                      block_owners(pool, surface), _rendered(brief, interior))
 
 
 def commit_switch(plan: SwitchPlan, write_text, read_text=None) -> None:

@@ -9,13 +9,15 @@ public catalog carries no operator path: only the generic filename conventions
 (`.claude/CLAUDE.md`, `CLAUDE.md`, `AGENTS.md`) live in source. A write is
 allowed only if its resolved path is exactly one of the catalog surfaces under
 the injected roots; anything else -- a secret file, a traversal escape, an
-ad-hoc surface -- is refused before a byte is read or written.
+ad-hoc surface, or a path that runs through a symlink or junction -- is
+refused before a byte is read or written.
 """
 from __future__ import annotations
 
 import os
 from dataclasses import dataclass
 
+from canon.path_policy import PathPolicyError, resolve_under_root
 from canon.region import extract_region
 from canon.schema import Record
 from canon.surface import SurfaceError, apply_surface
@@ -91,6 +93,19 @@ def assert_writable(path: str, *, home: str, workspace: str) -> None:
             f"path is not an allow-listed canon surface: {path!r}")
 
 
+def assert_no_link(path: str, root: str) -> None:
+    """Raise SurfaceError when `path`, or a directory between it and `root`,
+    is a symlink, junction or other reparse point. The allow-list check is
+    lexical; a link would carry the write outside the root. A root that does
+    not exist on disk (injected IO in a test) has nothing to follow."""
+    if not os.path.isdir(root):
+        return
+    try:
+        resolve_under_root(path, root=root, reject_reparse=True)
+    except PathPolicyError as exc:
+        raise SurfaceError(f"path runs through a link: {exc}") from exc
+
+
 def write_surface(surface: Surface, pool: list[Record], *, home: str,
                   workspace: str, read_text, write_text) -> str:
     """Render `pool` at `surface.scope` into `surface`'s file and write it back,
@@ -105,6 +120,7 @@ def write_surface(surface: Surface, pool: list[Record], *, home: str,
             f"surface is not in the write allow-list: {surface!r}")
     path = resolve_surface_path(surface, home=home, workspace=workspace)
     assert_writable(path, home=home, workspace=workspace)
+    assert_no_link(path, _root_dir(surface, home=home, workspace=workspace))
     host = read_text(path)
     new = apply_surface(host, pool, surface.scope)
     if new != host:
@@ -176,6 +192,7 @@ def write_surfaces(pool: list[Record], *, home: str, workspace: str,
                 f"surface is not in the write allow-list: {surface!r}")
         path = resolve_surface_path(surface, home=home, workspace=workspace)
         assert_writable(path, home=home, workspace=workspace)
+        assert_no_link(path, _root_dir(surface, home=home, workspace=workspace))
         host = read_text(path)
         if host is None:
             results.append(SurfaceResult(surface, path, "missing", None))
