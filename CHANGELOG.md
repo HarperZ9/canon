@@ -2,10 +2,13 @@
 
 ## Unreleased
 
+Nothing yet.
+
+## 0.3.0 - 2026-09-23
+
 Canon starts to carry a project's working state between models and tools.
 The walkthrough and its limits are in `docs/switching-models.md`; the
-specification is `project-docs/W1-WORKSPACE.md`. Nothing below is released
-and the version is unchanged.
+specification is `project-docs/W1-WORKSPACE.md`.
 
 - Adds a stable project identity (`canon workspace id`). A project with a
   remote is keyed on the normalized remote URL, so two clones or a moved
@@ -96,6 +99,11 @@ and the version is unchanged.
   as a note; and a rejection holds only for the render it was made against.
 - Registers six new version pins: `project-id`, `project-row`,
   `workspace-state`, `handoff-receipt`, `import-report` and `render-ledger`.
+- Fixes `python -m canon.cli mcp`, the command MCP host configurations use to
+  start the server. In 0.1.0 and 0.2.0 it imported the module and exited 0
+  without reading a request, so a host reported the server as failed with
+  "Connection closed". The `canon mcp` console script and `python -m canon mcp`
+  were not affected.
 
 Limits:
 

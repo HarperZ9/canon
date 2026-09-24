@@ -12,7 +12,7 @@ from .context_store import (
     ContextStoreIdentityError,
 )
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 ENV_CONTEXT_DB = "CANON_CONTEXT_DB"
 MAX_LINE = 2_000_000
 _SHAPES = {
