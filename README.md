@@ -191,8 +191,8 @@ python -m pip install flywheel-canon
 ```
 
 The workspace commands above (`canon workspace`, `canon handoff`,
-`canon switch`) are not released yet; 0.2.0 does not have them. To use them,
-install from a checkout of this repository:
+`canon switch`) first shipped in 0.3.0. To run the latest `main` instead of a
+release, install from a checkout of this repository:
 
 ```bash
 python -m pip install -e .

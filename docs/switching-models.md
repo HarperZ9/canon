@@ -14,8 +14,14 @@ This guide covers the commands. The specification is
 
 ## Install
 
-The workspace commands are not in a release yet. `flywheel-canon` 0.2.0 on PyPI
-does not have them. Install from a checkout of the repository:
+The workspace commands ship in `flywheel-canon` 0.3.0 and later. Install the
+release from PyPI:
+
+```bash
+python -m pip install "flywheel-canon>=0.3.0"
+```
+
+To run the latest `main` instead, install from a checkout of the repository:
 
 ```bash
 python -m pip install -e .
