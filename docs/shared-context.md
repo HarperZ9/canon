@@ -74,8 +74,11 @@ the client saw every message in that container.
 
 ## Purging and retention
 
-A purge removes captured events from the store. Select one event, every event
-captured before an ordinal, or every event in a workspace and project:
+A purge removes captured events from the store. Name the store with `--db` (or
+`CANON_CONTEXT_DB`) and the scope with `--workspace-id` and `--project-id`,
+then select one event with `--event-id`, every event captured before an
+ordinal with `--before-ord`, or every event in that workspace and project with
+`--all`:
 
 ```bash
 canon context purge --db C:/dev/state/canon-context.sqlite --workspace-id cdev --project-id canon --event-id <event_record_id> --dry-run
@@ -118,7 +121,30 @@ listed as already purged, and confirming the plan finishes the scrub.
 same store. Each policy entry names an event and an action: `tombstone` and
 `purge-all` remove the event with its closure, `purge-derived` removes its
 derived records only, and `retain` keeps it. The run is one purge plan with the
-same flags.
+same flags. A policy file looks like this:
+
+```json
+{
+  "schema": "canon.context-retention-policy/v1",
+  "keep_responses": false,
+  "policies": [
+    {"subject_id": "<event_record_id>", "action": "purge-all",
+     "retain_content_hash": false, "derived_stores": ["sqlite"]}
+  ]
+}
+```
+
+`retain_content_hash` must be false, because a context tombstone keeps no
+content hash. `purge-derived` needs `"derived_stores": ["sqlite"]`.
+
+Over MCP, `canon.context.purge` takes the same selection as arguments. A call
+without `confirm_plan_sha256` returns the plan and deletes nothing; a second
+call carrying the plan's digest applies exactly that plan, and a plan the store
+has moved past is refused as stale. Plans and reports over MCP carry ids,
+counts and digests, never record text or paths. The model that asked for a
+plan can send its digest back, so canon alone cannot tell the owner from a
+model: a harness that exposes this tool should require an owner's approval for
+it.
 
 The first capture or purge this version writes raises the store's identity
 version to 2 (`project-docs/CONTEXT-STORE-IDENTITY.md`). Canon 0.3.0 and older
@@ -132,8 +158,14 @@ the matching command flag. Clients that should share context must use the same
 database and the same workspace/project/container identifiers.
 
 This is a local trusted-client store. A process that can use the configured
-database path can submit and query context for the scopes it names. Do not point
-untrusted clients at the same database without an outer access-control boundary.
+database path can submit, query and purge context for the scopes it names. Do
+not point untrusted clients at the same database without an outer
+access-control boundary.
+
+The database is plaintext on disk (decision D-7 in
+`project-docs/F1-DECISIONS.md`). File permissions and disk encryption are its
+only protection. The path to encryption at rest is a cipher-wrapper backend
+that encrypts each envelope on write and decrypts it on read; it is not built.
 
 ## Media, links, and source state
 

@@ -4,6 +4,40 @@
 
 Nothing yet.
 
+## 0.4.0 - unreleased
+
+The shared context store can now remove what it holds. Decisions D-146 to
+D-158 are in `project-docs/C1-DECISIONS.md`.
+
+- BREAKING for mixed versions: the first capture or purge this version writes
+  raises the context store's identity version from 1 to 2. Canon 0.3.0 and
+  older refuse a version 2 database as identity invalid. Reading alone never
+  raises the version.
+- Adds `canon context purge` (`--event-id`, `--before-ord` or `--all`, with
+  `--keep-responses`, `--dry-run` and `--yes`) and the `canon.context.purge` MCP
+  tool, which returns a plan and applies it only when a second call carries the
+  plan's `confirm_plan_sha256`. A purge removes each selected event, the records
+  derived from it at ingest and, by default, its paired answer. It appends one
+  audit row and one tombstone per record, so the chain still verifies, and a
+  record put back under a purged key fails integrity.
+- A purge runs VACUUM with `secure_delete` on, scans the database, journal and
+  WAL files for the purged values, and reports freed disk clusters, legacy
+  fingerprints and the copies outside canon's reach. An interrupted purge
+  leaves a `scrub_pending` mark, reported by `canon.context.health`, that the
+  next confirmed run finishes; a rerun lists events already purged.
+- New context records store a salted commitment instead of a plain sha256 of
+  the envelope, so a purged record's audit row no longer confirms a guess of
+  its content. Records written by 0.3.0 keep their plain digests and are
+  counted in purge reports.
+- Adds `canon context retention --policy <file>`, which applies the retention
+  planner's `tombstone`, `purge-all`, `purge-derived` and `retain` actions as
+  one purge plan.
+- The capture hook gains `--capture prompts|prompts+responses` (default
+  `prompts`) and handles `Stop`: with responses on it stores the last assistant
+  message as an answer event linked to its prompt. It gains
+  `--transcript-locator path|none` (default `path`). Adds `Stop` hook fragments
+  for Claude Code and Codex.
+
 ## 0.3.0 - 2026-09-23
 
 Canon starts to carry a project's working state between models and tools.

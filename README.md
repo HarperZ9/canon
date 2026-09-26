@@ -116,7 +116,7 @@ in advance. Anything else fails the gate rather than logging a warning.
 
 ## What canon carries
 
-![A table of twelve rows: what canon carries, how many of it there are, and where each number is read from. Eight record kinds share one envelope: five under the v1 record tag and three workspace-state kinds under their own tag. Two scopes layer, workspace over global. Seven surfaces sit on the write allow-list: a global and a workspace file for Claude Code, an AGENTS.md for Codex, a workspace SOUL.md for Hermes, a GEMINI.md, the Copilot instructions file, and one Cursor rule. Four storage adapters implement the backend protocol, and five capability tokens describe what each one can carry. Twenty-two schema pins name the seams that carry a version. The aggregate check folds four legs, and four gate functions share the same zero or one exit code. 161 source modules hold 27,256 lines, and 90 test files hold 1630 tests. Two surfaces named in the roadmap are absent from the catalog, a global SOUL.md and a global GEMINI.md, so canon does not render them.](docs/art/record-table.svg)
+![A table of twelve rows: what canon carries, how many of it there are, and where each number is read from. Eight record kinds share one envelope: five under the v1 record tag and three workspace-state kinds under their own tag. Two scopes layer, workspace over global. Seven surfaces sit on the write allow-list: a global and a workspace file for Claude Code, an AGENTS.md for Codex, a workspace SOUL.md for Hermes, a GEMINI.md, the Copilot instructions file, and one Cursor rule. Four storage adapters implement the backend protocol, and five capability tokens describe what each one can carry. Twenty-two schema pins name the seams that carry a version. The aggregate check folds four legs, and four gate functions share the same zero or one exit code. 161 source modules hold 27,256 lines, and 91 test files hold 1635 tests. Two surfaces named in the roadmap are absent from the catalog, a global SOUL.md and a global GEMINI.md, so canon does not render them.](docs/art/record-table.svg)
 
 Every count is asserted against the module that defines it in
 `tests/test_repo_art.py`.
@@ -176,6 +176,23 @@ importers with their secret scrubber and declared losses, three more surfaces
 (`GEMINI.md`, the Copilot instructions file, one Cursor rule) with the
 downgrades each declares, and the read-back of edits made inside a rendered
 region. It is specified in `project-docs/W1-WORKSPACE.md`.
+
+C1 lets you own the shared context store (`docs/shared-context.md`). The
+capture hook stores your prompts by default and stores the assistant's answers
+only when you run it with `--capture prompts+responses`; it never stores tool
+calls or reasoning (`docs/client-capture.md`). `canon context purge` removes
+captured events together with the records derived from them and the answer
+paired with each prompt, shows you the plan first, and applies only the plan
+you confirmed. `canon context retention` applies a retention policy the same
+way. The audit chain still verifies after a purge, each removed record leaves a
+tombstone with no content hash, and new records store a salted digest that no
+longer opens once the record is gone. The store stays plaintext on disk, so
+freed disk clusters can hold purged text until they are reused, and every
+purge report says so along with the copies canon cannot reach. The first
+capture or purge this version writes raises the context store's identity
+version to 2, and canon 0.3.0 and older refuse such a database as identity
+invalid. These changes are in 0.4.0, which is not on PyPI yet; install from a
+checkout to use them.
 
 Installing a region into an existing file, the first migrator on the version seam,
 and the global SOUL.md and the global GEMINI.md surfaces are later phases. Everything
