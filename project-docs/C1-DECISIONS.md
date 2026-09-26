@@ -160,3 +160,27 @@ rerun the command that was interrupted. The list is part of the plan digest;
 the scrub mark is not, because a scrub that finishes between plan and
 confirmation changes nothing the owner confirms. A tombstone holds no scope,
 so an event id purged in another workspace also reads as already purged.
+
+## D-158 Answers are captured only on request, and each one names its prompt
+
+The capture hook stores prompts by default, as 0.3.0 did. `--capture
+prompts+responses` (or `CANON_CONTEXT_CAPTURE`) makes a `Stop` delivery store
+`last_assistant_message` as an assistant event. Answers restate prompts and
+often quote files and tool output, so storing them is the owner's choice, and
+a hook mounted on `Stop` without that choice returns a message saying nothing
+was stored instead of failing silently.
+
+The answer's id is `<native_id>-response-<segment>`. The prompt's id is derived
+from the same native id, so reusing it would give the answer the prompt's
+identity with different content and raise `ContextCollision`. The answer names
+the prompt's record id twice: in a `canon_event_ref` source, which related-event
+queries follow, and in `responds_to`, which a purge follows (D-151). The hook
+computes that id the way ingest does and records in `coverage.pairing` whether
+the prompt was in the store. A `Stop` with no `prompt_id` or `turn_id` stores
+nothing, because an answer that names no prompt would survive the purge of the
+prompt it restates. A different answer for the same prompt takes the next
+segment, up to 16, and a redelivery of the same answer stays idempotent.
+
+Tool calls and reasoning are not captured in either mode, and each answer says
+so in its coverage. `--transcript-locator none` records no transcript path,
+since the path names the client's project directory.

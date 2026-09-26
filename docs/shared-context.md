@@ -137,7 +137,8 @@ untrusted clients at the same database without an outer access-control boundary.
 
 ## Media, links, and source state
 
-The current client hook captures prompt text. Attachments, screenshots, videos,
+The current client hook captures prompt text, and the last assistant message
+when response capture is on. Attachments, screenshots, videos,
 links, and transcript files are represented as source references and pending
 extraction state unless a client supplies extracted text itself. Canon validates
 pending source `ref`, `locator`, and `extraction_status` fields before storing
@@ -159,8 +160,9 @@ the extracted text, and any interpretation as separate fields.
   result, including for opt-in related-event sidecars.
 - `container-id` is descriptive metadata. It does not prove full-container
   capture and does not authorize a client.
-- The hook captures prompt events only; it does not provide universal native
-  interception for ChatGPT, Codex, Claude, Flywheel, browsers, editors, or other
-  apps.
+- The hook captures prompt events, and answer events when response capture is
+  on (`docs/client-capture.md`). It does not capture tool calls or reasoning,
+  and it does not provide universal native interception for ChatGPT, Codex,
+  Claude, Flywheel, browsers, editors, or other apps.
 - mneme and Index are natural future integrations for richer recall and source
   envelopes, but they are not native dependencies of this slice.

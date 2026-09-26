@@ -1,4 +1,9 @@
-"""Command hook adapter for Canon shared context capture."""
+"""Command hook adapter for Canon shared context capture.
+
+A UserPromptSubmit delivery is queried against prior context and stored as a
+prompt event. A Stop delivery is handled by client_capture_stop.py: it stores
+the client's last assistant message only when response capture is on.
+"""
 from __future__ import annotations
 
 import argparse
@@ -9,6 +14,7 @@ from pathlib import Path
 from typing import Any, Callable, TextIO
 
 from .client_capture_payload import CaptureInputError, event_from_hook
+from .client_capture_stop import CAPTURE_MODES, CAPTURE_PROMPTS, capture_stop
 
 
 ENV_CONTEXT_DB = "CANON_CONTEXT_DB"
@@ -18,6 +24,9 @@ ENV_CONTAINER_ID = "CANON_CONTEXT_CONTAINER_ID"
 ENV_CLIENT = "CANON_CONTEXT_CLIENT"
 ENV_TOP_K = "CANON_CONTEXT_TOP_K"
 ENV_STDIN_MAX_CHARS = "CANON_HOOK_STDIN_MAX_CHARS"
+ENV_CAPTURE = "CANON_CONTEXT_CAPTURE"
+ENV_TRANSCRIPT_LOCATOR = "CANON_CONTEXT_TRANSCRIPT_LOCATOR"
+TRANSCRIPT_LOCATOR_MODES = ("path", "none")
 
 ServiceFactory = Callable[[Path], Any]
 
@@ -43,19 +52,11 @@ def run(
     try:
         args = _settings(argv or [], env)
         hook = _read_hook(stdin, args.stdin_max_chars)
-        payload = event_from_hook(
-            hook, args.client, args.workspace_id, args.project_id, args.container_id
-        )
-        service = (service_factory or _store_from_db)(args.db)
-        query = service.query(
-            args.workspace_id,
-            args.project_id,
-            payload["event"]["message_text"],
-            top_k=args.top_k,
-            include_pending=True,
-        )
-        ingest = service.ingest(payload)
-        _write_json(stdout, _context_output(payload, ingest, query, args.top_k, args.max_excerpt_chars))
+        factory = service_factory or _store_from_db
+        if hook.get("hook_event_name") == "Stop":
+            _write_json(stdout, capture_stop(hook, args, lambda: factory(args.db)))
+        else:
+            _write_json(stdout, _capture_prompt(hook, args, factory))
         return 0
     except (CaptureInputError, CaptureConfigError, json.JSONDecodeError) as exc:
         _write_json(stdout, _warning_output(_friendly_error(exc)))
@@ -64,6 +65,24 @@ def run(
         print(f"canon shared context capture failed: {exc}", file=stderr)
         _write_json(stdout, _warning_output(f"capture failed visibly: {exc}"))
         return 0
+
+
+def _capture_prompt(hook: dict[str, Any], args: argparse.Namespace,
+                    factory: ServiceFactory) -> dict:
+    payload = event_from_hook(
+        hook, args.client, args.workspace_id, args.project_id, args.container_id,
+        transcript_locator=args.transcript_locator,
+    )
+    service = factory(args.db)
+    query = service.query(
+        args.workspace_id,
+        args.project_id,
+        payload["event"]["message_text"],
+        top_k=args.top_k,
+        include_pending=True,
+    )
+    ingest = service.ingest(payload)
+    return _context_output(payload, ingest, query, args.top_k, args.max_excerpt_chars)
 
 
 def main() -> int:
@@ -80,10 +99,17 @@ def _settings(argv: list[str], env: dict[str, str]) -> argparse.Namespace:
     parser.add_argument("--top-k", default=None)
     parser.add_argument("--stdin-max-chars", default=None)
     parser.add_argument("--max-excerpt-chars", type=int, default=700)
+    parser.add_argument("--capture", default=None)
+    parser.add_argument("--transcript-locator", default=None)
     args, unknown = parser.parse_known_args(argv)
     if unknown:
         raise CaptureConfigError(f"unknown arguments: {' '.join(unknown)}")
     args.client = args.client or env.get(ENV_CLIENT, "auto")
+    args.capture = _choice(args.capture or env.get(ENV_CAPTURE, CAPTURE_PROMPTS),
+                           CAPTURE_MODES, "capture")
+    args.transcript_locator = _choice(
+        args.transcript_locator or env.get(ENV_TRANSCRIPT_LOCATOR, "path"),
+        TRANSCRIPT_LOCATOR_MODES, "transcript locator")
     db_raw = args.db or env.get(ENV_CONTEXT_DB, "")
     args.workspace_id = args.workspace_id or env.get(ENV_WORKSPACE_ID, "")
     args.project_id = args.project_id or env.get(ENV_PROJECT_ID, "")
@@ -101,6 +127,12 @@ def _settings(argv: list[str], env: dict[str, str]) -> argparse.Namespace:
     _require(args.project_id, "project id")
     _require(args.container_id, "container id")
     return args
+
+
+def _choice(raw: str, allowed: tuple[str, ...], label: str) -> str:
+    if raw not in allowed:
+        raise CaptureConfigError(f"{label} must be one of {', '.join(allowed)}")
+    return raw
 
 
 def _positive_int(raw: str, label: str) -> int:

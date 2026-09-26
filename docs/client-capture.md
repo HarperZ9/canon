@@ -4,7 +4,8 @@
 `UserPromptSubmit` event into a shared-context text event. It is intentionally
 small: it captures the prompt text, stores transcript paths as locators only, and
 marks attachment coverage as unknown/pending instead of claiming complete image
-or file capture.
+or file capture. Mounted on `Stop` with response capture on, it also stores the
+client's last assistant message as an answer paired with its prompt.
 
 The adapter writes to the same Canon context SQLite database used by the
 read/write context MCP facade. Codex, Claude Code, and Flywheel should point at
@@ -44,6 +45,44 @@ Optional controls:
   `1000000`.
 - `--max-excerpt-chars`: per-source excerpt cap in the returned context,
   default `700`.
+- `--capture` or `CANON_CONTEXT_CAPTURE`: `prompts` (the default) or
+  `prompts+responses`. With `prompts`, a `Stop` delivery stores nothing.
+- `--transcript-locator` or `CANON_CONTEXT_TRANSCRIPT_LOCATOR`: `path` (the
+  default) records the transcript path the client reports as a locator; `none`
+  records no path. The path names the client's project directory, so it reveals
+  which project a prompt came from.
+
+## What is captured
+
+| Delivery | `--capture prompts` (default) | `--capture prompts+responses` |
+| --- | --- | --- |
+| `UserPromptSubmit` | the prompt text, stored as an event | the same |
+| `Stop` | nothing; the hook says response capture is off | `last_assistant_message`, stored as an answer event |
+
+Neither mode captures tool calls, tool results, reasoning, attachments, or the
+transcript file. An answer event records `tool_calls: not_captured` and
+`reasoning: not_captured` in its `coverage`.
+
+## Responses
+
+With `--capture prompts+responses`, a `Stop` delivery stores
+`last_assistant_message` as an event with `message_role: "assistant"`. It is
+linked to the prompt event captured for the same `prompt_id` (Claude Code) or
+`turn_id` (Codex): a `canon_event_ref` source and a `responds_to` field both
+name the prompt's record id. `coverage.pairing` says whether that prompt event
+was found in the store when the answer was stored. A purge of the prompt
+removes the answer with it unless the purge keeps responses
+(`docs/shared-context.md`).
+
+The answer's event id is `<native_id>-response-<segment>`, starting at segment
+1. A redelivered `Stop` with the same text is stored once. A different answer
+for the same prompt, as when a `Stop` hook lets the client continue, takes the
+next segment, up to 16.
+
+A `Stop` delivery that stores nothing returns a `systemMessage` saying why:
+response capture is off, the delivery carried no `last_assistant_message`, or
+it carried no `prompt_id` or `turn_id` to pair the answer with. The hook never
+returns a `decision`, so it cannot stop or continue the client.
 
 ## Hook Shapes
 
@@ -76,8 +115,9 @@ commands inside the source text. The adapter serializes the whole response with
 ## Config Fragments
 
 The files in `examples/shared-context-hooks/` are fragments, not full settings
-files. Merge the relevant `UserPromptSubmit` hook entry into an existing host
-configuration and keep any existing hooks in place. Their `required_environment`
+files. Merge the relevant `UserPromptSubmit` hook entry, and the `Stop` entry
+if you want answers captured, into an existing host configuration and keep any
+existing hooks in place. Their `required_environment`
 objects are illustrative metadata, not valid hook-root configuration keys. Set
 those variables in the host environment or wrap the command in a local script.
 
