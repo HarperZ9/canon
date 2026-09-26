@@ -1,0 +1,128 @@
+"""What a purge plan and its report say beyond the records they remove.
+
+Every plan and report names, beside what the purge removes, the residue it
+cannot remove from canon's own files and the copies canon cannot reach. Plans
+and reports carry ids, roles, counts and digests, never record text or file
+paths, because an MCP result enters a model context. The command line asks for
+`local_detail`, which adds each event's opening words and the transcript paths
+it recorded, for the owner's own terminal.
+"""
+from __future__ import annotations
+
+from .context_related import cited_event_ids
+
+REPORT_SCHEMA = "canon.context-purge-report/v1"
+PREVIEW_CHARS = 80
+_FREED = ("SQLite rewrote the database file without the purged rows, but the disk clusters "
+          "the old file, its rollback journal or its WAL released can still hold them "
+          "until reused, because canon stores context as plaintext.")
+_LEGACY = ("Records written by canon 0.3.0 or older keep a plain sha256 of their envelope "
+           "in their audit row, which can confirm a guess of the exact record.")
+_OUT_OF_REACH = (
+    ("client_transcripts", "The client keeps its own transcript of each session; canon "
+                           "stored only its path. Delete it with the client's own tools."),
+    ("earlier_query_results", "Excerpts earlier queries returned, including the context the "
+                              "capture hook added to later prompts, stay in those sessions' "
+                              "transcripts and with their model provider."),
+    ("model_provider", "The client sent each prompt to its model provider and received each "
+                       "answer from it; the provider keeps what its terms allow."),
+    ("backups_and_copies", "Backups, synced folders and copies of the database file are "
+                           "not changed."),
+)
+DOES_NOT_PROVE = [
+    "the residual scan reads the database and its journal, WAL and shared-memory files, "
+    "not freed disk clusters, backups or copies elsewhere",
+    "a value shorter than 16 bytes, or a run of a value shorter than min_detectable_bytes, "
+    "is checked only by its row being gone",
+    "a client or tool that sends the same event again stores it again",
+]
+
+
+def plan_extras(view, entries: list[dict], local_detail: bool) -> dict:
+    purged = {row["event_record_id"] for row in entries if row["role"] != "derived"}
+    keys = {row["key"] for row in entries}
+    legacy = sum(1 for row in entries if view.state.live[row["key"]].salt is None)
+    events = [view.events[row["event_record_id"]] for row in entries if row["role"] != "derived"]
+    extras = {
+        "citing_events_kept": sum(1 for event_id, row in view.events.items()
+                                  if "workspace/" + event_id not in keys
+                                  and cited_event_ids(row.record) & purged),
+        "residue_forecast": residue(legacy),
+        "out_of_reach": out_of_reach(sum(len(_locators(row)) for row in events)),
+        "does_not_prove": list(DOES_NOT_PROVE),
+    }
+    if local_detail:
+        extras["events"] = [_detail(view, row) for row in entries if row["role"] != "derived"]
+    return extras
+
+
+def residue(legacy_count: int) -> list[dict]:
+    return [{"class": "freed_clusters", "note": _FREED},
+            {"class": "legacy_fingerprints", "count": legacy_count, "note": _LEGACY}]
+
+
+def out_of_reach(transcript_count: int) -> list[dict]:
+    rows = [{"class": name, "note": note} for name, note in _OUT_OF_REACH]
+    rows[0]["count"] = transcript_count
+    return rows
+
+
+def purge_report(plan: dict, ordinals: list[int], scrub: dict, scan: dict, audit: dict) -> dict:
+    status = "purged" if scan["hits"] == 0 else "residue_found"
+    report = _report_base(plan, status)
+    report.update({
+        "records_purged": len(ordinals),
+        "tombstone_ordinals": {"first": min(ordinals), "last": max(ordinals)},
+        "reason_codes": sorted({row["reason_code"] for row in plan["entries"]}),
+        "audit": audit, "scrub": scrub, "scrub_pending": scrub["pending"],
+        "residual_scan": {"status": "run", **scan},
+        "residue": plan["residue_forecast"], "out_of_reach": plan["out_of_reach"],
+    })
+    return report
+
+
+def nothing_report(plan: dict) -> dict:
+    report = _report_base(plan, "nothing_to_purge")
+    report.update({"records_purged": 0, "scrub_pending": False})
+    return report
+
+
+def scrub_report(plan: dict, scrub: dict) -> dict:
+    """A confirmed plan that removed nothing but finished the scrub an
+    interrupted purge left pending. The purged values are gone from the rows,
+    so there is nothing left to scan for."""
+    status = "scrub_incomplete" if scrub["pending"] else "scrub_finished"
+    report = _report_base(plan, status)
+    report.update({"records_purged": 0, "scrub": scrub, "scrub_pending": scrub["pending"],
+                   "residual_scan": {"status": "not_run",
+                                     "reason": "the purged values left the rows in an "
+                                               "earlier run"},
+                   "residue": plan["residue_forecast"], "out_of_reach": plan["out_of_reach"]})
+    return report
+
+
+def _report_base(plan: dict, status: str) -> dict:
+    return {"schema": REPORT_SCHEMA, "status": status, "store_id": plan["store_id"],
+            "workspace_id": plan["workspace_id"], "project_id": plan["project_id"],
+            "plan_sha256": plan["plan_sha256"], "counts": dict(plan["counts"]),
+            "already_purged": list(plan["already_purged"]),
+            "citing_events_kept": plan["citing_events_kept"],
+            "does_not_prove": list(DOES_NOT_PROVE)}
+
+
+def _detail(view, entry: dict) -> dict:
+    row = view.events[entry["event_record_id"]]
+    data = row.record.data
+    text = str(data.get("message_text", ""))
+    return {"event_record_id": entry["event_record_id"], "ordinal": entry["ordinal"],
+            "role": entry["role"], "reason_code": entry["reason_code"],
+            "message_role": data.get("message_role", "user"),
+            "source_app": row.record.provenance.harness,
+            "preview": text[:PREVIEW_CHARS], "preview_truncated": len(text) > PREVIEW_CHARS,
+            "transcript_locators": _locators(row)}
+
+
+def _locators(row) -> list[str]:
+    return sorted({str(source.get("locator")) for source in row.record.data.get("sources", [])
+                   if isinstance(source, dict) and source.get("source_kind") == "transcript_locator"
+                   and source.get("locator")})

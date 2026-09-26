@@ -78,6 +78,7 @@ def test_context_mcp_lists_only_the_context_tools() -> None:
         "canon.context.ingest",
         "canon.context.query",
         "canon.context.get",
+        "canon.context.purge",
     ]
 
 
