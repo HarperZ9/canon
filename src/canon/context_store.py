@@ -4,6 +4,10 @@ Every read and write reconciles the records with the op-aware audit chain in
 one snapshot (context_audit.py). A put stores a salted commitment; a purge
 (context_purge.py) removes records and leaves a tombstone per record; the
 identity and schema versions are handled in context_migrate.py.
+
+An event sent again after a purge removed it is stored again (D-155), and the
+ingest result says `stored_after_purge` so the caller can tell the owner. A
+get of a purged record says `purged` beside not found.
 """
 from __future__ import annotations
 
@@ -65,7 +69,8 @@ class ContextStore:
             prepare_write(conn)
             for record in records:
                 insert_record(conn, record)
-        return self._ingest_result(records, "stored", len(records), store_id)
+        status = "stored_after_purge" if record_key(records[0]) in state.purged else "stored"
+        return self._ingest_result(records, status, len(records), store_id)
 
     @staticmethod
     def _ingest_result(records, status, count, store_id):
@@ -90,11 +95,13 @@ class ContextStore:
         return result, store_id, state.purged_ids()
 
     def query(self, workspace_id, project_id, query, top_k=5, include_pending=True,
-              expected_store_id=None, include_related=False, related_limit=5):
+              expected_store_id=None, include_related=False, related_limit=5,
+              exclude_answers=False):
         workspace, project = scope(workspace_id, project_id)
         records, store_id, purged = self._records(workspace, project, expected_store_id)
         result = search(records, workspace, project, query, top_k, include_pending,
-                        include_related=include_related, related_limit=related_limit)
+                        include_related=include_related, related_limit=related_limit,
+                        exclude_answers=exclude_answers)
         mark_purged_citations(result["hits"], records, purged)
         result["store_id"] = store_id
         return result
@@ -105,8 +112,11 @@ class ContextStore:
         by_id = {rec.id: rec for rec in records}
         rec = by_id.get(record_id)
         if rec is None:
-            return {"status": "not_found_in_searched_sources", "store_id": store_id,
-                    "does_not_prove": list(LIMITS)}
+            missing = {"status": "not_found_in_searched_sources", "store_id": store_id,
+                       "does_not_prove": list(LIMITS)}
+            if record_id in purged:
+                missing["purged"] = True
+            return missing
         found = {"status": "found_in_searched_sources", "record_key": record_key(rec),
                  "record": rec.to_dict(), "store_id": store_id, "does_not_prove": list(LIMITS)}
         cited = purged_citations(rec, by_id, purged)

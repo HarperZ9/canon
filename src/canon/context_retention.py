@@ -9,7 +9,9 @@ store; `retain` keeps everything. A run is one purge plan, confirmed by its
 digest like any other, and each tombstone names the rule as its reason code.
 
 An event an earlier run already purged is listed as already purged, so a
-policy can run again after it applied.
+policy can run again after it applied. A policy that retains an answer, or
+purges only its derived records, while another entry removes that answer with
+its prompt is refused; `keep_responses` is the way to keep answers.
 
 A policy that asks a tombstone to keep a content hash is refused: context
 tombstones hold none, so nothing kept after a purge confirms what it removed.
@@ -45,7 +47,7 @@ def policy_selection(policy) -> Selection:
         {"subject_id": rule.subject_id, "action": rule.action,
          "retain_content_hash": rule.retain_content_hash,
          "derived_stores": list(rule.derived_stores)} for rule in rules]}}
-    return Selection(description, keep, lambda view: _targets(view, rules))
+    return Selection(description, keep, lambda view: _targets(view, rules, keep))
 
 
 def _rule(entry, index: int) -> RetentionPolicy:
@@ -65,7 +67,7 @@ def _rule(entry, index: int) -> RetentionPolicy:
     return rule
 
 
-def _targets(view, rules: list[RetentionPolicy]) -> list[Target]:
+def _targets(view, rules: list[RetentionPolicy], keep: bool) -> list[Target]:
     targets = []
     for rule in rules:
         if rule.subject_id not in view.events:
@@ -85,4 +87,17 @@ def _targets(view, rules: list[RetentionPolicy]) -> list[Target]:
         if rule.action != "retain":
             mode = "derived" if rule.action == "purge-derived" else "event"
             targets.append(Target(rule.subject_id, mode, _REASONS[rule.action]))
+    if not keep:
+        _refuse_kept_answers_in_a_closure(view, rules, targets)
     return targets
+
+
+def _refuse_kept_answers_in_a_closure(view, rules, targets) -> None:
+    """An entry that retains an answer, or purges only its derived records,
+    cannot stand beside an entry that removes the answer with its prompt."""
+    removed = {answer for target in targets if target.mode == "event"
+               for answer in view.answers.get(target.event_id, [])}
+    kept = {rule.subject_id for rule in rules if rule.action in ("retain", "purge-derived")}
+    if removed & kept:
+        raise ContextPurgeError("a retention policy keeps an answer that another entry removes "
+                                "with its prompt; set keep_responses to true or change one entry")

@@ -34,7 +34,7 @@ import sqlite3
 import time
 from pathlib import Path
 
-from .context_migrate import META_TABLE
+from .context_migrate import META_TABLE, TOMBSTONE_TABLE, table_exists
 
 WINDOW = 16
 SCRUB_MARK = "scrub_pending"
@@ -42,6 +42,7 @@ _MAX_NEEDLES = 1_000_000
 _MAX_STEPS = 10_000_000
 _DIRECT_WINDOWS = 256
 _SIDECARS = (("database", ""), ("journal", "-journal"), ("wal", "-wal"), ("shm", "-shm"))
+_KEPT_TABLES = ("records", "audit", TOMBSTONE_TABLE)
 _IDENTIFIER_KEYS = frozenset({"event_record_id", "source_ids", "responds_to"})
 _RECORD_ID = re.compile(r"context-event-[0-9a-f]{64}")
 # Never a byte of UTF-8 or of a JSON-escaped form, so no window of a purged
@@ -138,13 +139,13 @@ def residual_scan(path, values: list[str], live_values: list[bytes], short: int)
 
 
 def live_values(conn) -> list[bytes]:
-    """Every text value the database still holds, for subtracting what is kept."""
+    """The text of the kept records, the audit rows and the tombstones, for
+    subtracting what is kept. Text in any other table counts as residue."""
     out = []
-    tables = [row[0] for row in conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")]
-    for table in tables:
-        quoted = '"' + table.replace('"', '""') + '"'
-        for row in conn.execute(f"SELECT * FROM {quoted}"):
+    for table in _KEPT_TABLES:
+        if not table_exists(conn, table):
+            continue
+        for row in conn.execute(f"SELECT * FROM {table}"):
             out.extend(value.encode("utf-8") for value in row if isinstance(value, str))
     return out
 

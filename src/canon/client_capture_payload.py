@@ -1,9 +1,17 @@
-"""Normalize provider hook payloads into the shared context ingest shape."""
+"""Normalize provider hook payloads into the shared context ingest shape.
+
+Captured text passes through the secret scrubber before it is stored: each
+secret-shaped value becomes `[REDACTED:<rule>]`, and an event whose text had
+any carries `coverage.redactions`, the count per rule and never a value. A
+secret with no recognisable shape passes through.
+"""
 from __future__ import annotations
 
 import re
 from typing import Any
 from uuid import uuid4
+
+from .workspace.scrub import scrub
 
 
 class CaptureInputError(ValueError):
@@ -22,17 +30,29 @@ def event_from_hook(
     transcript_locator: str = "path",
 ) -> dict[str, Any]:
     """Build a ContextStore.ingest payload from a UserPromptSubmit hook. With
-    `transcript_locator="none"` the transcript path is not recorded."""
+    `transcript_locator="none"` neither the transcript path nor the working
+    directory is recorded."""
     _require_user_prompt(hook)
     source_app = source_app_for(client, hook)
-    prompt = _prompt_text(hook)
+    cleaned = scrub(_prompt_text(hook))
     native_id, identified = native_prompt_id(source_app, hook)
-    event = _event_data(hook, source_app, prompt, native_id, identified, container_id)
+    event = _event_data(hook, source_app, cleaned.text, native_id, identified, container_id)
+    if cleaned.hits:
+        event["coverage"]["redactions"] = dict(sorted(cleaned.hits.items()))
     if transcript_locator != "path":
-        event["sources"] = [source for source in event["sources"]
-                            if source["source_kind"] != "transcript_locator"]
-        event["coverage"]["transcript"] = "locator_not_recorded"
+        _drop_paths(event)
     return {"workspace_id": workspace_id, "project_id": project_id, "event": event}
+
+
+def _drop_paths(event: dict[str, Any]) -> None:
+    event["sources"] = [source for source in event["sources"]
+                        if source["source_kind"] != "transcript_locator"]
+    event["cwd"] = None
+    event["coverage"]["transcript"] = "locator_not_recorded"
+    event["coverage"]["cwd"] = "not_recorded"
+    event["interpretations"][0]["text"] = (
+        "Hook input captures prompt text only; no transcript or working-directory "
+        "path is recorded.")
 
 
 def _event_data(

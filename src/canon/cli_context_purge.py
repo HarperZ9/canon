@@ -1,10 +1,18 @@
 """`canon context purge` and `canon context retention`.
 
-Both print the plan first. --dry-run stops there, --yes applies it, and with
-neither the command asks and applies only when the owner types the word
-"purge". The database comes from --db or CANON_CONTEXT_DB and must already
-exist, so a mistyped path never creates an empty store. Text taken from stored
-events has its control characters escaped before it reaches the terminal.
+--dry-run prints the plan and its digest. --confirm-plan <digest> applies that
+plan only, and refuses when the store has moved past it, so the owner applies
+exactly what the dry run showed. --yes prints the plan it computes at run time
+and applies it. With none of these the command prints the plan and applies it
+only when the owner types the word "purge".
+
+The database comes from --db or CANON_CONTEXT_DB and must already be a canon
+context store: a missing file, a file that is not SQLite, and a SQLite file
+without the store's identity tables are refused before anything writes to
+them. A purge that leaves residue, leaves its scrub unfinished or ends with a
+failing audit chain exits with a failure code. Previews are scrubbed of
+secret-shaped values and have their control characters escaped; JSON output
+carries them only with --show-preview.
 """
 from __future__ import annotations
 
@@ -17,16 +25,21 @@ from typing import TextIO
 from .cli_context_text import plan_text, report_text
 from .cli_format import make_result, write_result
 from .context_audit import ContextIntegrityError
-from .context_migrate import ContextStoreIdentityError
+from .context_migrate import META_TABLE, VERSION_TABLE, ContextStoreIdentityError
 from .context_purge import ContextPurgeError, ContextPurgeNotFound, ContextPurgeStale, select
 from .context_retention import policy_selection
 from .context_store import ContextStore
 
 ENV_CONTEXT_DB = "CANON_CONTEXT_DB"
 _POLICY_MAX_BYTES = 1_000_000
+_STORE_TABLES = ("records", "audit", META_TABLE, VERSION_TABLE)
+_NOT_A_STORE = "the file is not a canon context store"
 _FAILURES = ((ContextPurgeStale, "plan_stale"), (ContextPurgeNotFound, "not_found"),
              (ContextPurgeError, "invalid_args"), (ContextIntegrityError, "store_invalid"),
              (ContextStoreIdentityError, "store_invalid"))
+_UNFINISHED = {"residue_found": "the purge left residue in the database files",
+               "scrub_incomplete": "the file scrub did not finish; run the purge again",
+               "audit_failed": "the audit chain does not verify after the purge"}
 
 
 class _Refusal(Exception):
@@ -67,9 +80,14 @@ def _child(subs, parent, name, help_text):
                        help="absolute path of the context database (default: CANON_CONTEXT_DB)")
     child.add_argument("--workspace-id", required=True, help="workspace scope")
     child.add_argument("--project-id", required=True, help="project scope")
+    child.add_argument("--show-preview", action="store_true",
+                       help="include each event's scrubbed opening words in --json output")
     mode = child.add_mutually_exclusive_group()
     mode.add_argument("--dry-run", action="store_true", help="print the plan and delete nothing")
-    mode.add_argument("--yes", action="store_true", help="apply the plan without asking")
+    mode.add_argument("--confirm-plan", default=None, metavar="SHA256",
+                      help="apply only the plan a dry run printed with this digest")
+    mode.add_argument("--yes", action="store_true",
+                      help="print the plan computed now and apply it without asking")
     return child
 
 
@@ -88,27 +106,39 @@ def run_context_command(parsed, *, stdin, stdout, stderr, environ, color) -> int
         return _fail(out, command, "store_busy" if busy else "io_error",
                      "the context database is busy; try again" if busy
                      else "the context database could not be used")
+    except sqlite3.DatabaseError:
+        return _fail(out, command, "store_invalid", _NOT_A_STORE)
+    except ValueError as exc:
+        return _fail(out, command, "invalid_args", str(exc))
 
 
 def _run(parsed, stdin, environ, out: _Out, command: str) -> int:
-    if out.json_output and not (parsed.dry_run or parsed.yes):
-        raise _Refusal("invalid_args", "--json needs --dry-run or --yes")
+    applies = parsed.yes or parsed.confirm_plan is not None
+    if out.json_output and not (parsed.dry_run or applies):
+        raise _Refusal("invalid_args", "--json needs --dry-run, --confirm-plan or --yes")
     store = ContextStore(_database(parsed, environ))
     selection = _selection(parsed)
     scope = (parsed.workspace_id, parsed.project_id)
-    plan = store.purge_plan(*scope, selection, local_detail=True)
+    detail = parsed.show_preview or not out.json_output
+    plan = store.purge_plan(*scope, selection, local_detail=detail)
     if parsed.dry_run:
         return _emit(out, command, "dry run: nothing was deleted", plan,
                      plan_text(plan) + "dry run: nothing was deleted\n")
-    if not parsed.yes and plan["entries"]:
+    digest = parsed.confirm_plan or plan["plan_sha256"]
+    if not out.json_output and (parsed.yes or not applies):
         out.stdout.write(plan_text(plan))
-        out.stdout.write(f"Type purge to delete these {plan['counts']['records']} records: ")
-        out.stdout.flush()
-        answer = stdin.readline() if stdin is not None else ""
-        if answer.strip() != "purge":
-            raise _Refusal("not_confirmed", "not confirmed; nothing was deleted")
-    report = store.purge(*scope, selection, confirm_plan_sha256=plan["plan_sha256"])
+    if not applies and plan["entries"]:
+        _ask(out, stdin, plan)
+    report = store.purge(*scope, selection, confirm_plan_sha256=digest)
     return _emit(out, command, report["status"], report, report_text(report))
+
+
+def _ask(out: _Out, stdin, plan: dict) -> None:
+    out.stdout.write(f"Type purge to delete these {plan['counts']['records']} records: ")
+    out.stdout.flush()
+    answer = stdin.readline() if stdin is not None else ""
+    if answer.strip() != "purge":
+        raise _Refusal("not_confirmed", "not confirmed; nothing was deleted")
 
 
 def _database(parsed, environ) -> Path:
@@ -120,7 +150,26 @@ def _database(parsed, environ) -> Path:
         raise _Refusal("invalid_args", "the context database path must be absolute")
     if not path.is_file():
         raise _Refusal("not_found", "the context database was not found")
+    _require_store(path)
     return path
+
+
+def _require_store(path: Path) -> None:
+    """Read the schema through a read-only connection, so a file that is not a
+    canon context store is refused without a byte written to it."""
+    try:
+        conn = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, timeout=10)
+        try:
+            names = {row[0] for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'")}
+        finally:
+            conn.close()
+    except sqlite3.OperationalError:
+        raise
+    except sqlite3.DatabaseError as exc:
+        raise _Refusal("store_invalid", _NOT_A_STORE) from exc
+    if not set(_STORE_TABLES) <= names:
+        raise _Refusal("store_invalid", _NOT_A_STORE)
 
 
 def _selection(parsed):
@@ -138,14 +187,26 @@ def _selection(parsed):
         raise _Refusal("invalid_args", "the retention policy file is not JSON") from exc
 
 
+def _unfinished(data: dict) -> str | None:
+    """The failure code for a report that did not finish cleanly, if any."""
+    status = data.get("status")
+    if status in _UNFINISHED:
+        return status
+    return "scrub_incomplete" if data.get("scrub_pending") else None
+
+
 def _emit(out: _Out, command: str, message: str, data: dict, text: str) -> int:
+    failure = _unfinished(data)
     if out.json_output:
-        result = make_result(ok=True, command=command, failure_code="ok", message=message,
-                             data=data)
+        result = make_result(ok=failure is None, command=command,
+                             failure_code=failure or "ok",
+                             message=_UNFINISHED[failure] if failure else message, data=data)
         return write_result(result, stdout=out.stdout, stderr=out.stderr, json_output=True,
                             color=out.color)
     out.stdout.write(text)
-    return 0
+    if failure is None:
+        return 0
+    return _fail(out, command, failure, _UNFINISHED[failure])
 
 
 def _fail(out: _Out, command: str, code: str, message: str) -> int:

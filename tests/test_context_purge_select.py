@@ -88,7 +88,7 @@ def test_a_purged_event_sent_again_is_stored_again_under_a_fresh_salt(tmp_path) 
 
     again = store.ingest(payload)
 
-    assert again["status"] == "stored" and again["event_record_id"] == first
+    assert again["status"] == "stored_after_purge" and again["event_record_id"] == first
     assert rows(db, "SELECT salt FROM records WHERE id=?", (first,))[0][0] != salt
     assert store.verify_chain()["ok"] is True
 

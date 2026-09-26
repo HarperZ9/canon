@@ -29,7 +29,7 @@ def pending_sources(records):
 
 
 def search(records, workspace, project, query, top_k, include_pending,
-           include_related=False, related_limit=5):
+           include_related=False, related_limit=5, exclude_answers=False):
     required_text(query, "query", 200_000)
     if type(top_k) is not int or not 0 <= top_k <= 20:
         raise ValueError("top_k must be an integer between 0 and 20")
@@ -53,13 +53,18 @@ def search(records, workspace, project, query, top_k, include_pending,
         if score:
             identifier_matches += 1 if identifier_score else 0
             matches.append((identifier_score, keyword_score, score, rec, body))
+    roles = _event_roles(records)
+    matches, left_out = _drop_answers(matches, roles) if exclude_answers else (matches, None)
     matches.sort(key=lambda row: (-row[0], -row[1], row[3].id))
-    hits = [hit(rec, text, score, workspace, project)
+    hits = [hit(rec, text, score, workspace, project,
+                roles.get(rec.data["event_record_id"], "user"))
             for _identifier_score, _keyword_score, score, rec, text in matches[:top_k]]
     pending = pending_sources(records)
     result = _base_result(workspace, project, _query_status(matches, pending), hits, pending,
                           include_pending, records, matches, query_identifiers,
                           identifier_matches, malformed_url_count)
+    if left_out is not None:
+        result["coverage"]["answers_left_out"] = left_out
     if include_related:
         related, coverage = related_events(records, hits, workspace, project, related_limit)
         result["related_events"] = related
@@ -67,6 +72,19 @@ def search(records, workspace, project, query, top_k, include_pending,
         result["does_not_prove"] = result["does_not_prove"] + [
             "related source references do not prove truth, currentness, or supersession"]
     return result
+
+
+def _event_roles(records) -> dict:
+    """The message role of each event, which its derived records share."""
+    return {rec.id: rec.data.get("message_role", "user") for rec in records
+            if rec.data.get("record_role") == "event"}
+
+
+def _drop_answers(matches, roles):
+    """Matches outside assistant events, and how many were left out."""
+    kept = [row for row in matches
+            if roles.get(row[3].data["event_record_id"]) != "assistant"]
+    return kept, len(matches) - len(kept)
 
 
 def _query_status(matches, pending):
@@ -105,8 +123,9 @@ def _coverage(workspace, project, records, matches, hits, pending, include_pendi
             "supersession_resolution": "not_implemented"}
 
 
-def hit(rec, text, score, workspace, project):
+def hit(rec, text, score, workspace, project, message_role="user"):
     return {"record_id": rec.id, "workspace_id": workspace, "project_id": project,
+            "message_role": message_role,
             "excerpt": text[:2000], "excerpt_truncated": len(text) > 2000,
             "claim_state": rec.data.get("claim_state"), "score": score,
             "citation": {"record_key": "workspace/" + rec.id,

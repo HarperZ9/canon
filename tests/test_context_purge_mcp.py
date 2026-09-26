@@ -1,5 +1,6 @@
 """canon.context.purge over MCP: a call returns a plan, and only a second call
-that carries the plan's digest deletes.
+that carries the plan's digest deletes, on a server the owner started with
+CANON_CONTEXT_MCP_PURGE=apply (test_context_mcp_egress.py covers the refusal).
 
 An MCP result enters a model context and so reaches its provider, so neither
 the plan nor the report carries record text or a file path: ids, roles, counts
@@ -11,7 +12,7 @@ import json
 
 import pytest
 
-from canon.context_mcp import ENV_CONTEXT_DB, handle
+from canon.context_mcp import ENV_CONTEXT_DB, ENV_MCP_PURGE, handle
 from canon.context_store import ContextStore
 
 from ._context_fixtures import PROJECT, WORKSPACE, answer_payload, counts, prompt_payload, short_canary
@@ -32,6 +33,7 @@ def _purge(arguments):
 def stored(tmp_path, monkeypatch):
     db = tmp_path / "context.sqlite"
     monkeypatch.setenv(ENV_CONTEXT_DB, str(db))
+    monkeypatch.setenv(ENV_MCP_PURGE, "apply")
     canary = short_canary()
     payload = prompt_payload("turn-1", f"Prompt {canary}")
     payload["event"]["sources"].append({"source_id": "transcript_path",

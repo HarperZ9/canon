@@ -5,14 +5,18 @@ cannot remove from canon's own files and the copies canon cannot reach. Plans
 and reports carry ids, roles, counts and digests, never record text or file
 paths, because an MCP result enters a model context. The command line asks for
 `local_detail`, which adds each event's opening words and the transcript paths
-it recorded, for the owner's own terminal.
+it recorded, for the owner's own terminal; those words pass through the secret
+scrubber first. Every plan and report says `presence: none`: nothing checks
+that the owner, rather than an agent, confirmed the plan.
 """
 from __future__ import annotations
 
 from .context_related import cited_event_ids
+from .workspace.scrub import scrub
 
 REPORT_SCHEMA = "canon.context-purge-report/v1"
 PREVIEW_CHARS = 80
+PRESENCE = "none"
 _FREED = ("SQLite rewrote the database file without the purged rows, but the disk clusters "
           "the old file, its rollback journal or its WAL released can still hold them "
           "until reused, because canon stores context as plaintext.")
@@ -35,6 +39,8 @@ DOES_NOT_PROVE = [
     "a value shorter than 16 bytes, or a run of a value shorter than min_detectable_bytes, "
     "is checked only by its row being gone",
     "a client or tool that sends the same event again stores it again",
+    "no owner presence check guards the apply: any process that can reach this tool or "
+    "the CLI, agents included, can apply a purge",
 ]
 
 
@@ -49,6 +55,7 @@ def plan_extras(view, entries: list[dict], local_detail: bool) -> dict:
                                   and cited_event_ids(row.record) & purged),
         "residue_forecast": residue(legacy),
         "out_of_reach": out_of_reach(sum(len(_locators(row)) for row in events)),
+        "presence": PRESENCE,
         "does_not_prove": list(DOES_NOT_PROVE),
     }
     if local_detail:
@@ -68,7 +75,8 @@ def out_of_reach(transcript_count: int) -> list[dict]:
 
 
 def purge_report(plan: dict, ordinals: list[int], scrub: dict, scan: dict, audit: dict) -> dict:
-    status = "purged" if scan["hits"] == 0 else "residue_found"
+    status = ("audit_failed" if not audit["ok"] else
+              "purged" if scan["hits"] == 0 else "residue_found")
     report = _report_base(plan, status)
     report.update({
         "records_purged": len(ordinals),
@@ -107,13 +115,13 @@ def _report_base(plan: dict, status: str) -> dict:
             "plan_sha256": plan["plan_sha256"], "counts": dict(plan["counts"]),
             "already_purged": list(plan["already_purged"]),
             "citing_events_kept": plan["citing_events_kept"],
-            "does_not_prove": list(DOES_NOT_PROVE)}
+            "presence": PRESENCE, "does_not_prove": list(DOES_NOT_PROVE)}
 
 
 def _detail(view, entry: dict) -> dict:
     row = view.events[entry["event_record_id"]]
     data = row.record.data
-    text = str(data.get("message_text", ""))
+    text = scrub(str(data.get("message_text", ""))).text
     return {"event_record_id": entry["event_record_id"], "ordinal": entry["ordinal"],
             "role": entry["role"], "reason_code": entry["reason_code"],
             "message_role": data.get("message_role", "user"),

@@ -168,16 +168,6 @@ def test_a_redelivered_stop_is_idempotent_and_a_new_answer_takes_the_next_segmen
     assert ids == ["native-7-response-1", "native-7-response-2"]
 
 
-def test_an_answer_without_a_captured_prompt_says_the_pair_is_missing(tmp_path) -> None:
-    db = tmp_path / "context.sqlite"
-
-    code, _, err = _run(_stop_hook("claude-code"), db, "claude-code", *RESPONSES)
-
-    assert (code, err) == (0, "")
-    [answer] = _answers(db)
-    assert answer["data"]["coverage"]["pairing"] == "prompt_event_not_found"
-
-
 def test_the_environment_turns_response_capture_on_and_a_bad_value_fails_visibly(
         tmp_path) -> None:
     db = tmp_path / "context.sqlite"

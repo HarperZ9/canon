@@ -25,11 +25,9 @@ scrub when it is confirmed.
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Callable
-from dataclasses import dataclass, field
 
 from .canonical_json import canonical_json_bytes
-from .context_audit import StoreState, append_purge, verified_state
+from .context_audit import append_purge, verified_state
 from .context_migrate import (
     checked_expected_store_id, compare_store_id, prepare_write, store_identity,
 )
@@ -39,68 +37,21 @@ from .context_scrub import (
     clear_scrub_mark, live_values, mark_scrub_pending, residual_scan, scan_values,
     scrub_complete, scrub_connection, scrub_database, scrub_pending,
 )
+from .context_selection import (
+    NOT_FOUND, REASON_OWNER, ContextPurgeError, ContextPurgeNotFound, ScopeView, Selection,
+    Target, scope_view, select, was_purged,
+)
+
+__all__ = ["REASON_OWNER", "ContextPurgeError", "ContextPurgeNotFound", "ContextPurgeStale",
+           "ScopeView", "Selection", "Target", "apply_purge", "build_plan", "plan_purge",
+           "scope_view", "select", "was_purged"]
 
 PLAN_SCHEMA = "canon.context-purge-plan/v1"
-REASON_OWNER = "owner_request"
 _ROLE_RANK = {"event": 0, "response": 1, "derived": 2}
-_ONE_SELECTOR = "choose exactly one of event_id, before_ord or all"
-_NOT_FOUND = "event_id is not a captured event in this workspace and project"
-
-
-class ContextPurgeError(ValueError):
-    """A purge selection, policy or confirmation that cannot be applied."""
-
-
-class ContextPurgeNotFound(ContextPurgeError):
-    """The selected event is not a captured event in this workspace and project."""
 
 
 class ContextPurgeStale(ContextPurgeError):
     """The confirmed plan no longer matches what the store holds."""
-
-
-@dataclass(frozen=True)
-class Target:
-    event_id: str
-    mode: str  # "event": the event and its closure; "derived": its derived records only
-    reason_code: str
-
-
-@dataclass(frozen=True)
-class ScopeView:
-    state: StoreState
-    events: dict
-    derived: dict
-    answers: dict
-
-
-@dataclass(frozen=True)
-class Selection:
-    description: dict
-    keep_responses: bool
-    resolve: Callable[[ScopeView], list[Target]] = field(compare=False, repr=False)
-
-
-def select(*, event_id=None, before_ord=None, all_events=False, keep_responses=False) -> Selection:
-    """Exactly one of an event record id, an ordinal cut-off, or every event."""
-    if type(keep_responses) is not bool:
-        raise ContextPurgeError("keep_responses must be true or false")
-    if type(all_events) is not bool or [event_id is not None, before_ord is not None,
-                                        all_events].count(True) != 1:
-        raise ContextPurgeError(_ONE_SELECTOR)
-    if event_id is not None:
-        if not isinstance(event_id, str) or not event_id:
-            raise ContextPurgeError(_NOT_FOUND)
-        return Selection({"event_id": event_id}, keep_responses,
-                         lambda view: [Target(event_id, "event", REASON_OWNER)])
-    if before_ord is not None:
-        if type(before_ord) is not int or before_ord < 1:
-            raise ContextPurgeError("before_ord must be a whole number of 1 or more")
-        return Selection({"before_ord": before_ord}, keep_responses, lambda view: [
-            Target(eid, "event", REASON_OWNER) for eid, row in sorted(view.events.items())
-            if row.ordinal < before_ord])
-    return Selection({"all": True}, keep_responses, lambda view: [
-        Target(eid, "event", REASON_OWNER) for eid in sorted(view.events)])
 
 
 def plan_purge(store, workspace_id, project_id, selection, *, expected_store_id=None,
@@ -167,46 +118,23 @@ def build_plan(state, store_id, workspace, project, selection, *, scrub_is_pendi
             **plan_extras(view, entries, local_detail)}
 
 
-def scope_view(state: StoreState, workspace: str, project: str) -> ScopeView:
-    """The events of one workspace and project, their derived records, and the
-    assistant events that answer each of them."""
-    events, derived, answers = {}, {}, {}
-    for key, row in state.live.items():
-        data = row.record.data
-        parent = data.get("event_record_id")
-        if (data.get("workspace_id"), data.get("project_id")) != (workspace, project) \
-                or not isinstance(parent, str):
-            continue
-        if data.get("record_role") == "event" and parent == row.record.id:
-            events[parent] = row
-        else:
-            derived.setdefault(parent, []).append(key)
-    for event_id, row in events.items():
-        data = row.record.data
-        if data.get("message_role") == "assistant" and isinstance(data.get("responds_to"), str):
-            answers.setdefault(data["responds_to"], []).append(event_id)
-    return ScopeView(state, events, {k: sorted(v) for k, v in derived.items()},
-                     {k: sorted(v) for k, v in answers.items()})
-
-
-def was_purged(view: ScopeView, event_id: str) -> bool:
-    """Whether the latest audit row for this event's record is a purge."""
-    return "workspace/" + event_id in view.state.purged
-
-
 def _closure(view: ScopeView, targets: list[Target], keep_responses: bool):
+    """The records a plan removes. A target an earlier purge removed is listed
+    as already purged, and an answer stored after that purge still goes with
+    it, so a rerun leaves nothing that restates the purged prompt."""
     entries: dict[str, dict] = {}
     already: set[str] = set()
     for target in sorted(targets, key=lambda item: (item.event_id, item.mode)):
-        if target.event_id not in view.events:
-            if not was_purged(view, target.event_id):
-                raise ContextPurgeNotFound(_NOT_FOUND)
+        live = target.event_id in view.events
+        if not live and not was_purged(view, target.event_id):
+            raise ContextPurgeNotFound(NOT_FOUND)
+        if not live:
             already.add(target.event_id)
-            continue
-        if target.mode != "derived":
-            _add(entries, view, "workspace/" + target.event_id, target.event_id, "event",
-                 target.reason_code)
-        _add_derived(entries, view, target.event_id, target.reason_code)
+        else:
+            if target.mode != "derived":
+                _add(entries, view, "workspace/" + target.event_id, target.event_id, "event",
+                     target.reason_code)
+            _add_derived(entries, view, target.event_id, target.reason_code)
         if target.mode == "derived" or keep_responses:
             continue
         for answer in view.answers.get(target.event_id, []):

@@ -13,6 +13,12 @@ keep sha256(envelope); they still verify, and a purge counts them as legacy
 fingerprints. Every purge row has a tombstone, stored at the row's sequence
 number, whose sha256 is the row's digest. A tombstone names the key, a reason
 code and its ordinal, and holds no content hash.
+
+The schema holds only what canon creates: the records, audit, tombstone and
+identity tables, SQLite's own sequence and statistics tables, and the indexes
+SQLite makes for their keys. A trigger, a view, an index or a table from
+anywhere else fails integrity before any read, write or purge, since a trigger
+could copy each deleted row somewhere a purge does not look.
 """
 from __future__ import annotations
 
@@ -27,12 +33,16 @@ from .backends.sqlite import (
     GENESIS, OP_PURGE, OP_PUT, audit_rows, chain_hash, last_chain, row_is_chained,
 )
 from .canonical_json import canonical_json_text
-from .context_migrate import TOMBSTONE_TABLE, VERSION_OPS, columns, table_exists
+from .context_migrate import (
+    META_TABLE, TOMBSTONE_TABLE, VERSION_OPS, VERSION_TABLE, columns, table_exists,
+)
 from .schema import Record
 
 PUT_TAG = b"canon.context.put.v1"
 TOMBSTONE_SCHEMA = "canon.context-tombstone/v1"
 _SALT = re.compile(r"[0-9a-f]{64}\Z")
+CANON_TABLES = frozenset({"records", "audit", "sqlite_sequence", META_TABLE, VERSION_TABLE,
+                          TOMBSTONE_TABLE})
 
 
 class ContextIntegrityError(ValueError):
@@ -102,6 +112,7 @@ def append_purge(conn, key: str, reason_code: str) -> int:
 
 def verified_state(conn, version) -> StoreState:
     """Reconcile records, audit and tombstones in the caller's snapshot."""
+    check_schema(conn)
     latest, purges, length = _walk_chain(conn)
     _check_tombstones(conn, purges)
     live = _check_records(conn, latest)
@@ -109,6 +120,16 @@ def verified_state(conn, version) -> StoreState:
         raise ContextIntegrityError("context store version marker is older than its rows")
     purged = {key: seq for key, (op, _sha, seq) in latest.items() if op == OP_PURGE}
     return StoreState(live, purged, length)
+
+
+def check_schema(conn) -> None:
+    """Refuse any schema object canon did not create."""
+    for kind, name, table in conn.execute("SELECT type, name, tbl_name FROM sqlite_master"):
+        if kind == "table" and (name in CANON_TABLES or name.startswith("sqlite_stat")):
+            continue
+        if kind == "index" and name.startswith("sqlite_autoindex_") and table in CANON_TABLES:
+            continue
+        raise ContextIntegrityError("context store schema holds an object canon did not create")
 
 
 def _walk_chain(conn):

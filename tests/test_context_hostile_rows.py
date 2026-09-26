@@ -76,7 +76,8 @@ def test_a_tombstone_in_another_layout_fails_integrity(tmp_path) -> None:
     _refused(store)
 
 
-def test_a_purge_reads_a_table_whose_name_needs_quoting(tmp_path) -> None:
+def test_a_table_another_tool_added_is_refused_even_when_its_name_needs_quoting(
+        tmp_path) -> None:
     db = tmp_path / "context.sqlite"
     store = ContextStore(db)
     prompt = store.ingest(prompt_payload("turn-1", "A prompt to purge"))["event_record_id"]
@@ -86,12 +87,9 @@ def test_a_purge_reads_a_table_whose_name_needs_quoting(tmp_path) -> None:
     con.commit()
     con.close()
 
-    plan = store.purge_plan(WORKSPACE, PROJECT, select(event_id=prompt))
-    report = store.purge(WORKSPACE, PROJECT, select(event_id=prompt),
-                         confirm_plan_sha256=plan["plan_sha256"])
-
-    assert report["status"] == "purged"
-    assert report["records_purged"] == 3
+    with pytest.raises(ContextIntegrityError, match="schema"):
+        store.purge_plan(WORKSPACE, PROJECT, select(event_id=prompt))
+    assert store.verify_chain()["ok"] is False
 
 
 def test_an_event_id_with_control_characters_prints_escaped(tmp_path) -> None:

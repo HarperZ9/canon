@@ -3,6 +3,12 @@
 A UserPromptSubmit delivery is queried against prior context and stored as a
 prompt event. A Stop delivery is handled by client_capture_stop.py: it stores
 the client's last assistant message only when response capture is on.
+
+The context returned to a prompt leaves stored answers out unless
+`--replay-answers on` is set, and says how many it left out. Every excerpt
+passes through the secret scrubber before it is returned, which also covers
+records stored before capture scrubbed its text. A prompt a purge removed and
+the client sent again is stored again, and the hook says so.
 """
 from __future__ import annotations
 
@@ -15,6 +21,7 @@ from typing import Any, Callable, TextIO
 
 from .client_capture_payload import CaptureInputError, event_from_hook
 from .client_capture_stop import CAPTURE_MODES, CAPTURE_PROMPTS, capture_stop
+from .workspace.scrub import scrub
 
 
 ENV_CONTEXT_DB = "CANON_CONTEXT_DB"
@@ -26,7 +33,11 @@ ENV_TOP_K = "CANON_CONTEXT_TOP_K"
 ENV_STDIN_MAX_CHARS = "CANON_HOOK_STDIN_MAX_CHARS"
 ENV_CAPTURE = "CANON_CONTEXT_CAPTURE"
 ENV_TRANSCRIPT_LOCATOR = "CANON_CONTEXT_TRANSCRIPT_LOCATOR"
+ENV_REPLAY_ANSWERS = "CANON_CONTEXT_REPLAY_ANSWERS"
 TRANSCRIPT_LOCATOR_MODES = ("path", "none")
+REPLAY_MODES = ("off", "on")
+STORED_AGAIN = ("Canon: this prompt was purged earlier and the client sent it again; it is "
+                "stored again. Purge it again to remove it.")
 
 ServiceFactory = Callable[[Path], Any]
 
@@ -80,9 +91,13 @@ def _capture_prompt(hook: dict[str, Any], args: argparse.Namespace,
         payload["event"]["message_text"],
         top_k=args.top_k,
         include_pending=True,
+        exclude_answers=args.replay_answers != "on",
     )
     ingest = service.ingest(payload)
-    return _context_output(payload, ingest, query, args.top_k, args.max_excerpt_chars)
+    output = _context_output(payload, ingest, query, args.top_k, args.max_excerpt_chars)
+    if ingest.get("status") == "stored_after_purge":
+        output["systemMessage"] = STORED_AGAIN
+    return output
 
 
 def main() -> int:
@@ -101,6 +116,7 @@ def _settings(argv: list[str], env: dict[str, str]) -> argparse.Namespace:
     parser.add_argument("--max-excerpt-chars", type=int, default=700)
     parser.add_argument("--capture", default=None)
     parser.add_argument("--transcript-locator", default=None)
+    parser.add_argument("--replay-answers", default=None)
     args, unknown = parser.parse_known_args(argv)
     if unknown:
         raise CaptureConfigError(f"unknown arguments: {' '.join(unknown)}")
@@ -110,6 +126,8 @@ def _settings(argv: list[str], env: dict[str, str]) -> argparse.Namespace:
     args.transcript_locator = _choice(
         args.transcript_locator or env.get(ENV_TRANSCRIPT_LOCATOR, "path"),
         TRANSCRIPT_LOCATOR_MODES, "transcript locator")
+    args.replay_answers = _choice(args.replay_answers or env.get(ENV_REPLAY_ANSWERS, "off"),
+                                  REPLAY_MODES, "replay answers")
     db_raw = args.db or env.get(ENV_CONTEXT_DB, "")
     args.workspace_id = args.workspace_id or env.get(ENV_WORKSPACE_ID, "")
     args.project_id = args.project_id or env.get(ENV_PROJECT_ID, "")
@@ -220,6 +238,9 @@ def _format_context(
     ]
     if event.get("coverage", {}).get("deduplication") == "unsupported_without_native_prompt_id":
         lines.append("Duplicate retry idempotence: unsupported without a native prompt id.")
+    left_out = (query.get("coverage") or {}).get("answers_left_out")
+    if left_out:
+        lines.append(f"Stored answers left out: {left_out} (answer replay is off).")
     hits = list(query.get("hits") or [])[:top_k]
     if hits:
         lines.append("Sources:")
@@ -242,7 +263,7 @@ def _format_hit(idx: int, hit: dict, max_chars: int) -> str:
     citation = hit.get("citation") if isinstance(hit.get("citation"), dict) else {}
     record_key = citation.get("record_key") or hit.get("record_id") or "unknown"
     claim_state = hit.get("claim_state") or "unknown"
-    excerpt = _clip(str(hit.get("excerpt", "")), max_chars)
+    excerpt = _clip(scrub(str(hit.get("excerpt", ""))).text, max_chars)
     return f"- [{idx}] {record_key} claim_state={claim_state}: {excerpt}"
 
 

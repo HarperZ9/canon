@@ -129,18 +129,32 @@ keeps no content hash.
 The latest row decides, so a client that sends the same event again after a
 purge stores it again, under a fresh salt. Blocking the key forever would not
 stop a tool from sending the same text under a new id, and it would make a
-mistaken purge permanent. The purge report says so.
+mistaken purge permanent. The purge report says so, the ingest result says
+`stored_after_purge` instead of `stored`, and the capture hook returns a
+`systemMessage` telling the owner the event is back. Whether a purged event
+should be refused instead, as the design's "deleted content does not come
+back" invariant asks, is an open decision for the owner.
 
-## D-156 The command line applies only a plan the owner saw
+## D-156 The command line applies a plan the owner saw, or says it did not
 
-`canon context purge` and `canon context retention` print the plan. `--dry-run`
-stops there, `--yes` applies it, and with neither the command applies only when
-the owner types `purge`. The database must already exist, so a mistyped path
-does not create an empty store. `--json` needs `--dry-run` or `--yes`, so a
-script never waits on a prompt. The terminal text shows each event's opening
-words and the transcript paths it recorded, with control and format characters
-escaped; plans and reports over MCP carry ids, roles, counts and digests only,
-because an MCP result enters a model context.
+`--dry-run` prints the plan and its digest. `--confirm-plan <digest>` applies
+that plan only and refuses it as stale when the store moved past it, which is
+how the owner applies exactly what a dry run showed. `--yes` prints the plan it
+computes at run time and applies it; it applies whatever matches then, which
+can be more than an earlier dry run listed, and the docs say so. With none of
+these the command prints the plan and applies it only when the owner types
+`purge`. `--json` needs `--dry-run`, `--confirm-plan` or `--yes`, so a script
+never waits on a prompt.
+
+The database must already be a canon context store: the command reads its
+schema through a read-only connection first, so a missing file, a file that is
+not SQLite, or another SQLite file is refused as `not_found` or
+`store_invalid` with no byte written to it. The terminal text shows each
+event's opening words, run through the secret scrubber, and the transcript
+paths it recorded, with control and format characters escaped. `--json` output
+carries the previews only with `--show-preview`, because a command an agent
+runs lands in the agent's transcript. Plans and reports over MCP carry ids,
+roles, counts and digests only, because an MCP result enters a model context.
 
 ## D-157 An interrupted purge finishes on the next run
 
@@ -175,12 +189,72 @@ from the same native id, so reusing it would give the answer the prompt's
 identity with different content and raise `ContextCollision`. The answer names
 the prompt's record id twice: in a `canon_event_ref` source, which related-event
 queries follow, and in `responds_to`, which a purge follows (D-151). The hook
-computes that id the way ingest does and records in `coverage.pairing` whether
-the prompt was in the store. A `Stop` with no `prompt_id` or `turn_id` stores
-nothing, because an answer that names no prompt would survive the purge of the
-prompt it restates. A different answer for the same prompt takes the next
-segment, up to 16, and a redelivery of the same answer stays idempotent.
+computes that id the way ingest does and stores the answer only when that
+prompt event is in the store; `coverage.pairing` then reads
+`prompt_event_found`. A `Stop` with no `prompt_id` or `turn_id`, a `Stop`
+whose prompt was purged, and a `Stop` whose prompt was never captured store
+nothing and say which, because an answer that names no stored prompt would
+survive the purge of the prompt it restates. A different answer for the same
+prompt takes the next segment, up to 16, and a redelivery of the same answer
+stays idempotent.
 
 Tool calls and reasoning are not captured in either mode, and each answer says
-so in its coverage. `--transcript-locator none` records no transcript path,
-since the path names the client's project directory.
+so in its coverage. `--transcript-locator none` records neither the transcript
+path nor the working directory, since both name the client's project
+directory, and marks `coverage.cwd: not_recorded`.
+
+## D-159 The schema holds only what canon creates
+
+Every read, write and purge first lists `sqlite_master`. The tables canon
+creates, SQLite's `sqlite_sequence` and `sqlite_stat*` tables, and the
+`sqlite_autoindex_*` indexes on canon's tables are allowed; any other table,
+index, view or trigger fails integrity. Anything that can write the file can
+add a trigger that copies each deleted row into a table of its own, and a
+purge would then report success while the text survived. The residual scan
+subtracts only text held by the records, audit and tombstone tables, so text
+in any other table counts as residue rather than as kept.
+
+## D-160 Captured text is scrubbed, and answers are not replayed by default
+
+The hook runs prompt and answer text through the workspace secret scrubber
+before it stores them and records the hit count per rule in
+`coverage.redactions`, only when there were hits, so a prompt without a
+secret-shaped value stores the same bytes as 0.3.0 and a redelivery stays
+idempotent across the upgrade. Excerpts the hook returns, and query excerpts
+and get results over MCP, are scrubbed again at egress, which covers records
+stored before this version. The context the hook returns leaves out hits from
+assistant events unless `--replay-answers on` is set, and says how many it
+left out, because a returned excerpt enters the prompt another client sends to
+its provider. The scrubber is pattern-based; a secret with no recognisable
+shape passes through.
+
+## D-161 A purge over MCP is a plan unless the owner enabled apply
+
+The model that asked for a plan can send its digest straight back, and an
+allow rule covering the whole `canon-context` server would approve the purge
+tool with the rest. So `canon.context.purge` applies a confirmed plan only when
+the server process was started with `CANON_CONTEXT_MCP_PURGE=apply`; otherwise
+it refuses and names `canon context purge --confirm-plan`. Every plan and
+report carries `presence: none` and a `does_not_prove` line saying any process
+that can reach the command or an apply-enabled server, agents included, can
+apply a purge. An owner-presence check is not built in canon.
+
+## D-162 A purge that did not finish cleanly fails the command
+
+A report whose status is `residue_found`, `scrub_incomplete` or
+`audit_failed`, or which leaves the scrub mark set, exits with `EX_GATE` and a
+failure code of the same name; `--json` output says `ok: false` and keeps the
+report under `data`. A script or a scheduled retention run can then tell a
+clean purge from one that left text behind. A file that is not a database is
+`store_invalid` and a malformed scope is `invalid_args`, never a traceback.
+
+## D-163 keep_responses holds for every selector, and reruns take late answers
+
+With `keep_responses`, `before_ord` and `all` leave out each answer whose
+prompt they also select or an earlier purge removed; before this, a bulk
+selector named the answers as events of their own and removed them. An answer
+named by its own event id is removed as named. A rerun that finds its target
+already purged still removes answers stored after that purge, so a `Stop` that
+raced the purge leaves nothing behind. A retention policy that retains an
+answer, or purges only its derived records, while another entry removes the
+answer with its prompt is refused and points at `keep_responses`.
