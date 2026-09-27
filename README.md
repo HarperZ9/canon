@@ -72,8 +72,9 @@ canon switch --to codex --create
   headers, cookies, passwords in URLs and config files, and secret-named
   assignments in any case are redacted before a workspace record is stored, the
   workspace store refuses anything that still looks like one, and a brief that
-  would carry one is refused. Captured context events are redacted by the same
-  rules but not refused (see C1 below).
+  would carry one is refused. Shared context events are redacted by the same
+  rules at every ingest, through the capture hook or `canon.context.ingest`,
+  but not refused (see C1 below).
 - **Losses are named.** Each importer lists what it drops and counts it. A
   session with content the importer has not seen is refused until you declare
   that drop, so a format change cannot lose data quietly.
@@ -118,7 +119,7 @@ in advance. Anything else fails the gate rather than logging a warning.
 
 ## What canon carries
 
-![A table of twelve rows: what canon carries, how many of it there are, and where each number is read from. Eight record kinds share one envelope: five under the v1 record tag and three workspace-state kinds under their own tag. Two scopes layer, workspace over global. Seven surfaces sit on the write allow-list: a global and a workspace file for Claude Code, an AGENTS.md for Codex, a workspace SOUL.md for Hermes, a GEMINI.md, the Copilot instructions file, and one Cursor rule. Four storage adapters implement the backend protocol, and five capability tokens describe what each one can carry. Twenty-two schema pins name the seams that carry a version. The aggregate check folds four legs, and four gate functions share the same zero or one exit code. 165 source modules hold 27,686 lines, and 98 test files hold 1740 tests. Two surfaces named in the roadmap are absent from the catalog, a global SOUL.md and a global GEMINI.md, so canon does not render them.](https://raw.githubusercontent.com/HarperZ9/canon/main/docs/art/record-table.svg)
+![A table of twelve rows: what canon carries, how many of it there are, and where each number is read from. Eight record kinds share one envelope: five under the v1 record tag and three workspace-state kinds under their own tag. Two scopes layer, workspace over global. Seven surfaces sit on the write allow-list: a global and a workspace file for Claude Code, an AGENTS.md for Codex, a workspace SOUL.md for Hermes, a GEMINI.md, the Copilot instructions file, and one Cursor rule. Four storage adapters implement the backend protocol, and five capability tokens describe what each one can carry. Twenty-two schema pins name the seams that carry a version. The aggregate check folds four legs, and four gate functions share the same zero or one exit code. 167 source modules hold 27,909 lines, and 102 test files hold 1777 tests. Two surfaces named in the roadmap are absent from the catalog, a global SOUL.md and a global GEMINI.md, so canon does not render them.](https://raw.githubusercontent.com/HarperZ9/canon/main/docs/art/record-table.svg)
 
 Every count is asserted against the module that defines it in
 [`tests/test_repo_art.py`](https://github.com/HarperZ9/canon/blob/main/tests/test_repo_art.py).
@@ -187,7 +188,11 @@ calls or reasoning as records, though an answer's own text can quote files and
 tool output (`docs/client-capture.md`). Prompt and answer text pass through
 the secret scrubber before they are stored, which catches secret-shaped values
 by pattern and misses a secret with no recognisable shape. An answer is stored
-only beside the prompt it answers. `canon context purge` removes captured
+only while the prompt it answers is in the store, checked in the same write.
+Pairing needs the same prompt id on the prompt and on the `Stop` delivery, and
+the answer in `last_assistant_message`; the tests use synthetic hook inputs,
+and whether each live client sends those fields is unverified. `canon context
+purge` removes captured
 events together with the records derived from them and the answer paired with
 each prompt. `--dry-run` shows the plan and its digest, and `--confirm-plan`
 applies exactly that plan or refuses it as stale; `--yes` applies the plan as
@@ -196,18 +201,23 @@ policy the same way. Canon keeps every captured event until you purge it. The
 audit chain still verifies after a purge, each removed record leaves a
 tombstone with no content hash, and new records store a salted digest that no
 longer opens once the record is gone. A client that sends a purged event again
-stores it again, and the capture hook says so. The store stays plaintext on
-disk, so freed disk clusters can hold purged text until they are reused, and
+under the same native id stores it again, and the capture hook says so. The
+store stays plaintext on disk, so freed disk clusters can hold purged text until they are reused, and
 every purge report says so along with the copies canon cannot reach. What the
 hook returns to a later prompt becomes part of the prompt the client sends to
 its model provider; with a hosted provider that text leaves your machine under
 the provider's terms. The first capture or purge this version writes raises the
 context store's identity version to 2, and canon 0.3.0 and older refuse such a
-database as identity invalid. These changes shipped in 0.4.0.
+database as identity invalid. These changes shipped in 0.4.0. Version 0.4.2
+closes security and privacy gaps that a second review found in 0.4.0 and
+0.4.1; `CHANGELOG.md` marks each one, and a store in use with either version
+should move to 0.4.2.
 
 Installing a region into an existing file, the first migrator on the version seam,
-and the global SOUL.md and the global GEMINI.md surfaces are later phases. Everything
-shipped is proven by a full test suite and aims at the one envelope.
+and the global SOUL.md and the global GEMINI.md surfaces are later phases.
+Everything shipped has tests, and all of it aims at the one envelope. The
+capture hook's tests run on synthetic hook inputs, not recordings of live
+clients.
 
 ## Run it
 

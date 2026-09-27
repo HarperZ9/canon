@@ -1,8 +1,9 @@
 """Whether other accounts on this machine can read or replace the context database.
 
-canon sets no file permissions of its own: the database and its journal take
-the access rules of the directory they are created in. On POSIX the check
-reads the mode bits. The database is `shared` when its group or other bits
+canon sets no file permissions of its own. On Windows the database and its
+journal inherit the ACL of their folder; on POSIX SQLite creates them with the
+process umask applied, whatever the folder allows. On POSIX the check reads
+the mode bits. The database is `shared` when its group or other bits
 grant anything, or when its directory is writable by group or other, since an
 account that can write the directory can replace the file. On Windows access
 is governed by ACLs this check does not read, so it reports `not_checked`

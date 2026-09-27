@@ -8,6 +8,12 @@ identity and schema versions are handled in context_migrate.py.
 An event sent again after a purge removed it is stored again (D-155), and the
 ingest result says `stored_after_purge` so the caller can tell the owner. A
 get of a purged record says `purged` beside not found.
+
+Every ingest is redacted first (context_redact.py), whoever sends it. An
+answer, an assistant event whose `responds_to` names a prompt, is stored only
+while that prompt is live in the same workspace and project. The check runs
+inside the write transaction that stores the answer, so a purge of the prompt
+cannot leave the answer behind (D-164).
 """
 from __future__ import annotations
 
@@ -26,14 +32,24 @@ from .context_migrate import (
 )
 from .context_query import search
 from .context_records import LIMITS, make_records, scope
+from .context_redact import redact_payload
 from .context_related import mark_purged_citations, purged_citations
 
-__all__ = ["ContextCollision", "ContextIntegrityError", "ContextStore",
+__all__ = ["ContextCollision", "ContextIntegrityError", "ContextPairingError", "ContextStore",
            "ContextStoreIdentityError"]
 
 
 class ContextCollision(ValueError):
     """The same observed event identity was submitted with different content."""
+
+
+class ContextPairingError(ValueError):
+    """An answer names a prompt that is not live in this workspace and project."""
+
+    def __init__(self, purged: bool) -> None:
+        super().__init__("the prompt this answer responds to was purged" if purged else
+                         "the prompt this answer responds to is not in the store")
+        self.purged = purged
 
 
 class ContextStore:
@@ -54,7 +70,7 @@ class ContextStore:
 
     def ingest(self, payload, expected_store_id=None):
         expected = checked_expected_store_id(expected_store_id)
-        records = make_records(payload)
+        records = make_records(redact_payload(payload))
         with self._backend._conn() as conn:
             conn.execute("BEGIN IMMEDIATE")
             store_id, version = store_identity(conn, create=True)
@@ -66,6 +82,7 @@ class ContextStore:
                 return self._ingest_result(records, "already_present", 0, store_id)
             if any(record_key(record) in state.live for record in records[1:]):
                 raise ContextIntegrityError("captured event has derived records without its event")
+            _require_prompt(records[0], state)
             prepare_write(conn)
             for record in records:
                 insert_record(conn, record)
@@ -157,6 +174,22 @@ class ContextStore:
                            confirm_plan_sha256=confirm_plan_sha256,
                            expected_store_id=expected_store_id,
                            busy_retry_seconds=busy_retry_seconds)
+
+
+def _require_prompt(event, state) -> None:
+    """Refuse an answer whose prompt is not a live event in its scope."""
+    data = event.data
+    prompt = data.get("responds_to")
+    if data.get("message_role") != "assistant" or not isinstance(prompt, str):
+        return
+    key = "workspace/" + prompt
+    row = state.live.get(key)
+    if row is None:
+        raise ContextPairingError(purged=key in state.purged)
+    found = row.record.data
+    if (found.get("record_role"), found.get("workspace_id"), found.get("project_id")) != \
+            ("event", data["workspace_id"], data["project_id"]):
+        raise ContextPairingError(purged=False)
 
 
 def _check_redelivery(records, first, state):

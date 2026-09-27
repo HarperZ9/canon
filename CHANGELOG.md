@@ -4,6 +4,74 @@
 
 Nothing yet.
 
+## 0.4.2 - 2026-09-26
+
+Fixes from a second review of the 0.4.0 purge and capture work. Items marked
+**Security** or **Privacy** close gaps that 0.4.0 and 0.4.1 ship; where an
+earlier release has the same gap, the item names it. Decisions D-164 to D-170
+are in `project-docs/C1-DECISIONS.md`. The record and the context store's
+identity version do not change.
+
+- **Security.** Every ingest is redacted, including events sent through the
+  `canon.context.ingest` MCP tool. 0.4.0 and 0.4.1 redacted the capture hook's
+  events only and stored an MCP ingest as sent, secret-shaped values included;
+  0.2.0 and 0.3.0 redacted neither path. An event stored raw before this
+  change that is sent again with a secret-shaped value is refused as a
+  collision, since its redacted form differs from what is stored.
+- **Security.** Query excerpts are scrubbed whole and then cut at 2000
+  characters. 0.4.0 and 0.4.1 cut first, so the part of a secret before the
+  cut had lost its recognisable shape and came back over MCP. 0.2.0 and 0.3.0
+  scrub no query result at all.
+- **Security.** Pending references and the sources of related events are
+  scrubbed before a query returns them, over MCP and in the context the hook
+  hands the client, and the hook prints each pending reference on one line.
+  0.2.0 to 0.4.1 returned them as stored, and a reference holding line breaks
+  could add lines of its own, such as a forged source, to that context.
+- **Privacy.** Recorded transcript paths are counted, not listed, in query
+  results and in the context the hook returns
+  (`coverage.transcript_locators_not_listed`). 0.2.0 to 0.4.1 listed each path
+  as pending extraction, so it went into the next prompt the client sent to its
+  model provider. The path names the project folder and often the account.
+  `canon.context.get` still returns the whole record, scrubbed.
+- **Privacy.** An answer is stored only while its prompt is a live event in
+  the same workspace and project, checked inside the write that stores it. In
+  0.4.0 and 0.4.1 a purge of the prompt that landed while the `Stop` hook ran
+  left the answer, which can restate the prompt, in the store with no message,
+  and `canon.context.ingest` stored an answer for a prompt that was never
+  captured.
+- **Privacy.** A purge report is `purged` only when its scrub finished;
+  otherwise it says `scrub_incomplete`, over MCP as on the command line. In
+  0.4.0 and 0.4.1 `canon.context.purge` reported `purged` beside
+  `scrub_pending: true`, and the residue note said SQLite rewrote the file
+  when VACUUM had not run. The note now follows what VACUUM did.
+- **Privacy.** The residual scan reads a UTF-16 database in UTF-16. 0.4.0 and
+  0.4.1 looked for UTF-8 forms only and reported `purged` over residue in a
+  database another tool created as UTF-16.
+- **Privacy, docs.** File-permission advice per platform: on Linux and macOS
+  SQLite creates the database with the process umask applied, which commonly
+  leaves it readable by other accounts, so set `umask 077` or run `chmod 600`.
+  The 0.4.0 and 0.4.1 docs said the files take the access rules of their
+  folder, which holds on Windows only. The docs now also say that an MCP
+  result enters the model's context, and so leaves the machine with a hosted
+  provider, and that nothing checks who set the purge tool's apply variable.
+- A purge names the unsalted `source_hash` values that earlier ingest and
+  query results carried as out of canon's reach: a copy a caller kept can
+  confirm a guess of a purged event. This states a limit and does not remove
+  it.
+- `--keep-responses` with `--all` or `--before-ord` keeps every answer,
+  including one whose prompt was never captured. 0.4.0 and 0.4.1 removed such
+  an answer under the flag.
+- A report that removed nothing still names residue and what canon cannot
+  reach. The scrub reports the WAL checkpoint before VACUUM beside the one
+  after.
+- A dry run no longer takes a write lock and succeeds while a scrub is
+  pending. An apply blocked by a reader refuses as `store_busy` with nothing
+  changed.
+- The capture hook reads stdin as UTF-8 whatever the locale, so non-ASCII text
+  is no longer mangled on Windows.
+- Docs: the pairing fields the tests supply on synthetic hook inputs, and the
+  version the `Stop` fragments need.
+
 ## 0.4.1 - 2026-09-26
 
 Fixes found by checking the 0.3.0 and 0.4.0 releases as a user gets them.

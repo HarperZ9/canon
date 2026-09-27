@@ -355,8 +355,11 @@ holds and the capture hook can store answers on request.
   `SqliteBackend.verify_chain` walks the same op-aware chain, and
   `SqliteBackend.put` still writes plain puts, so blocks databases stay
   readable by 0.3.0. `context_selection.py` resolves a selection and applies
-  `keep_responses` to the bulk selectors; `context_access.py` reports whether
-  the database file is shared with other accounts.
+  `keep_responses` to the bulk selectors; `context_access.py` reports from the
+  POSIX mode bits whether the database file is shared with other accounts, and
+  `not_checked` on Windows. `context_redact.py` redacts every ingest, and
+  `ContextStore.ingest` refuses an answer whose prompt is not live
+  (`ContextPairingError`) inside the write.
 - `src/canon/context_purge.py` plans and applies a purge (event, derived
   records, paired answer; `keep_responses`), bound by a plan digest;
   `context_purge_report.py` states residue and out-of-reach copies;
@@ -366,8 +369,9 @@ holds and the capture hook can store answers on request.
   `cli_context_text.py` add `canon context purge|retention`; `context_mcp.py`
   adds `canon.context.purge`.
 - `src/canon/client_capture_stop.py` stores a `Stop` delivery's last assistant
-  message as an answer event when `--capture prompts+responses` is set.
-- `project-docs/C1-DECISIONS.md` records D-146 to D-163. Tests plant canaries
+  message as an answer event when `--capture prompts+responses` is set;
+  `client_capture_input.py` reads the hook's stdin as UTF-8 bytes.
+- `project-docs/C1-DECISIONS.md` records D-146 to D-170. Tests plant canaries
   built at run time and scan the database files for every 16-byte window.
 
 Later phases (verifier, migration legs, region installation into an existing

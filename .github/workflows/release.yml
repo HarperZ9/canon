@@ -10,7 +10,7 @@ name: release
 #
 # To release, bump the version in pyproject.toml and src/canon/_version.py,
 # merge, and push a tag that matches it:
-#   git tag -a v0.4.1 -m "canon 0.4.1" && git push origin v0.4.1
+#   git tag -a v0.4.2 -m "canon 0.4.2" && git push origin v0.4.2
 # The tag push starts a run, and so does publishing a GitHub release for that
 # tag. The second run builds and checks the same version again, and its
 # publish step skips the files PyPI already has.

@@ -1,4 +1,12 @@
-"""Bounded deterministic lookup, with explicit extraction and search coverage."""
+"""Bounded deterministic lookup, with explicit extraction and search coverage.
+
+What a query returns passes through the secret scrubber. Each excerpt is
+scrubbed whole and then cut, so a secret that straddles the cut is still
+recognised, and each pending reference is scrubbed before it is listed.
+Transcript locators are counted, not listed: canon never reads a transcript,
+and its path names the client's project directory and often the account
+(D-166).
+"""
 from __future__ import annotations
 
 import re
@@ -6,6 +14,10 @@ from urllib.parse import urlsplit, urlunsplit
 
 from .context_records import LIMITS, required_text
 from .context_related import related_events
+from .workspace.scrub import scrub
+
+EXCERPT_CHARS = 2000
+_DONE = frozenset({"completed", "extracted", "reviewed"})
 
 _ARXIV_ID = re.compile(r"(?<![\w.])(\d{4}\.\d{4,5})(v\d+)?(?!\w)", re.IGNORECASE)
 _COMPOUND_ID = re.compile(r"(?<!\w)([a-z0-9]+(?:[._:-][a-z0-9]+){1,})(?!\w)", re.IGNORECASE)
@@ -17,15 +29,27 @@ _IDENTIFIER_SCORE_STEP = 10_000
 def pending_sources(records):
     pending = []
     for rec in records:
-        if rec.data.get("record_role") != "event":
-            continue
-        for item in rec.data.get("attachments", []) + rec.data.get("sources", []):
-            status = item.get("extraction_status", "pending_extraction")
-            if status not in {"completed", "extracted", "reviewed"}:
-                pending.append({"event_record_id": rec.id,
-                                "ref": str(item.get("ref", item.get("locator", "unknown")))[:1024],
-                                "status": str(status)[:120]})
+        for item in _pending_items(rec):
+            if item.get("source_kind") == "transcript_locator":
+                continue
+            ref = str(item.get("ref", item.get("locator", "unknown")))
+            status = str(item.get("extraction_status", "pending_extraction"))
+            pending.append({"event_record_id": rec.id, "ref": scrub(ref).text[:1024],
+                            "status": scrub(status).text[:120]})
     return pending
+
+
+def unlisted_locators(records) -> int:
+    """How many pending transcript locators a query counts but does not list."""
+    return sum(1 for rec in records for item in _pending_items(rec)
+               if item.get("source_kind") == "transcript_locator")
+
+
+def _pending_items(rec) -> list:
+    if rec.data.get("record_role") != "event":
+        return []
+    return [item for item in rec.data.get("attachments", []) + rec.data.get("sources", [])
+            if item.get("extraction_status", "pending_extraction") not in _DONE]
 
 
 def search(records, workspace, project, query, top_k, include_pending,
@@ -63,6 +87,7 @@ def search(records, workspace, project, query, top_k, include_pending,
     result = _base_result(workspace, project, _query_status(matches, pending), hits, pending,
                           include_pending, records, matches, query_identifiers,
                           identifier_matches, malformed_url_count)
+    result["coverage"]["transcript_locators_not_listed"] = unlisted_locators(records)
     if left_out is not None:
         result["coverage"]["answers_left_out"] = left_out
     if include_related:
@@ -124,9 +149,10 @@ def _coverage(workspace, project, records, matches, hits, pending, include_pendi
 
 
 def hit(rec, text, score, workspace, project, message_role="user"):
+    clean = scrub(text).text
     return {"record_id": rec.id, "workspace_id": workspace, "project_id": project,
             "message_role": message_role,
-            "excerpt": text[:2000], "excerpt_truncated": len(text) > 2000,
+            "excerpt": clean[:EXCERPT_CHARS], "excerpt_truncated": len(clean) > EXCERPT_CHARS,
             "claim_state": rec.data.get("claim_state"), "score": score,
             "citation": {"record_key": "workspace/" + rec.id,
                          "event_record_id": rec.data["event_record_id"],

@@ -17,9 +17,13 @@ from .workspace.scrub import scrub
 REPORT_SCHEMA = "canon.context-purge-report/v1"
 PREVIEW_CHARS = 80
 PRESENCE = "none"
-_FREED = ("SQLite rewrote the database file without the purged rows, but the disk clusters "
-          "the old file, its rollback journal or its WAL released can still hold them "
-          "until reused, because canon stores context as plaintext.")
+_CLUSTERS = ("the disk clusters the old file, its rollback journal or its WAL released can "
+             "still hold them until reused, because canon stores context as plaintext.")
+_FREED_PLAN = "After the purge, SQLite rewrites the database file without the purged rows, but "
+_FREED_DONE = "SQLite rewrote the database file without the purged rows, but "
+_FREED_NOT_RUN = ("VACUUM did not run ({vacuum}), so the database file itself can still hold "
+                  "the purged rows in its free pages until a confirmed purge runs again and "
+                  "finishes the scrub; beyond that, ")
 _LEGACY = ("Records written by canon 0.3.0 or older keep a plain sha256 of their envelope "
            "in their audit row, which can confirm a guess of the exact record.")
 _OUT_OF_REACH = (
@@ -32,6 +36,10 @@ _OUT_OF_REACH = (
                        "answer from it; the provider keeps what its terms allow."),
     ("backups_and_copies", "Backups, synced folders and copies of the database file are "
                            "not changed."),
+    ("returned_content_digests", "Ingest and query results carried each event's "
+                                 "source_hash, an unsalted sha256 of the captured event. A "
+                                 "copy a caller kept can confirm a guess of the purged "
+                                 "event."),
 )
 DOES_NOT_PROVE = [
     "the residual scan reads the database and its journal, WAL and shared-memory files, "
@@ -63,9 +71,23 @@ def plan_extras(view, entries: list[dict], local_detail: bool) -> dict:
     return extras
 
 
-def residue(legacy_count: int) -> list[dict]:
-    return [{"class": "freed_clusters", "note": _FREED},
+def residue(legacy_count: int, vacuum: str | None = None) -> list[dict]:
+    """What stays in reach of the disk. A plan (`vacuum` None) speaks of the
+    rewrite still to come; a report says whether VACUUM ran."""
+    if vacuum is None:
+        freed = _FREED_PLAN + _CLUSTERS
+    elif vacuum == "done":
+        freed = _FREED_DONE + _CLUSTERS
+    else:
+        freed = _FREED_NOT_RUN.format(vacuum=vacuum) + _CLUSTERS
+    return [{"class": "freed_clusters", "note": freed},
             {"class": "legacy_fingerprints", "count": legacy_count, "note": _LEGACY}]
+
+
+def _residue_after(plan: dict, scrub: dict) -> list[dict]:
+    legacy = next(row["count"] for row in plan["residue_forecast"]
+                  if row["class"] == "legacy_fingerprints")
+    return residue(legacy, scrub["vacuum"])
 
 
 def out_of_reach(transcript_count: int) -> list[dict]:
@@ -75,8 +97,10 @@ def out_of_reach(transcript_count: int) -> list[dict]:
 
 
 def purge_report(plan: dict, ordinals: list[int], scrub: dict, scan: dict, audit: dict) -> dict:
-    status = ("audit_failed" if not audit["ok"] else
-              "purged" if scan["hits"] == 0 else "residue_found")
+    """`purged` only when the chain verifies, the scan found nothing and the
+    scrub finished; otherwise the first of those that failed names the status."""
+    status = ("audit_failed" if not audit["ok"] else "residue_found" if scan["hits"] else
+              "scrub_incomplete" if scrub["pending"] else "purged")
     report = _report_base(plan, status)
     report.update({
         "records_purged": len(ordinals),
@@ -84,14 +108,17 @@ def purge_report(plan: dict, ordinals: list[int], scrub: dict, scan: dict, audit
         "reason_codes": sorted({row["reason_code"] for row in plan["entries"]}),
         "audit": audit, "scrub": scrub, "scrub_pending": scrub["pending"],
         "residual_scan": {"status": "run", **scan},
-        "residue": plan["residue_forecast"], "out_of_reach": plan["out_of_reach"],
+        "residue": _residue_after(plan, scrub), "out_of_reach": plan["out_of_reach"],
     })
     return report
 
 
 def nothing_report(plan: dict) -> dict:
+    """This run removed nothing; the residue and reach earlier purges left
+    are named all the same."""
     report = _report_base(plan, "nothing_to_purge")
-    report.update({"records_purged": 0, "scrub_pending": False})
+    report.update({"records_purged": 0, "scrub_pending": False,
+                   "residue": plan["residue_forecast"], "out_of_reach": plan["out_of_reach"]})
     return report
 
 
@@ -105,7 +132,7 @@ def scrub_report(plan: dict, scrub: dict) -> dict:
                    "residual_scan": {"status": "not_run",
                                      "reason": "the purged values left the rows in an "
                                                "earlier run"},
-                   "residue": plan["residue_forecast"], "out_of_reach": plan["out_of_reach"]})
+                   "residue": _residue_after(plan, scrub), "out_of_reach": plan["out_of_reach"]})
     return report
 
 

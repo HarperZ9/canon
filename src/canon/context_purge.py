@@ -35,7 +35,7 @@ from .context_purge_report import nothing_report, plan_extras, purge_report, scr
 from .context_records import scope as checked_scope
 from .context_scrub import (
     clear_scrub_mark, live_values, mark_scrub_pending, residual_scan, scan_values,
-    scrub_complete, scrub_connection, scrub_database, scrub_pending,
+    scrub_complete, scrub_connection, scrub_database, scrub_pending, text_codec,
 )
 from .context_selection import (
     NOT_FOUND, REASON_OWNER, ContextPurgeError, ContextPurgeNotFound, ScopeView, Selection,
@@ -59,7 +59,9 @@ def plan_purge(store, workspace_id, project_id, selection, *, expected_store_id=
     workspace, project = checked_scope(workspace_id, project_id)
     expected = checked_expected_store_id(expected_store_id)
     with store._backend._conn() as conn:
-        conn.execute("BEGIN IMMEDIATE")
+        # A deferred read: a plan writes nothing to an established store, so a
+        # reader holding the database does not block a dry run.
+        conn.execute("BEGIN")
         store_id, version = store_identity(conn, create=True)
         compare_store_id(store_id, expected)
         state = verified_state(conn, version)
@@ -91,7 +93,8 @@ def apply_purge(store, workspace_id, project_id, selection, *, confirm_plan_sha2
         ordinals = _delete_and_tombstone(conn, plan["entries"])
         conn.commit()
         scrub = _scrub(conn, busy_retry_seconds)
-        scan = residual_scan(store.path, values, live_values(conn), short)
+        codec = text_codec(conn)
+        scan = residual_scan(store.path, values, live_values(conn, codec), short, codec)
     finally:
         if conn.in_transaction:
             conn.rollback()

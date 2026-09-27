@@ -19,6 +19,7 @@ import sys
 from pathlib import Path
 from typing import Any, Callable, TextIO
 
+from .client_capture_input import read_hook
 from .client_capture_payload import CaptureInputError, event_from_hook
 from .client_capture_stop import CAPTURE_MODES, CAPTURE_PROMPTS, capture_stop
 from .workspace.scrub import scrub
@@ -55,14 +56,15 @@ def run(
     env: dict[str, str] | None = None,
     service_factory: ServiceFactory | None = None,
 ) -> int:
-    """Run the hook adapter and write hook-compatible JSON to stdout."""
-    stdin = stdin or sys.stdin
+    """Run the hook adapter and write hook-compatible JSON to stdout. Without
+    an injected `stdin` the hook reads the process's standard input as UTF-8
+    bytes, whatever the locale's encoding is."""
     stdout = stdout or sys.stdout
     stderr = stderr or sys.stderr
     env = os.environ if env is None else env
     try:
         args = _settings(argv or [], env)
-        hook = _read_hook(stdin, args.stdin_max_chars)
+        hook = read_hook(stdin, args.stdin_max_chars)
         factory = service_factory or _store_from_db
         if hook.get("hook_event_name") == "Stop":
             _write_json(stdout, capture_stop(hook, args, lambda: factory(args.db)))
@@ -178,19 +180,6 @@ def _require(value: object, label: str) -> None:
         raise CaptureConfigError(f"missing {label}")
 
 
-def _read_hook(stdin: TextIO, max_chars: int) -> dict[str, Any]:
-    raw = stdin.read(max_chars + 1)
-    if len(raw) > max_chars:
-        raise CaptureInputError(f"hook stdin exceeds stdin limit of {max_chars} chars")
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise json.JSONDecodeError("malformed stdin JSON", exc.doc, exc.pos) from exc
-    if not isinstance(data, dict):
-        raise CaptureInputError("hook stdin JSON must be an object")
-    return data
-
-
 def _store_from_db(path: Path) -> Any:
     try:
         from .context_store import ContextStore
@@ -252,7 +241,9 @@ def _format_context(
     if pending:
         lines.append("Pending extraction:")
         for item in pending[:5]:
-            lines.append(f"- {str(item.get('ref', 'unknown'))}: {str(item.get('status', 'pending'))}")
+            ref = _clip(scrub(str(item.get("ref", "unknown"))).text, 300)
+            status = _clip(scrub(str(item.get("status", "pending"))).text, 60)
+            lines.append(f"- {ref}: {status}")
     does_not_prove = query.get("does_not_prove")
     if does_not_prove:
         lines.append(f"Does not prove: {does_not_prove}")

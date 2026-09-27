@@ -46,13 +46,18 @@ def _found(store, record_id) -> bool:
     return store.get(WORKSPACE, PROJECT, record_id)["status"] == "found_in_searched_sources"
 
 
-def test_a_rerun_takes_an_answer_stored_after_its_prompt_was_purged(tmp_path) -> None:
+def test_a_rerun_takes_an_answer_stored_after_its_prompt_was_purged(tmp_path,
+                                                                     monkeypatch) -> None:
     canary = short_canary()
     db = tmp_path / "context.sqlite"
     store = ContextStore(db)
     prompt = store.ingest(prompt_payload("turn-1", f"Prompt {canary}"))["event_record_id"]
     _purge(store, select(event_id=prompt))
+    # The store now refuses such an answer (D-164); one stored before that
+    # check existed is planted with the check turned off.
+    monkeypatch.setattr("canon.context_store._require_prompt", lambda *args: None)
     late = store.ingest(answer_payload(prompt, "turn-1", f"Answer {canary}"))["event_record_id"]
+    monkeypatch.undo()
 
     plan, report = _purge(store, select(event_id=prompt))
 
