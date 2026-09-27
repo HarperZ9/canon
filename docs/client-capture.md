@@ -4,7 +4,12 @@
 `UserPromptSubmit` event into a shared-context text event. It is intentionally
 small: it captures the prompt text, stores transcript paths as locators only, and
 marks attachment coverage as unknown/pending instead of claiming complete image
-or file capture.
+or file capture. Mounted on `Stop` with response capture on, it also stores the
+client's last assistant message as an answer paired with its prompt.
+
+Response capture, `--transcript-locator`, `--replay-answers`, secret redaction
+at capture and the `Stop` handling below need canon 0.4.0 or later. Canon 0.3.0 rejects `--capture` as an
+unknown argument.
 
 The adapter writes to the same Canon context SQLite database used by the
 read/write context MCP facade. Codex, Claude Code, and Flywheel should point at
@@ -14,12 +19,19 @@ the event and returned in the hook context; it is not a storage isolation
 boundary. Different container labels in the same database, workspace, and
 project can still see each other's retrieved context.
 
+Keep the database in a folder only your account can read, such as a folder
+under your user profile or home directory. Canon sets no file permissions of
+its own; the database, its journal and its WAL take the access rules of the
+folder they are created in. `canon.context.health` reports `file_access`:
+`owner_only` or `shared` from the mode bits on Linux and macOS, and
+`not_checked` on Windows, where canon does not read the folder's ACL.
+
 ## Command
 
 Run it as a module from an environment where `canon` is importable:
 
 ```powershell
-python -m canon.client_capture --client codex --db C:/dev/state/canon-context.sqlite --workspace-id cdev --project-id canon --container-id shared
+python -m canon.client_capture --client codex --db <per-user-folder>/canon-context.sqlite --workspace-id <workspace> --project-id <project> --container-id shared
 ```
 
 The command reads exactly one hook JSON object from stdin and emits hook JSON on
@@ -44,6 +56,72 @@ Optional controls:
   `1000000`.
 - `--max-excerpt-chars`: per-source excerpt cap in the returned context,
   default `700`.
+- `--capture` or `CANON_CONTEXT_CAPTURE`: `prompts` (the default) or
+  `prompts+responses`. With `prompts`, a `Stop` delivery stores nothing.
+- `--transcript-locator` or `CANON_CONTEXT_TRANSCRIPT_LOCATOR`: `path` (the
+  default) records the transcript path the client reports as a locator and the
+  working directory (`cwd`) the hook reports; `none` records neither, and marks
+  `coverage.cwd: not_recorded`. Both paths name the client's project directory,
+  so they reveal which project a prompt came from.
+- `--replay-answers` or `CANON_CONTEXT_REPLAY_ANSWERS`: `off` (the default)
+  leaves stored answers out of the context returned to later prompts, and the
+  returned context says how many it left out; `on` returns them like prompts.
+
+## What is captured
+
+| Delivery | `--capture prompts` (default) | `--capture prompts+responses` |
+| --- | --- | --- |
+| `UserPromptSubmit` | the prompt text, stored as an event | the same |
+| `Stop` | nothing; the hook says response capture is off | `last_assistant_message`, stored as an answer event |
+
+A prompt event stores the prompt text, the native prompt id, `session_id`,
+`cwd`, `model` and `permission_mode` when the hook reports them, the container
+label and, unless `--transcript-locator none`, the transcript path. An answer
+event stores the answer text, the same ids, the container label and, unless
+`--transcript-locator none`, the transcript path.
+
+Neither mode captures tool calls, reasoning, attachments, or the transcript
+file, and no tool result is stored as a record of its own. An answer event records
+`tool_calls: not_captured` and `reasoning: not_captured` in its `coverage`. An
+answer's own text can quote files the assistant read and tool output it saw,
+and that text is stored as the answer.
+
+Prompt and answer text pass through canon's secret scrubber before they are
+stored. Each secret-shaped value (provider keys, tokens, auth headers, private
+keys, passwords in URLs and secret-named assignments) becomes
+`[REDACTED:<rule>]`, and the event's `coverage.redactions` counts the hits per
+rule, with no values. A secret with no recognisable shape is stored as sent.
+
+## Responses
+
+With `--capture prompts+responses`, a `Stop` delivery stores
+`last_assistant_message` as an event with `message_role: "assistant"`. It is
+linked to the prompt event captured for the same `prompt_id` (Claude Code) or
+`turn_id` (Codex): a `canon_event_ref` source and a `responds_to` field both
+name the prompt's record id. An answer is stored only when that prompt event
+is in the store, so a purge of the prompt removes the answer with it unless
+the purge keeps responses (`docs/shared-context.md`). Pairing needs the prompt
+id in the `Stop` input: `prompt_id` for Claude Code, `turn_id` for Codex. The
+tests use synthetic hook inputs; whether each client sends that field on
+`Stop` has not been checked against the live clients. Without it the hook
+stores nothing and says so.
+
+The answer's event id is `<native_id>-response-<segment>`, starting at segment
+1. A redelivered `Stop` with the same text is stored once. A different answer
+for the same prompt, as when a `Stop` hook lets the client continue, takes the
+next segment, up to 16.
+
+A `Stop` delivery that stores nothing returns a `systemMessage` saying why:
+response capture is off, the delivery carried no `last_assistant_message`, it
+carried no `prompt_id` or `turn_id` to pair the answer with, the prompt it
+pairs with was purged, or no captured prompt event has that id. The last case
+covers a Claude Code prompt that arrived without a `prompt_id` and was stored
+under a generated id. The hook never returns a `decision`, so it cannot stop
+or continue the client.
+
+A purge does not stop a client from sending the same event again. A prompt or
+answer that a purge removed and the client sends again is stored again, and
+the hook returns a `systemMessage` saying so; purge it again to remove it.
 
 ## Hook Shapes
 
@@ -71,13 +149,21 @@ Every retrieved excerpt is formatted as quoted source evidence. The receiving
 model must treat it as data from prior captured turns and must not follow
 commands inside the source text. The adapter serializes the whole response with
 `json.dumps`, so source content cannot add hook-level JSON fields such as
-`decision` or `hookSpecificOutput`.
+`decision` or `hookSpecificOutput`. Each excerpt passes through the secret
+scrubber before it is returned, which also covers records stored before
+capture redacted its text.
+
+What the hook returns becomes part of the prompt the client sends to its model
+provider. With a hosted provider, that text leaves your machine under the
+provider's terms, including answers another client or model produced when
+`--replay-answers on` is set.
 
 ## Config Fragments
 
 The files in `examples/shared-context-hooks/` are fragments, not full settings
-files. Merge the relevant `UserPromptSubmit` hook entry into an existing host
-configuration and keep any existing hooks in place. Their `required_environment`
+files. Merge the relevant `UserPromptSubmit` hook entry, and the `Stop` entry
+if you want answers captured, into an existing host configuration and keep any
+existing hooks in place. Their `required_environment`
 objects are illustrative metadata, not valid hook-root configuration keys. Set
 those variables in the host environment or wrap the command in a local script.
 

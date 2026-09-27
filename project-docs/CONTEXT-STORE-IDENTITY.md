@@ -7,13 +7,21 @@ store now persists one logical store id in that same database:
 - key: `store_id`
 - value shape: `ctxstore_<32 lowercase hex>`
 - marker table: `context_store_identity_version`
-- marker row: `schema_version = 1`
+- marker row: `schema_version = 1` or `schema_version = 2`
+
+Version 1 is the shape canon 0.3.0 writes: put rows with plain digests. The
+first purge or salted put raises the marker to 2 in the same transaction
+(C1-DECISIONS D-148), and canon 0.3.0 refuses a version 2 database as
+"identity invalid" instead of reading its purge rows as tampering. Reading
+never raises the marker. This version reads both, and a marker at 1 over rows
+that need 2 fails integrity.
 
 The id is created once for a database and returned by `canon.context.health`.
-`canon.context.ingest`, `canon.context.query`, and `canon.context.get` accept an
-optional `expected_store_id`. When present, Canon reads the stored id and compares
-it on the same SQLite connection and transaction that performs the write or read.
-A mismatch refuses before returning query/get records or writing capture records.
+`canon.context.ingest`, `canon.context.query`, `canon.context.get` and
+`canon.context.purge` accept an optional `expected_store_id`. When present,
+Canon reads the stored id and compares it on the same SQLite connection and
+transaction that performs the write or read. A mismatch refuses before
+returning query/get records, writing capture records, or purging.
 
 Legacy calls without `expected_store_id` remain compatible. They still use the
 same store and may initialize the logical id only when the identity metadata and

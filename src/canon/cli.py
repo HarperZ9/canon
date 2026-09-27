@@ -30,6 +30,7 @@ COMMANDS = (
     "workspace",
     "handoff",
     "switch",
+    "context",
 )
 
 
@@ -111,6 +112,8 @@ def _run_parsed(
         from .cli_rescue import run_rescue_command
 
         return run_rescue_command(parsed, stdin=stdin, stdout=stdout, stderr=stderr, color=color)
+    if parsed.command == "context":
+        return _run_context(parsed, stdin, stdout, stderr, environ, color)
     return write_result(
         _command_result(parsed),
         stdout=stdout,
@@ -129,6 +132,14 @@ def _run_workspace_family(parsed: argparse.Namespace, **streams) -> int:
     from .cli_handoff import run_handoff_command
 
     return run_handoff_command(parsed, **streams)
+
+
+def _run_context(parsed: argparse.Namespace, stdin, stdout, stderr, environ, color) -> int:
+    """`canon context purge` and `canon context retention`."""
+    from .cli_context_purge import run_context_command
+
+    return run_context_command(parsed, stdin=stdin, stdout=stdout, stderr=stderr,
+                               environ=environ, color=color)
 
 
 def _run_check(stdout: TextIO) -> int:

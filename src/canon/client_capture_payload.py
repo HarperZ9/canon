@@ -1,9 +1,17 @@
-"""Normalize provider hook payloads into the shared context ingest shape."""
+"""Normalize provider hook payloads into the shared context ingest shape.
+
+Captured text passes through the secret scrubber before it is stored: each
+secret-shaped value becomes `[REDACTED:<rule>]`, and an event whose text had
+any carries `coverage.redactions`, the count per rule and never a value. A
+secret with no recognisable shape passes through.
+"""
 from __future__ import annotations
 
 import re
 from typing import Any
 from uuid import uuid4
+
+from .workspace.scrub import scrub
 
 
 class CaptureInputError(ValueError):
@@ -19,14 +27,32 @@ def event_from_hook(
     workspace_id: str,
     project_id: str,
     container_id: str,
+    transcript_locator: str = "path",
 ) -> dict[str, Any]:
-    """Build a ContextStore.ingest payload from a UserPromptSubmit hook."""
+    """Build a ContextStore.ingest payload from a UserPromptSubmit hook. With
+    `transcript_locator="none"` neither the transcript path nor the working
+    directory is recorded."""
     _require_user_prompt(hook)
-    source_app = _source_app(client, hook)
-    prompt = _prompt_text(hook)
-    native_id, identified = _native_prompt_id(source_app, hook)
-    event = _event_data(hook, source_app, prompt, native_id, identified, container_id)
+    source_app = source_app_for(client, hook)
+    cleaned = scrub(_prompt_text(hook))
+    native_id, identified = native_prompt_id(source_app, hook)
+    event = _event_data(hook, source_app, cleaned.text, native_id, identified, container_id)
+    if cleaned.hits:
+        event["coverage"]["redactions"] = dict(sorted(cleaned.hits.items()))
+    if transcript_locator != "path":
+        _drop_paths(event)
     return {"workspace_id": workspace_id, "project_id": project_id, "event": event}
+
+
+def _drop_paths(event: dict[str, Any]) -> None:
+    event["sources"] = [source for source in event["sources"]
+                        if source["source_kind"] != "transcript_locator"]
+    event["cwd"] = None
+    event["coverage"]["transcript"] = "locator_not_recorded"
+    event["coverage"]["cwd"] = "not_recorded"
+    event["interpretations"][0]["text"] = (
+        "Hook input captures prompt text only; no transcript or working-directory "
+        "path is recorded.")
 
 
 def _event_data(
@@ -42,10 +68,10 @@ def _event_data(
         "are retained as locators and are not read by this adapter."
     )
     return {
-        "event_id": _safe_event_id(native_id),
+        "event_id": safe_event_id(native_id),
         "source_app": source_app,
         "native_id": native_id,
-        "session_id": _string_field(hook, "session_id"),
+        "session_id": string_field(hook, "session_id"),
         "message_text": prompt,
         "container_id": container_id,
         "cwd": _optional_string(hook, "cwd"),
@@ -62,7 +88,7 @@ def _event_data(
                 else "unsupported_without_native_prompt_id"
             ),
         },
-        "sources": _sources(source_app, native_id, _optional_string(hook, "transcript_path")),
+        "sources": sources_for(source_app, native_id, _optional_string(hook, "transcript_path")),
         "extractions": [{
             "source_id": "prompt",
             "text": prompt,
@@ -82,7 +108,7 @@ def _require_user_prompt(hook: dict[str, Any]) -> None:
         raise CaptureInputError("expected UserPromptSubmit hook input")
 
 
-def _source_app(client: str, hook: dict[str, Any]) -> str:
+def source_app_for(client: str, hook: dict[str, Any]) -> str:
     if client == "auto":
         if "turn_id" in hook:
             return "codex"
@@ -101,7 +127,7 @@ def _prompt_text(hook: dict[str, Any]) -> str:
     return prompt
 
 
-def _native_prompt_id(source_app: str, hook: dict[str, Any]) -> tuple[str, bool]:
+def native_prompt_id(source_app: str, hook: dict[str, Any]) -> tuple[str, bool]:
     field = "turn_id" if source_app == "codex" else "prompt_id"
     fallback = "prompt_id" if field == "turn_id" else "turn_id"
     value = hook.get(field) or hook.get(fallback)
@@ -110,14 +136,14 @@ def _native_prompt_id(source_app: str, hook: dict[str, Any]) -> tuple[str, bool]
     return f"unidentified-{uuid4().hex}", False
 
 
-def _safe_event_id(native_id: str) -> str:
+def safe_event_id(native_id: str) -> str:
     safe = _SAFE_ID.sub("-", native_id).strip("-")
     if not safe:
         raise CaptureInputError("stable prompt id has no safe identifier characters")
     return safe[:120]
 
 
-def _string_field(hook: dict[str, Any], field: str) -> str:
+def string_field(hook: dict[str, Any], field: str) -> str:
     value = hook.get(field)
     if not isinstance(value, str) or not value:
         raise CaptureInputError(f"missing {field}")
@@ -138,7 +164,7 @@ def _pending_attachment() -> dict[str, str]:
     }
 
 
-def _sources(source_app: str, native_id: str, transcript_path: str | None) -> list[dict[str, str]]:
+def sources_for(source_app: str, native_id: str, transcript_path: str | None) -> list[dict[str, str]]:
     sources = [{
         "source_id": "prompt",
         "source_kind": "prompt",

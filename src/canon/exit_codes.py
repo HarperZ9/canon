@@ -34,6 +34,11 @@ _FAILURE_EXIT_CODES = {
     "undeclared_loss": EX_GATE,
     "unsupported_format": EX_UNSUPPORTED,
     "shadowed": EX_CONFLICT,
+    "not_confirmed": EX_GATE,
+    "plan_stale": EX_CONFLICT,
+    "residue_found": EX_GATE,
+    "scrub_incomplete": EX_GATE,
+    "audit_failed": EX_GATE,
 }
 
 

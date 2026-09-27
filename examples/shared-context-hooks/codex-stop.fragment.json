@@ -1,5 +1,5 @@
 {
-  "merge_note": "Fragment only. Merge the hooks.UserPromptSubmit entry into an existing Claude Code settings hooks list and keep every existing UserPromptSubmit hook entry already present.",
+  "merge_note": "Fragment only. Merge the hooks.Stop entry into an existing Codex hooks configuration and keep every existing Stop hook entry already present. Mount it beside the UserPromptSubmit fragment: the answer is linked to the prompt that hook captured.",
   "example_metadata_note": "The required_environment object is illustrative documentation, not a valid hook-root configuration key. Set these variables in the host environment or wrapper script.",
   "required_environment": {
     "CANON_CONTEXT_DB": "<absolute path in a per-user folder>/canon-context.sqlite",
@@ -8,12 +8,12 @@
     "CANON_CONTEXT_CONTAINER_ID": "shared"
   },
   "hooks": {
-    "UserPromptSubmit": [
+    "Stop": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "python -m canon.client_capture --client claude-code"
+            "command": "python -m canon.client_capture --client codex --capture prompts+responses"
           }
         ]
       }

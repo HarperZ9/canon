@@ -1,36 +1,39 @@
-"""Shared context operations over Canon's existing audited SQLite record store."""
+"""Shared context operations over Canon's existing audited SQLite record store.
+
+Every read and write reconciles the records with the op-aware audit chain in
+one snapshot (context_audit.py). A put stores a salted commitment; a purge
+(context_purge.py) removes records and leaves a tombstone per record; the
+identity and schema versions are handled in context_migrate.py.
+
+An event sent again after a purge removed it is stored again (D-155), and the
+ingest result says `stored_after_purge` so the caller can tell the owner. A
+get of a purged record says `purged` beside not found.
+"""
 from __future__ import annotations
 
-import hashlib
-import re
-import secrets
 from pathlib import Path
 
 from .backends.base import record_key
 from .backends.sqlite import SqliteBackend
+from .context_audit import ContextIntegrityError, insert_record, verified_state
+from .context_migrate import (
+    ContextStoreIdentityError,
+    checked_expected_store_id,
+    compare_store_id,
+    prepare_write,
+    read_version,
+    store_identity,
+)
 from .context_query import search
 from .context_records import LIMITS, make_records, scope
-from .schema import Record
+from .context_related import mark_purged_citations, purged_citations
+
+__all__ = ["ContextCollision", "ContextIntegrityError", "ContextStore",
+           "ContextStoreIdentityError"]
 
 
 class ContextCollision(ValueError):
     """The same observed event identity was submitted with different content."""
-
-
-class ContextIntegrityError(ValueError):
-    """A stored record no longer matches its audit-bound payload."""
-
-
-class ContextStoreIdentityError(ValueError):
-    """The caller's bound store identity does not match this Canon store."""
-
-
-_META_TABLE = "context_store_meta"
-_VERSION_TABLE = "context_store_identity_version"
-_STORE_ID_KEY = "store_id"
-_VERSION_KEY = "schema_version"
-_IDENTITY_VERSION = "1"
-_STORE_ID = re.compile(r"ctxstore_[0-9a-f]{32}\Z")
 
 
 class ContextStore:
@@ -40,40 +43,34 @@ class ContextStore:
             raise ValueError("context database path must be absolute")
         self._backend = SqliteBackend(path)
 
+    @property
+    def path(self) -> Path:
+        return Path(self._backend._path)
+
     def identity(self):
         with self._backend._conn() as conn:
             conn.execute("BEGIN IMMEDIATE")
-            return self._store_id(conn, create=True)
+            return store_identity(conn, create=True)[0]
 
     def ingest(self, payload, expected_store_id=None):
-        expected = _expected_store_id(expected_store_id)
+        expected = checked_expected_store_id(expected_store_id)
         records = make_records(payload)
         with self._backend._conn() as conn:
             conn.execute("BEGIN IMMEDIATE")
-            store_id = self._store_id(conn, create=True)
-            _compare_store_id(store_id, expected)
-            self._verified_rows(conn)
-            existing = conn.execute("SELECT envelope, sha256 FROM records WHERE key=?",
-                                    (record_key(records[0]),)).fetchone()
-            if existing:
-                self._verify_row(conn, record_key(records[0]), *existing)
-                if existing[0] != records[0].to_json():
-                    raise ContextCollision("event identity already exists with different content")
-                for record in records[1:]:
-                    key = record_key(record)
-                    row = conn.execute("SELECT envelope,sha256 FROM records WHERE key=?", (key,)).fetchone()
-                    if not row or row[0] != record.to_json():
-                        raise ContextIntegrityError("captured event has missing or changed derived records")
-                    self._verify_row(conn, key, *row)
+            store_id, version = store_identity(conn, create=True)
+            compare_store_id(store_id, expected)
+            state = verified_state(conn, version)
+            first = state.live.get(record_key(records[0]))
+            if first is not None:
+                _check_redelivery(records, first, state)
                 return self._ingest_result(records, "already_present", 0, store_id)
+            if any(record_key(record) in state.live for record in records[1:]):
+                raise ContextIntegrityError("captured event has derived records without its event")
+            prepare_write(conn)
             for record in records:
-                envelope = record.to_json()
-                digest = hashlib.sha256(envelope.encode()).hexdigest()
-                key = record_key(record)
-                conn.execute("INSERT INTO records(key,scope,id,kind,envelope,sha256) VALUES(?,?,?,?,?,?)",
-                             (key, record.scope, record.id, record.kind, envelope, digest))
-                self._backend._append_audit(conn, key, digest)
-        return self._ingest_result(records, "stored", len(records), store_id)
+                insert_record(conn, record)
+        status = "stored_after_purge" if record_key(records[0]) in state.purged else "stored"
+        return self._ingest_result(records, status, len(records), store_id)
 
     @staticmethod
     def _ingest_result(records, status, count, store_id):
@@ -82,153 +79,95 @@ class ContextStore:
                 "source_hash": records[0].provenance.source_hash, "store_id": store_id,
                 "does_not_prove": list(LIMITS)}
 
-    @staticmethod
-    def _verify_row(conn, key, envelope, digest):
-        expected = hashlib.sha256(envelope.encode()).hexdigest()
-        row = conn.execute("SELECT sha256 FROM audit WHERE key=? ORDER BY seq DESC LIMIT 1",
-                           (key,)).fetchone()
-        if expected != digest or not row or row[0] != digest:
-            raise ContextIntegrityError("stored context payload integrity failed")
-
     def _records(self, workspace, project, expected_store_id=None):
-        result = []
         with self._backend._conn() as conn:
             conn.execute("BEGIN IMMEDIATE")
-            store_id = self._store_id(conn, create=True)
-            _compare_store_id(store_id, _expected_store_id(expected_store_id))
-            rows = self._verified_rows(conn)
-            for key, envelope, digest in rows:
-                try:
-                    rec = Record.from_json(envelope)
-                except Exception as exc:
-                    raise ContextIntegrityError("context store integrity failed") from exc
-                if (rec.data.get("workspace_id"), rec.data.get("project_id")) != (workspace, project):
-                    continue
-                if not rec.data.get("event_record_id"):
-                    continue
+            store_id, version = store_identity(conn, create=True)
+            compare_store_id(store_id, checked_expected_store_id(expected_store_id))
+            state = verified_state(conn, version)
+        result = []
+        for key in sorted(state.live):
+            rec = state.live[key].record
+            if (rec.data.get("workspace_id"), rec.data.get("project_id")) != (workspace, project):
+                continue
+            if rec.data.get("event_record_id"):
                 result.append(rec)
-        return result, store_id
+        return result, store_id, state.purged_ids()
 
     def query(self, workspace_id, project_id, query, top_k=5, include_pending=True,
-              expected_store_id=None, include_related=False, related_limit=5):
+              expected_store_id=None, include_related=False, related_limit=5,
+              exclude_answers=False):
         workspace, project = scope(workspace_id, project_id)
-        records, store_id = self._records(workspace, project, expected_store_id)
+        records, store_id, purged = self._records(workspace, project, expected_store_id)
         result = search(records, workspace, project, query, top_k, include_pending,
-                        include_related=include_related, related_limit=related_limit)
+                        include_related=include_related, related_limit=related_limit,
+                        exclude_answers=exclude_answers)
+        mark_purged_citations(result["hits"], records, purged)
         result["store_id"] = store_id
         return result
 
     def get(self, workspace_id, project_id, record_id, expected_store_id=None):
         workspace, project = scope(workspace_id, project_id)
-        records, store_id = self._records(workspace, project, expected_store_id)
-        for rec in records:
-            if rec.id == record_id:
-                return {"status": "found_in_searched_sources", "record_key": record_key(rec), "record": rec.to_dict(),
-                        "store_id": store_id, "does_not_prove": list(LIMITS)}
-        return {"status": "not_found_in_searched_sources", "store_id": store_id, "does_not_prove": list(LIMITS)}
+        records, store_id, purged = self._records(workspace, project, expected_store_id)
+        by_id = {rec.id: rec for rec in records}
+        rec = by_id.get(record_id)
+        if rec is None:
+            missing = {"status": "not_found_in_searched_sources", "store_id": store_id,
+                       "does_not_prove": list(LIMITS)}
+            if record_id in purged:
+                missing["purged"] = True
+            return missing
+        found = {"status": "found_in_searched_sources", "record_key": record_key(rec),
+                 "record": rec.to_dict(), "store_id": store_id, "does_not_prove": list(LIMITS)}
+        cited = purged_citations(rec, by_id, purged)
+        if cited:
+            found["cited_events_purged"] = cited
+        return found
 
     def verify_chain(self):
         with self._backend._conn() as conn:
             conn.execute("BEGIN")
             length = conn.execute("SELECT COUNT(*) FROM audit").fetchone()[0]
             try:
-                self._verified_rows(conn)
+                verified_state(conn, read_version(conn))
             except ContextIntegrityError:
                 return {"ok": False, "length": length}
             return {"ok": True, "length": length}
 
-    def _store_id(self, conn, *, create):
-        meta_exists = _table_exists(conn, _META_TABLE)
-        version_exists = _table_exists(conn, _VERSION_TABLE)
-        if not meta_exists:
-            if version_exists:
-                raise ContextStoreIdentityError("context store identity invalid")
-            if not create:
-                raise ContextStoreIdentityError("context store identity missing")
-            conn.execute(
-                f"CREATE TABLE {_VERSION_TABLE}(key TEXT PRIMARY KEY, value TEXT NOT NULL)"
-            )
-            conn.execute(
-                f"INSERT INTO {_VERSION_TABLE}(key,value) VALUES(?,?)",
-                (_VERSION_KEY, _IDENTITY_VERSION),
-            )
-            conn.execute(
-                f"CREATE TABLE {_META_TABLE}(key TEXT PRIMARY KEY, value TEXT NOT NULL)"
-            )
-            store_id = "ctxstore_" + secrets.token_hex(16)
-            conn.execute(
-                f"INSERT INTO {_META_TABLE}(key,value) VALUES(?,?)",
-                (_STORE_ID_KEY, store_id),
-            )
-            return store_id
-        if not version_exists:
-            raise ContextStoreIdentityError("context store identity invalid")
-        try:
-            versions = conn.execute(
-                f"SELECT value FROM {_VERSION_TABLE} WHERE key=?",
-                (_VERSION_KEY,),
-            ).fetchall()
-        except Exception as exc:
-            raise ContextStoreIdentityError("context store identity invalid") from exc
-        if versions != [(_IDENTITY_VERSION,)]:
-            raise ContextStoreIdentityError("context store identity invalid")
-        try:
-            rows = conn.execute(
-                f"SELECT value FROM {_META_TABLE} WHERE key=?",
-                (_STORE_ID_KEY,),
-            ).fetchall()
-        except Exception as exc:
-            raise ContextStoreIdentityError("context store identity invalid") from exc
-        if len(rows) != 1 or not _valid_store_id(rows[0][0]):
-            raise ContextStoreIdentityError("context store identity invalid")
-        return rows[0][0]
+    def scrub_pending(self) -> bool:
+        """Whether a purge committed and its file scrub has not finished."""
+        from .context_scrub import scrub_pending
+        with self._backend._conn() as conn:
+            conn.execute("BEGIN")
+            store_identity(conn, create=False)
+            return scrub_pending(conn)
 
-    @staticmethod
-    def _verified_rows(conn):
-        """Reconcile payloads and audit in one snapshot, including missing rows."""
-        previous, latest = "0" * 64, {}
-        for key, digest, prev_hash, chain in conn.execute(
-                "SELECT key,sha256,prev_hash,chain_hash FROM audit ORDER BY seq"):
-            if not all(isinstance(value, str) for value in (key, digest, prev_hash, chain)):
-                raise ContextIntegrityError("context audit contains malformed fields")
-            expected = hashlib.sha256((previous + key + digest).encode()).hexdigest()
-            if previous != prev_hash or expected != chain:
-                raise ContextIntegrityError("context audit chain integrity failed")
-            previous, latest[key] = chain, digest
-        rows = conn.execute("SELECT key,envelope,sha256 FROM records ORDER BY key").fetchall()
-        if {row[0] for row in rows} != set(latest):
-            raise ContextIntegrityError("context records and audit keys differ")
-        for key, envelope, digest in rows:
-            if not all(isinstance(value, str) for value in (key, envelope, digest)):
-                raise ContextIntegrityError("context record contains malformed fields")
-            if hashlib.sha256(envelope.encode()).hexdigest() != digest or latest[key] != digest:
-                raise ContextIntegrityError("stored context payload integrity failed")
-            try:
-                Record.from_json(envelope)
-            except Exception as exc:
-                raise ContextIntegrityError("context store integrity failed") from exc
-        return rows
+    def purge_plan(self, workspace_id, project_id, selection, *, expected_store_id=None,
+                   local_detail=False):
+        """The plan a purge of `selection` would apply; deletes nothing."""
+        from .context_purge import plan_purge
+        return plan_purge(self, workspace_id, project_id, selection,
+                          expected_store_id=expected_store_id, local_detail=local_detail)
+
+    def purge(self, workspace_id, project_id, selection, *, confirm_plan_sha256,
+              expected_store_id=None, busy_retry_seconds=30.0):
+        """Apply exactly the plan whose digest is `confirm_plan_sha256`."""
+        from .context_purge import apply_purge
+        return apply_purge(self, workspace_id, project_id, selection,
+                           confirm_plan_sha256=confirm_plan_sha256,
+                           expected_store_id=expected_store_id,
+                           busy_retry_seconds=busy_retry_seconds)
 
 
-def _valid_store_id(value):
-    return isinstance(value, str) and _STORE_ID.fullmatch(value) is not None
-
-
-def _table_exists(conn, name):
-    return conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
-        (name,),
-    ).fetchone() is not None
-
-
-def _expected_store_id(value):
-    if value is None:
-        return None
-    if not _valid_store_id(value):
-        raise ContextStoreIdentityError("expected_store_id is invalid")
-    return value
-
-
-def _compare_store_id(actual, expected):
-    if expected is not None and actual != expected:
-        raise ContextStoreIdentityError("context store identity mismatch")
+def _check_redelivery(records, first, state):
+    """A redelivered event must match what is stored. Derived records a
+    retention run purged stay purged."""
+    if first.envelope != records[0].to_json():
+        raise ContextCollision("event identity already exists with different content")
+    for record in records[1:]:
+        key = record_key(record)
+        if key in state.purged:
+            continue
+        row = state.live.get(key)
+        if row is None or row.envelope != record.to_json():
+            raise ContextIntegrityError("captured event has missing or changed derived records")

@@ -340,6 +340,30 @@ level up, in the stored row:
   its own line, D-145 a Codex URL that names this checkout's own remote defers
   to the directory under `--remote`.
 
+C1 is the context-ownership band: the shared context store can remove what it
+holds and the capture hook can store answers on request.
+- `src/canon/context_audit.py` reconciles records with the op-aware audit chain
+  (`put` and `purge` rows; the latest row per key decides) and holds the salted
+  put commitment; `src/canon/context_migrate.py` holds the identity marker
+  (version 1 or 2) and the `ALTER TABLE` migration at the first write.
+  `SqliteBackend.verify_chain` walks the same op-aware chain, and
+  `SqliteBackend.put` still writes plain puts, so blocks databases stay
+  readable by 0.3.0. `context_selection.py` resolves a selection and applies
+  `keep_responses` to the bulk selectors; `context_access.py` reports whether
+  the database file is shared with other accounts.
+- `src/canon/context_purge.py` plans and applies a purge (event, derived
+  records, paired answer; `keep_responses`), bound by a plan digest;
+  `context_purge_report.py` states residue and out-of-reach copies;
+  `context_scrub.py` runs `secure_delete`, VACUUM, the WAL checkpoints, the
+  scrub-pending mark and the residual scan; `context_retention.py` maps the
+  retention planner onto a purge. `cli_context_purge.py` and
+  `cli_context_text.py` add `canon context purge|retention`; `context_mcp.py`
+  adds `canon.context.purge`.
+- `src/canon/client_capture_stop.py` stores a `Stop` delivery's last assistant
+  message as an answer event when `--capture prompts+responses` is set.
+- `project-docs/C1-DECISIONS.md` records D-146 to D-163. Tests plant canaries
+  built at run time and scan the database files for every 16-byte window.
+
 Later phases (verifier, migration legs, region installation into an existing
 file, the global SOUL.md and the global GEMINI.md surfaces) aim at this same
 envelope. Each lands on its own branch.

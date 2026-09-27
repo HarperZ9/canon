@@ -88,6 +88,30 @@ def _related_hit(rec, anchor, direction, source, workspace, project):
                          "session_id": rec.provenance.session_id}}
 
 
+def cited_event_ids(rec) -> set[str]:
+    """The event record ids this record cites through canon_event_ref sources."""
+    return {_ref_target(source) for source in _canon_event_refs(rec)}
+
+
+def mark_purged_citations(hits, records, purged_ids) -> None:
+    """Name, on each hit, the purged events that the hit's event cites. The
+    citing record keeps its own text; only the cited event is gone."""
+    if not purged_ids:
+        return
+    by_id = {rec.id: rec for rec in records}
+    for hit in hits:
+        cited = purged_citations(by_id.get(hit.get("record_id")), by_id, purged_ids)
+        if cited:
+            hit["cited_events_purged"] = cited
+
+
+def purged_citations(rec, by_id, purged_ids) -> list[str]:
+    if rec is None:
+        return []
+    event = by_id.get(rec.data.get("event_record_id"), rec)
+    return sorted(cited_event_ids(event) & set(purged_ids))
+
+
 def _canon_event_refs(rec):
     return [source for source in rec.data.get("sources", [])
             if isinstance(source, dict) and source.get("source_kind") == "canon_event_ref"

@@ -91,6 +91,10 @@ def _add_command_args(command: str, parser: argparse.ArgumentParser) -> None:
         from .cli_workspace_parser import add_handoff_args, add_switch_args
 
         (add_handoff_args if command == "handoff" else add_switch_args)(parser)
+    elif command == "context":
+        from .cli_context_purge import add_context_args
+
+        add_context_args(parser)
 
 
 def _add_init_args(parser: argparse.ArgumentParser) -> None:
