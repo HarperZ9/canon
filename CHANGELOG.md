@@ -2,7 +2,12 @@
 
 ## Unreleased
 
+Nothing yet.
+
+## 0.4.1 - 2026-09-26
+
 Fixes found by checking the 0.3.0 and 0.4.0 releases as a user gets them.
+Nothing in the record, the context store or its identity version changes.
 
 - `canon --version` (and `-V`) prints the installed version, and
   `canon --json --version` prints it as a result object. 0.4.0 answered
@@ -27,7 +32,8 @@ Fixes found by checking the 0.3.0 and 0.4.0 releases as a user gets them.
   `project-docs/CONTEXT-STORE-IDENTITY.md`), the hook examples, and what the
   suite imports and reads (the test helpers, the art tools and the block set),
   so the suite collects and runs from an extracted sdist. The 0.4.0 sdist
-  left out every user doc and the C1 decisions. A test builds the sdist and
+  left out all three user docs, the W1 and C1 docs and the test helpers, and
+  its suite stopped with 57 collection errors. A test builds the sdist and
   checks this.
 - The release workflow's smoke step runs `canon --version` from the built
   wheel and fails the release when it does not print the distribution version.

@@ -17,7 +17,7 @@ latest audit entry for each key, missing audit rows, and the audit chain before
 they report a result. A context database with a broken payload hash, missing audit
 key, or broken chain is refused rather than searched as if it were intact.
 
-Each record canon 0.4.0 writes has a salted commitment as its payload hash:
+Each record canon 0.4.0 or later writes has a salted commitment as its payload hash:
 the salt is stored beside the record and deleted with it, so after a purge the
 audit table no longer confirms what the record held. Records written by 0.3.0
 keep a plain sha256 of the envelope. A purge appends an audit row and a
