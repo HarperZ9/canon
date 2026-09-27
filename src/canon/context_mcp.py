@@ -1,12 +1,12 @@
 """Bounded context MCP entrypoint; existing Canon read-only MCP stays unchanged.
 
 `canon.context.purge` returns a plan. It applies a confirmed plan only when the
-owner started the server with `CANON_CONTEXT_MCP_PURGE=apply`; otherwise the
-owner applies it with `canon context purge --confirm-plan`. A model that asked
-for a plan can send its digest straight back, so the digest alone shows no
-owner decision. Query excerpts and get results pass through the secret
-scrubber before they are returned, because an MCP result enters a model
-context.
+server was started with `CANON_CONTEXT_MCP_PURGE=apply`; otherwise the owner
+applies it with `canon context purge --confirm-plan`. Nothing checks who set
+that variable. A model that asked for a plan can send its digest straight back,
+so the digest alone shows no owner decision. Ingest redacts before it stores,
+and query and get results pass through the secret scrubber before they are
+returned, because an MCP result enters a model context.
 """
 from __future__ import annotations
 
@@ -20,6 +20,7 @@ from .context_access import file_access
 from .context_purge import ContextPurgeError, select
 from .context_store import (
     ContextIntegrityError,
+    ContextPairingError,
     ContextStore,
     ContextStoreIdentityError,
 )
@@ -54,8 +55,8 @@ _SHAPES = {
 }
 _PURGE_DESCRIPTION = (
     "purge captured Canon context events. Without confirm_plan_sha256 this returns the plan "
-    "and deletes nothing; with the plan's digest it applies exactly that plan, when the owner "
-    "started this server with CANON_CONTEXT_MCP_PURGE=apply. Choose one of event_id, "
+    "and deletes nothing; with the plan's digest it applies exactly that plan, when this "
+    "server was started with CANON_CONTEXT_MCP_PURGE=apply. Choose one of event_id, "
     "before_ord or all. A paired answer goes with its prompt unless keep_responses.")
 
 
@@ -153,7 +154,7 @@ def handle(request):
             params = request.get("params", {})
             value = call(params.get("name"), params.get("arguments", {}))
             result = {"content": [{"type": "text", "text": json.dumps(value)}], "isError": False}
-        except (ContextMcpInputError, ContextPurgeError) as exc:
+        except (ContextMcpInputError, ContextPurgeError, ContextPairingError) as exc:
             result = {"content": [{"type": "text", "text": str(exc)}], "isError": True}
         except ContextStoreIdentityError as exc:
             result = {"content": [{"type": "text", "text": str(exc)}], "isError": True}

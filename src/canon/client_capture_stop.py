@@ -13,9 +13,10 @@ which the store refuses as a collision. A redelivered Stop with the same text
 is idempotent at its segment; a different answer for the same prompt, as when a
 Stop hook asks the client to continue, takes the next segment.
 
-An answer is stored only when the prompt it answers is in the store, so a
-purge of that prompt always takes the answer with it. A Stop whose prompt was
-purged, or never captured (a Claude Code prompt that arrived without a
+An answer is stored only when the prompt it answers is in the store. The store
+checks this inside the transaction that writes the answer (D-164), so a purge
+of the prompt that lands while the hook runs still takes the answer with it.
+A Stop whose prompt was purged, or never captured (a Claude Code prompt that arrived without a
 `prompt_id` is stored under a generated id no Stop can name), stores nothing
 and says which. The answer text passes through the secret scrubber first, as
 a prompt does. The event records that tool calls and reasoning were not
@@ -64,14 +65,15 @@ def capture_stop(hook: dict[str, Any], args, open_service: Callable[[], Any]) ->
     session_id = string_field(hook, "session_id")
     prompt_ref = prompt_record_id(args.workspace_id, args.project_id, source_app,
                                   session_id, native_id)
-    service = open_service()
-    found = service.get(args.workspace_id, args.project_id, prompt_ref)
-    if found["status"] != "found_in_searched_sources":
-        return {"systemMessage": PURGED_PROMPT if found.get("purged") else NO_PROMPT}
+    from .context_store import ContextPairingError
+
     cleaned = scrub(message)
     answer = _Answer(source_app, native_id, session_id, cleaned.text, prompt_ref,
                      dict(sorted(cleaned.hits.items())))
-    status = _ingest_first_free_segment(service, hook, args, answer)
+    try:
+        status = _ingest_first_free_segment(open_service(), hook, args, answer)
+    except ContextPairingError as exc:
+        return {"systemMessage": PURGED_PROMPT if exc.purged else NO_PROMPT}
     return {"systemMessage": STORED_AGAIN} if status == "stored_after_purge" else {}
 
 

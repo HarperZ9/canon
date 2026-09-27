@@ -2,7 +2,36 @@
 
 ## Unreleased
 
-Nothing yet.
+Fixes from a review of the 0.4.0 purge and capture work. Decisions D-164 to
+D-170 are in `project-docs/C1-DECISIONS.md`.
+
+- An answer is refused unless its prompt is a live event in the same workspace
+  and project, checked inside the write that would store it. A purge that
+  lands while the `Stop` hook runs can no longer leave the answer behind, and
+  `canon.context.ingest` refuses an answer for a prompt that was never
+  captured.
+- Every ingest is redacted, including events sent through
+  `canon.context.ingest`, which were stored as sent.
+- Query excerpts are scrubbed before they are cut, so a secret across the
+  2000-character cut no longer leaks in part. Pending references and
+  related-event sources are scrubbed. Recorded transcript paths are counted,
+  not listed, in query results and in the context the hook returns.
+- `--keep-responses` with `--all` or `--before-ord` keeps every answer,
+  including one whose prompt was never captured.
+- A purge report is `purged` only when its scrub finished; otherwise it says
+  `scrub_incomplete`, over MCP too. The residue note says whether VACUUM ran,
+  a report that removed nothing still names residue and reach, and out of
+  reach names the `source_hash` values earlier results carried.
+- The residual scan reads a UTF-16 database in UTF-16; it reported `purged`
+  over residue before.
+- A dry run no longer takes a write lock and succeeds while a scrub is
+  pending. An apply blocked by a reader refuses as `store_busy` with nothing
+  changed. The scrub reports the WAL checkpoint before VACUUM too.
+- The capture hook reads stdin as UTF-8 whatever the locale, so non-ASCII text
+  is no longer mangled on Windows. Pending references print one to a line.
+- Docs: file-permission advice per platform (`umask 077` or `chmod 600` on
+  Linux and macOS), the provider egress of MCP results, the pairing fields the
+  tests supply synthetically, and the version the `Stop` fragments need.
 
 ## 0.4.1 - 2026-09-26
 

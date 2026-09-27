@@ -124,7 +124,7 @@ def _run(parsed, stdin, environ, out: _Out, command: str) -> int:
     plan = store.purge_plan(*scope, selection, local_detail=detail)
     if parsed.dry_run:
         return _emit(out, command, "dry run: nothing was deleted", plan,
-                     plan_text(plan) + "dry run: nothing was deleted\n")
+                     plan_text(plan) + "dry run: nothing was deleted\n", plan_only=True)
     digest = parsed.confirm_plan or plan["plan_sha256"]
     if not out.json_output and (parsed.yes or not applies):
         out.stdout.write(plan_text(plan))
@@ -196,8 +196,11 @@ def _unfinished(data: dict) -> str | None:
     return "scrub_incomplete" if data.get("scrub_pending") else None
 
 
-def _emit(out: _Out, command: str, message: str, data: dict, text: str) -> int:
-    failure = _unfinished(data)
+def _emit(out: _Out, command: str, message: str, data: dict, text: str,
+          plan_only: bool = False) -> int:
+    """A dry run succeeds whatever the store's scrub mark says: the plan it
+    prints names the pending scrub, and a confirmed run finishes it."""
+    failure = None if plan_only else _unfinished(data)
     if out.json_output:
         result = make_result(ok=failure is None, command=command,
                              failure_code=failure or "ok",

@@ -17,7 +17,8 @@ latest audit entry for each key, missing audit rows, and the audit chain before
 they report a result. A context database with a broken payload hash, missing audit
 key, or broken chain is refused rather than searched as if it were intact.
 
-Each record canon 0.4.0 or later writes has a salted commitment as its payload hash:
+Each context record canon 0.4.0 or later writes has a salted commitment as its
+payload hash:
 the salt is stored beside the record and deleted with it, so after a purge the
 audit table no longer confirms what the record held. Records written by 0.3.0
 keep a plain sha256 of the envelope. A purge appends an audit row and a
@@ -39,14 +40,33 @@ The context MCP server exposes five tools:
   workspace and project scope.
 - `canon.context.get` returns one stored record by id.
 - `canon.context.purge` returns a purge plan. It applies exactly that plan when
-  a second call carries its `confirm_plan_sha256` and the owner started the
-  server with `CANON_CONTEXT_MCP_PURGE=apply`.
+  a second call carries its `confirm_plan_sha256` and the server was started
+  with `CANON_CONTEXT_MCP_PURGE=apply`.
+
+Like every ingest, `canon.context.ingest` redacts secret-shaped values before
+it stores the event: the message text, the text of each extraction and
+interpretation, and the `ref`, `locator` and `caption` of each attachment and
+source. The hits are counted per rule in `coverage.redactions`. An answer, an
+event with `message_role: "assistant"` and a `responds_to` field, is refused
+unless the prompt it names is live in the same workspace and project.
 
 Every query response includes coverage fields and a `does_not_prove` list.
 `found_in_searched_sources` means the bounded searched records matched the query.
 `not_found_in_searched_sources` means those records did not match. It does not
 mean the topic was never discussed. Pending or unextracted attachments are
-returned separately so the caller can see the coverage gap.
+returned separately so the caller can see the coverage gap. Recorded transcript
+paths are counted in `coverage.transcript_locators_not_listed` and not listed,
+since canon never reads a transcript.
+
+What `canon.context.query`, `canon.context.get` and the capture hook return
+enters the calling model's context. With a hosted provider that text leaves
+your machine under the provider's terms. Each excerpt is scrubbed whole and
+then cut at 2000 characters, and pending references and related-event sources
+are scrubbed too. `canon.context.get` returns the whole stored record,
+scrubbed, including the `cwd` and transcript path it recorded.
+`--replay-answers` applies to the hook only; MCP queries return answers.
+Ingest and query results carry each event's `source_hash`, an unsalted sha256
+of the captured event, and a purge report names those copies as out of reach.
 
 Callers may opt in to `include_related` with a bounded `related_limit`. This adds
 a `related_events` sidecar built only from explicit one-hop `canon_event_ref`
@@ -75,7 +95,8 @@ for that delivery.
 
 The hook reads one JSON object from stdin and writes hook JSON to stdout. It does
 not call provider APIs, dereference links, open attachment paths, or read a
-transcript file. Transcript paths are stored as locators only.
+transcript file. Transcript paths are stored as locators only, and the context
+the hook returns never lists them.
 
 `container-id` is metadata for the captured event and the returned context
 header. It is not an access-control boundary, isolation primitive, or proof that
@@ -100,8 +121,9 @@ The plan names every record it removes: each selected event, the extraction
 and interpretation records stored with it, and the answer paired with it (an
 assistant event whose `responds_to` names the prompt), since an answer often
 restates its prompt. `--keep-responses` keeps the answers with every selector:
-with `--before-ord` or `--all` it leaves out each answer whose prompt the
-selector also removes or an earlier purge removed. An answer named by its own
+with `--before-ord` or `--all` it leaves out every event with
+`message_role: "assistant"`, whether its prompt is selected, was purged
+earlier or was never captured. An answer named by its own
 `--event-id` is removed as named. Events that cite a purged event keep their
 own text, and their query results list the purged event under
 `cited_events_purged`. An ordinal is the audit sequence number of an event's
@@ -128,16 +150,22 @@ The command exits with a failure code, and `--json` output says `ok: false`
 with the report under `data`, when the purge left residue in the database
 files (`residue_found`), when its file scrub did not finish
 (`scrub_incomplete`), or when the audit chain does not verify afterwards
-(`audit_failed`). A file that is not a canon context store is refused as
-`store_invalid` before anything writes to it.
+(`audit_failed`). The report's own `status` says the same over MCP; only a
+purge with a verifying chain, no residue and a finished scrub is `purged`. A
+file that is not a canon context store is refused as `store_invalid` before
+anything writes to it. A dry run succeeds while a scrub is pending, and it
+reads without taking a write lock, so another reader does not block it. An apply
+waits up to 10 seconds for readers to let go and then refuses as
+`store_busy`, having changed nothing.
 
 After a purge nothing reads the records back, and the audit chain still
 verifies. The report says what canon could not remove from its own files and
 what it cannot reach at all:
 
-- The database is plaintext (decision D-7). SQLite rewrites the file without
-  the purged rows, but the disk clusters the old file and its journal released
-  can hold them until reused.
+- The database is plaintext (decision D-7). After the rows are gone, VACUUM
+  rebuilds the database file without them, and the report says whether it ran
+  and how each WAL checkpoint went. The disk clusters the old file and its
+  journal released can hold the purged text until reused.
 - Records captured by canon 0.3.0 or older keep a plain digest in their audit
   row, which can confirm a guess of the exact record. The report counts them.
 - The client's own transcript, the excerpts earlier queries returned into model
@@ -145,7 +173,8 @@ what it cannot reach at all:
   database are outside canon's reach.
 
 A residual scan reads the database and its journal and WAL files for the purged
-values after the purge and reports any it finds. A value shorter than 16 bytes
+values after the purge and reports any it finds. It searches in the encoding
+the database stores text in, UTF-8 or UTF-16, and names it in the report. A value shorter than 16 bytes
 is checked only by its row being gone. A run of a purged value shorter than the
 report's `min_detectable_bytes` can be missed; that bound is 16 bytes until the
 purged values pass about 1 MB or the database files pass about 10 MB, and grows
@@ -154,8 +183,9 @@ for the deleted salts.
 
 A purge that stops between removing the rows and rewriting the file leaves the
 store marked scrub-pending, and `canon.context.health` reports
-`scrub_pending: true`. Run the same command again with `--dry-run` to see the
-events listed as already purged, then apply it with `--confirm-plan` or `--yes`.
+`scrub_pending: true`. Run the same command again with `--dry-run`: it
+succeeds, lists the events as already purged and says a scrub is pending. Then
+apply it with `--confirm-plan` or `--yes`.
 When nothing is left to remove, applying the plan runs the scrub and reports
 `scrub_finished` or `scrub_incomplete`. That report lists no event ids and runs
 no residual scan, because the purged values left the rows in the earlier run.
@@ -189,8 +219,9 @@ Over MCP, `canon.context.purge` takes the same selection as arguments. A call
 without `confirm_plan_sha256` returns the plan and deletes nothing. The model
 that asked for a plan can send its digest straight back, so by default the
 server returns plans only, and the owner applies one with
-`canon context purge --confirm-plan <digest>`. When the owner starts the server
-with `CANON_CONTEXT_MCP_PURGE=apply`, a second call carrying the plan's digest
+`canon context purge --confirm-plan <digest>`. When the server was started with
+`CANON_CONTEXT_MCP_PURGE=apply`, by the owner or by any process that could set
+that variable, a second call carrying the plan's digest
 applies exactly that plan, and a plan the store has moved past is refused as
 stale. Plans and reports over MCP carry ids, counts and digests, never record
 text or paths. Query excerpts and get results pass through the secret scrubber
@@ -204,8 +235,10 @@ harness that exposes this tool should require an owner's approval for it.
 The first capture or purge this version writes raises the store's identity
 version to 2 (`project-docs/CONTEXT-STORE-IDENTITY.md`). Canon 0.3.0 and older
 then refuse the database as "identity invalid". A client that sends a purged
-event again stores it again: the ingest result says `stored_after_purge`, and
-the capture hook tells the owner.
+event again under the same native id stores it again: the ingest result says
+`stored_after_purge`, and the capture hook tells the owner. A Claude Code
+prompt that arrives without a `prompt_id` gets a new id each time, so it is
+stored as a new event and nothing says it was purged before.
 
 ## Scope and storage
 
@@ -220,12 +253,18 @@ access-control boundary.
 
 The database is plaintext on disk (decision D-7 in
 `project-docs/F1-DECISIONS.md`). File permissions and disk encryption are its
-only protection, and canon sets no file permissions of its own: the database,
-its journal and its WAL take the access rules of their folder. Keep the
-database in a folder only your account can read. `canon.context.health`
-reports `file_access` as `owner_only` or `shared` from the mode bits on Linux
-and macOS, and as `not_checked` on Windows, where canon does not read ACLs. The path to encryption at rest is a cipher-wrapper backend
-that encrypts each envelope on write and decrypts it on read; it is not built.
+only protection, and canon sets no file permissions of its own. On Windows the
+database, its journal and its WAL inherit the access rules of their folder, so
+keep them in a folder only your account can read; `canon.context.health`
+reports `file_access: not_checked` there, since canon does not read ACLs. On
+Linux and macOS SQLite creates each file with the process umask applied, which
+commonly leaves it readable by other accounts whatever the folder allows. Set
+`umask 077` before the first capture, or run `chmod 600` on the database and
+its `-journal`, `-wal` and `-shm` files. Health reports `owner_only` only when
+the database grants nothing to group or other and its folder is not writable
+by group or other, and `shared` otherwise. The path to encryption at rest is a
+cipher-wrapper backend that encrypts each envelope on write and decrypts it on
+read; it is not built.
 
 ## Media, links, and source state
 
