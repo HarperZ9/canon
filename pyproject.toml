@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -13,11 +13,18 @@ license-files = ["LICENSE"]
 authors = [{ name = "HarperZ9" }]
 dependencies = []
 
+[project.urls]
+Homepage = "https://github.com/HarperZ9/canon"
+Source = "https://github.com/HarperZ9/canon"
+Changelog = "https://github.com/HarperZ9/canon/blob/main/CHANGELOG.md"
+Issues = "https://github.com/HarperZ9/canon/issues"
+
 [project.scripts]
 canon = "canon.cli:main"
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+# setuptools builds the sdist that tests/test_packaging.py inspects.
+dev = ["pytest>=8", "setuptools>=77"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
