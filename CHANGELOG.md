@@ -4,6 +4,42 @@
 
 Nothing yet.
 
+## 0.4.1 - 2026-09-26
+
+Fixes found by checking the 0.3.0 and 0.4.0 releases as a user gets them.
+Nothing in the record, the context store or its identity version changes.
+
+- `canon --version` (and `-V`) prints the installed version, and
+  `canon --json --version` prints it as a result object. 0.4.0 answered
+  `canon --version` with "FAIL canon: invalid arguments". `canon.__version__`
+  holds the same number, read from one module that a test holds equal to
+  pyproject.toml.
+- `canon --help` describes the tool and each command. 0.4.0 showed
+  "<name> placeholder" for all fifteen. Each subcommand's own `--help`
+  (`canon workspace id --help`, `canon context purge --help` and the rest)
+  now opens with the same one-line description.
+- `python -m canon.local_mcp` and `python -m canon.context_mcp` read their
+  arguments before serving: `--help` and `--version` print and exit 0, and an
+  unknown argument exits 2 with a message. Before, both started a stdio server
+  whatever the arguments were.
+- The README loads its drawings and links from absolute GitHub URLs, so the
+  PyPI project page shows the images and the walkthrough link resolves.
+- The package metadata carries Homepage, Source, Changelog and Issues links.
+- The sdist carries the docs the README, this changelog and the user docs name
+  (`docs/switching-models.md`, `docs/shared-context.md`,
+  `docs/client-capture.md`, `project-docs/W1-WORKSPACE.md`,
+  `project-docs/W1-DECISIONS.md`, `project-docs/C1-DECISIONS.md`,
+  `project-docs/CONTEXT-STORE-IDENTITY.md`), the hook examples, and what the
+  suite imports and reads (the test helpers, the art tools and the block set),
+  so the suite collects and runs from an extracted sdist. The 0.4.0 sdist
+  left out all three user docs, the W1 and C1 docs and the test helpers, and
+  its suite stopped with 57 collection errors. A test builds the sdist and
+  checks this.
+- The release workflow's smoke step runs `canon --version` from the built
+  wheel and fails the release when it does not print the distribution version.
+- The build requires setuptools 77 or newer. setuptools 76 rejects the SPDX
+  `license` string in pyproject.toml.
+
 ## 0.4.0 - 2026-09-26
 
 The shared context store can now remove what it holds. Decisions D-146 to

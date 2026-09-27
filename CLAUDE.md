@@ -220,6 +220,12 @@ that door and still writes nothing:
 - `src/canon/cli.py` and `[project.scripts]` give `canon mcp`, `canon check` and
   `canon blocks`. Reconcile is absent on purpose: it rewrites instruction files
   and raises durable gates.
+- `src/canon/_version.py` holds the one version number. `canon.__version__`,
+  `canon --version` and the serverInfo of both MCP servers read it, and
+  `tests/test_local_mcp.py` holds it equal to pyproject.toml.
+  `src/canon/mcp_entry.py` parses argv for `python -m canon.local_mcp` and
+  `python -m canon.context_mcp`, so `--help` and `--version` exit without
+  serving and an unknown argument exits 2.
 - `project-docs/MCP-DECISIONS.md` records D-68 the door reads and never writes
   (with the byte-digest control behind that claim), D-69 the probe vocabulary,
   D-70 the status/doctor split and how doctor can be false, D-71 the roots come
@@ -377,6 +383,16 @@ envelope. Each lands on its own branch.
 - Never commit `.env`. Secrets go in `.env`, template in `.env.example`.
 - Branch before committing. Do not push, open a PR, or deploy without an
   explicit go.
+- Release: bump the version in pyproject.toml and `src/canon/_version.py`
+  together, add a dated CHANGELOG entry, then push a `v*` tag. release.yml
+  runs on the tag push and again on a published GitHub release; the publish
+  step skips files PyPI already has, so the second run uploads nothing. Its
+  smoke step checks that `canon --version` from the built wheel prints the
+  distribution version. `tests/test_packaging.py` builds the sdist
+  and checks what PyPI and the sdist carry: absolute README image and link
+  URLs, the project URLs, the named docs, the test helpers, and that the suite
+  collects from the extracted sdist. A new doc the README or CHANGELOG names
+  needs a MANIFEST.in rule.
 
 ## The one envelope (F0 contract)
 A record is `{canon_schema, kind, id, scope, data, provenance, temporal}`.

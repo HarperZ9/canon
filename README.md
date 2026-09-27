@@ -3,7 +3,7 @@
 One record for your memory bank and your personality, shared across every model
 and every tool.
 
-![canon: one memory record, rendered into every tool's own file. Own one region of the file. Leave every byte outside it alone.](docs/art/canon-header.svg)
+![canon: one memory record, rendered into every tool's own file. Own one region of the file. Leave every byte outside it alone.](https://raw.githubusercontent.com/HarperZ9/canon/main/docs/art/canon-header.svg)
 
 You keep the same working relationship whether you open Claude Code, Claude CLI,
 ChatGPT, Codex, or a web surface: the same authored voice, the same accumulated
@@ -97,31 +97,31 @@ only, so a block scoped with `applies_to` is written for every file with an
 `Applies to:` line, and that downgrade is declared rather than silent.
 
 The walkthrough, every command, and the limits are in
-[`docs/switching-models.md`](docs/switching-models.md). The short version of
+[`docs/switching-models.md`](https://github.com/HarperZ9/canon/blob/main/docs/switching-models.md). The short version of
 the limits: the importers use fixed patterns rather than a model, the session
 formats they read are not stable interfaces, the scrubber recognises secrets by
 shape, and the brief knows only what was recorded or imported.
 
 ## How one record becomes the file each tool reads
 
-![Eight stages taking one record to the file a tool reads: record, validate, layer, resolve, render, region, allow-list, write. Every entry is one envelope in one of eight kinds: an authored personality block, an episodic memory, a synthesized persona, a decision record, a reference to an external research artifact, and three workspace-state kinds for a project's focus, its work items and its environment constraints. The validator checks every field and refuses a record it cannot vouch for. A workspace block overrides a global block carrying the same id, and the resolve step keeps current entries only, ordered by a clock-free ordinal so a rebuild is byte-identical. The block set is rendered to text and spliced into the span between the canon begin and end markers, and every byte outside that span is preserved. The write allow-list holds seven surfaces: a global and a workspace file for Claude Code, an AGENTS.md for Codex, a workspace SOUL.md for Hermes, a GEMINI.md for Gemini CLI, the repository instructions file for GitHub Copilot, and one canon-owned Cursor rule. A path outside that list is refused, and so is a file with no canon region. Three outcomes: written inside the markers canon owns, a surface that drifted and needs a human, and a file canon declines to write at all.](docs/art/surface-lane.svg)
+![Eight stages taking one record to the file a tool reads: record, validate, layer, resolve, render, region, allow-list, write. Every entry is one envelope in one of eight kinds: an authored personality block, an episodic memory, a synthesized persona, a decision record, a reference to an external research artifact, and three workspace-state kinds for a project's focus, its work items and its environment constraints. The validator checks every field and refuses a record it cannot vouch for. A workspace block overrides a global block carrying the same id, and the resolve step keeps current entries only, ordered by a clock-free ordinal so a rebuild is byte-identical. The block set is rendered to text and spliced into the span between the canon begin and end markers, and every byte outside that span is preserved. The write allow-list holds seven surfaces: a global and a workspace file for Claude Code, an AGENTS.md for Codex, a workspace SOUL.md for Hermes, a GEMINI.md for Gemini CLI, the repository instructions file for GitHub Copilot, and one canon-owned Cursor rule. A path outside that list is refused, and so is a file with no canon region. Three outcomes: written inside the markers canon owns, a surface that drifted and needs a human, and a file canon declines to write at all.](https://raw.githubusercontent.com/HarperZ9/canon/main/docs/art/surface-lane.svg)
 
 canon writes seven paths and no others, and inside those seven it rewrites only
 the span between its own markers. A file with no canon region is left alone.
 
 ## How a rendered file is checked back against the record
 
-![Eight stages checking a rendered file back against its record: read, extract, ingest, canonical, compare, drops, legs, verdict. The file is read as it sits on disk and the region between the canon markers is extracted byte exactly. The region text is ingested back into records, each reduced to one canonical form so the comparison is against a single shape rather than a formatting accident. The rendered form and the ingested form are compared field by field. Every field that failed to survive is classified against the losses that storage adapter declared in advance, and a loss nobody declared is a refusal. The aggregate check folds four legs: surface drift, the vault round-trip, the vault read symmetry, and the persona assessment. A leg whose seam is not wired reports nothing and does not affect the result. The verdict is one exit code, zero when every wired leg passed and one otherwise, and all four gate functions in the codebase share that signature so a build keys on them the same way. Three outcomes: the record survives the file, a declared drop that was named in advance, and a refusal that returns a nonzero code.](docs/art/verdict-lane.svg)
+![Eight stages checking a rendered file back against its record: read, extract, ingest, canonical, compare, drops, legs, verdict. The file is read as it sits on disk and the region between the canon markers is extracted byte exactly. The region text is ingested back into records, each reduced to one canonical form so the comparison is against a single shape rather than a formatting accident. The rendered form and the ingested form are compared field by field. Every field that failed to survive is classified against the losses that storage adapter declared in advance, and a loss nobody declared is a refusal. The aggregate check folds four legs: surface drift, the vault round-trip, the vault read symmetry, and the persona assessment. A leg whose seam is not wired reports nothing and does not affect the result. The verdict is one exit code, zero when every wired leg passed and one otherwise, and all four gate functions in the codebase share that signature so a build keys on them the same way. Three outcomes: the record survives the file, a declared drop that was named in advance, and a refusal that returns a nonzero code.](https://raw.githubusercontent.com/HarperZ9/canon/main/docs/art/verdict-lane.svg)
 
 A round-trip that loses a field passes only when the adapter declared that loss
 in advance. Anything else fails the gate rather than logging a warning.
 
 ## What canon carries
 
-![A table of twelve rows: what canon carries, how many of it there are, and where each number is read from. Eight record kinds share one envelope: five under the v1 record tag and three workspace-state kinds under their own tag. Two scopes layer, workspace over global. Seven surfaces sit on the write allow-list: a global and a workspace file for Claude Code, an AGENTS.md for Codex, a workspace SOUL.md for Hermes, a GEMINI.md, the Copilot instructions file, and one Cursor rule. Four storage adapters implement the backend protocol, and five capability tokens describe what each one can carry. Twenty-two schema pins name the seams that carry a version. The aggregate check folds four legs, and four gate functions share the same zero or one exit code. 163 source modules hold 27,554 lines, and 95 test files hold 1674 tests. Two surfaces named in the roadmap are absent from the catalog, a global SOUL.md and a global GEMINI.md, so canon does not render them.](docs/art/record-table.svg)
+![A table of twelve rows: what canon carries, how many of it there are, and where each number is read from. Eight record kinds share one envelope: five under the v1 record tag and three workspace-state kinds under their own tag. Two scopes layer, workspace over global. Seven surfaces sit on the write allow-list: a global and a workspace file for Claude Code, an AGENTS.md for Codex, a workspace SOUL.md for Hermes, a GEMINI.md, the Copilot instructions file, and one Cursor rule. Four storage adapters implement the backend protocol, and five capability tokens describe what each one can carry. Twenty-two schema pins name the seams that carry a version. The aggregate check folds four legs, and four gate functions share the same zero or one exit code. 165 source modules hold 27,686 lines, and 98 test files hold 1740 tests. Two surfaces named in the roadmap are absent from the catalog, a global SOUL.md and a global GEMINI.md, so canon does not render them.](https://raw.githubusercontent.com/HarperZ9/canon/main/docs/art/record-table.svg)
 
 Every count is asserted against the module that defines it in
-`tests/test_repo_art.py`.
+[`tests/test_repo_art.py`](https://github.com/HarperZ9/canon/blob/main/tests/test_repo_art.py).
 
 ## Status
 
@@ -177,7 +177,8 @@ workspace-state kinds, the handoff brief and `switch`, the two session
 importers with their secret scrubber and declared losses, three more surfaces
 (`GEMINI.md`, the Copilot instructions file, one Cursor rule) with the
 downgrades each declares, and the read-back of edits made inside a rendered
-region. It is specified in `project-docs/W1-WORKSPACE.md`.
+region. It is specified in
+[`project-docs/W1-WORKSPACE.md`](https://github.com/HarperZ9/canon/blob/main/project-docs/W1-WORKSPACE.md).
 
 C1 lets you own the shared context store (`docs/shared-context.md`). The
 capture hook stores your prompts by default and stores the assistant's answers
@@ -298,7 +299,7 @@ docs/art/                                the drawings above and the spec they re
 project-docs/                            the F0, F1, R0, R1, R2, V2, V3, V4, MCP, W1 decisions
 ```
 
-See `project-docs/` for the schema reference, the layering derivation, the
+See [`project-docs/`](https://github.com/HarperZ9/canon/tree/main/project-docs) for the schema reference, the layering derivation, the
 section-ownership contract, the declared drops each storage backend must
 announce, and the decisions behind the round-trip, vault, drift and reconcile
 gates.
@@ -307,4 +308,4 @@ gates.
 
 FSL-1.1-MIT. Functional Source License, source-available now for any purpose
 other than a competing product, and it converts to the MIT license two years
-after each version is released. See `LICENSE`.
+after each version is released. See [`LICENSE`](https://github.com/HarperZ9/canon/blob/main/LICENSE).

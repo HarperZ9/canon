@@ -15,6 +15,7 @@ import os
 import sys
 from pathlib import Path
 
+from ._version import __version__
 from .context_access import file_access
 from .context_purge import ContextPurgeError, select
 from .context_store import (
@@ -24,7 +25,6 @@ from .context_store import (
 )
 from .workspace.scrub import scrub, scrub_value
 
-__version__ = "0.4.0"
 ENV_CONTEXT_DB = "CANON_CONTEXT_DB"
 ENV_MCP_PURGE = "CANON_CONTEXT_MCP_PURGE"
 _PLAN_ONLY = ("this server returns purge plans only; apply the plan with `canon context purge "
@@ -191,5 +191,15 @@ def serve(stdin=None, stdout=None):
         stdout.flush()
 
 
+def main(argv=None):
+    """`python -m canon.context_mcp`: parse argv, then serve on stdio."""
+    from .mcp_entry import run_server
+
+    return run_server(module="canon.context_mcp", server_name="canon-context",
+                      description="Serve the shared Canon context store over MCP on stdio. "
+                                  f"{ENV_CONTEXT_DB} names the database as an absolute path.",
+                      serve=serve, argv=argv)
+
+
 if __name__ == "__main__":
-    raise SystemExit(serve())
+    raise SystemExit(main())

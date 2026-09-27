@@ -34,6 +34,9 @@ Run it as a module from an environment where `canon` is importable:
 python -m canon.client_capture --client codex --db <per-user-folder>/canon-context.sqlite --workspace-id <workspace> --project-id <project> --container-id shared
 ```
 
+Replace `<per-user-folder>` with the absolute path of a folder that already
+exists. canon creates the database file but not the folders above it.
+
 The command reads exactly one hook JSON object from stdin and emits hook JSON on
 stdout. It does not call a provider, read the transcript file, dereference links,
 or open attachment paths supplied by the hook payload.
