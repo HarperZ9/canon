@@ -83,8 +83,7 @@ the client saw every message in that container.
 
 ## Purging and retention
 
-Purge and retention need canon 0.4.0, which is not on PyPI yet; install from a
-checkout to use them.
+Purge and retention need canon 0.4.0 or later.
 
 A purge removes captured events from the store. Name the store with `--db` (or
 `CANON_CONTEXT_DB`) and the scope with `--workspace-id` and `--project-id`,

@@ -8,8 +8,7 @@ or file capture. Mounted on `Stop` with response capture on, it also stores the
 client's last assistant message as an answer paired with its prompt.
 
 Response capture, `--transcript-locator`, `--replay-answers`, secret redaction
-at capture and the `Stop` handling below need canon 0.4.0, which is not on PyPI
-yet; install from a checkout to use them. Canon 0.3.0 rejects `--capture` as an
+at capture and the `Stop` handling below need canon 0.4.0 or later. Canon 0.3.0 rejects `--capture` as an
 unknown argument.
 
 The adapter writes to the same Canon context SQLite database used by the

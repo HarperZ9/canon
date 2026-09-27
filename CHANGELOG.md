@@ -4,7 +4,7 @@
 
 Nothing yet.
 
-## 0.4.0 - unreleased
+## 0.4.0 - 2026-09-26
 
 The shared context store can now remove what it holds. Decisions D-146 to
 D-163 are in `project-docs/C1-DECISIONS.md`.

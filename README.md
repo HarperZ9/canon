@@ -202,8 +202,7 @@ hook returns to a later prompt becomes part of the prompt the client sends to
 its model provider; with a hosted provider that text leaves your machine under
 the provider's terms. The first capture or purge this version writes raises the
 context store's identity version to 2, and canon 0.3.0 and older refuse such a
-database as identity invalid. These changes are in 0.4.0, which is not on PyPI
-yet; install from a checkout to use them.
+database as identity invalid. These changes shipped in 0.4.0.
 
 Installing a region into an existing file, the first migrator on the version seam,
 and the global SOUL.md and the global GEMINI.md surfaces are later phases. Everything

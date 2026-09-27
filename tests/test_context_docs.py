@@ -72,4 +72,4 @@ def test_the_version_is_0_4_0_everywhere_it_is_declared() -> None:
 
     assert version == "0.4.0"
     assert context_mcp.__version__ == local_mcp.__version__ == version
-    assert re.search(r"^## 0\.4\.0 - unreleased$", changelog, re.MULTILINE)
+    assert re.search(r"^## 0\.4\.0 - \d{4}-\d{2}-\d{2}\r?$", changelog, re.MULTILINE)
