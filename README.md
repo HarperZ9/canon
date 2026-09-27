@@ -201,15 +201,17 @@ policy the same way. Canon keeps every captured event until you purge it. The
 audit chain still verifies after a purge, each removed record leaves a
 tombstone with no content hash, and new records store a salted digest that no
 longer opens once the record is gone. A client that sends a purged event again
-under the same native id stores it again, and the capture hook says so. The store stays plaintext on
-disk, so freed disk clusters can hold purged text until they are reused, and
+under the same native id stores it again, and the capture hook says so. The
+store stays plaintext on disk, so freed disk clusters can hold purged text until they are reused, and
 every purge report says so along with the copies canon cannot reach. What the
 hook returns to a later prompt becomes part of the prompt the client sends to
 its model provider; with a hosted provider that text leaves your machine under
 the provider's terms. The first capture or purge this version writes raises the
 context store's identity version to 2, and canon 0.3.0 and older refuse such a
-database as identity invalid. These changes shipped in 0.4.0; the fixes under
-Unreleased in `CHANGELOG.md` are not in a release yet.
+database as identity invalid. These changes shipped in 0.4.0. Version 0.4.2
+closes security and privacy gaps that a second review found in 0.4.0 and
+0.4.1; `CHANGELOG.md` marks each one, and a store in use with either version
+should move to 0.4.2.
 
 Installing a region into an existing file, the first migrator on the version seam,
 and the global SOUL.md and the global GEMINI.md surfaces are later phases.

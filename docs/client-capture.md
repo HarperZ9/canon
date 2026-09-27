@@ -70,10 +70,11 @@ Optional controls:
   working directory (`cwd`) the hook reports; `none` records neither, and marks
   `coverage.cwd: not_recorded`. Both paths name the client's project directory,
   and often the account, so they reveal which project a prompt came from.
-  Recorded transcript paths are not listed in the context the hook returns to
-  later prompts or in MCP query results, which count them instead;
-  `canon.context.get` returns the stored record with its paths. Events stored
-  before you switch to `none` keep their paths until you purge them.
+  From canon 0.4.2, recorded transcript paths are not listed in the context
+  the hook returns to later prompts or in MCP query results, which count them
+  instead; `canon.context.get` returns the stored record with its paths.
+  Events stored before you switch to `none` keep their paths until you purge
+  them.
 - `--replay-answers` or `CANON_CONTEXT_REPLAY_ANSWERS`: `off` (the default)
   leaves stored answers out of the context returned to later prompts, and the
   returned context says how many it left out; `on` returns them like prompts.

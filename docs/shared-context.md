@@ -43,8 +43,9 @@ The context MCP server exposes five tools:
   a second call carries its `confirm_plan_sha256` and the server was started
   with `CANON_CONTEXT_MCP_PURGE=apply`.
 
-Like every ingest, `canon.context.ingest` redacts secret-shaped values before
-it stores the event: the message text, the text of each extraction and
+From canon 0.4.2, `canon.context.ingest` redacts secret-shaped values before
+it stores the event, like every ingest; 0.4.0 and 0.4.1 stored what this tool
+was sent. Redaction covers the message text, the text of each extraction and
 interpretation, and the `ref`, `locator` and `caption` of each attachment and
 source. The hits are counted per rule in `coverage.redactions`. An answer, an
 event with `message_role: "assistant"` and a `responds_to` field, is refused
