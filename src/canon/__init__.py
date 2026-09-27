@@ -10,6 +10,7 @@ defines.
 """
 from __future__ import annotations
 
+from ._version import __version__
 from .canon_check import (
     CanonCheckReport,
     canon_check,
@@ -103,6 +104,7 @@ from .versions import (
 )
 
 __all__ = [
+    "__version__",
     "SCHEMA",
     "KINDS",
     "KIND_PERSONALITY_BLOCK",

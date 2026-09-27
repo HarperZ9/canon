@@ -92,6 +92,10 @@ same number, and a test holds the two equal. A harness reads it from serverInfo
 and a lane roster reads it from install metadata, so a second hand-typed number
 here would show up over there as a stale install rather than as the typo it is.
 
+Later: 0.2.0 published the package to PyPI, so the number now follows each
+release. `src/canon/_version.py` holds it for the package, `canon --version`
+and both MCP servers, and a test holds it equal to pyproject.toml.
+
 ## D-75 The block directory is resolved, and this repository ships none (honest null).
 
 `CANON_BLOCKS_DIR` wins when set; otherwise the loader looks for a `blocks/`

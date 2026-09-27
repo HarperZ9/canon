@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import argparse
 
+from .cli_parser import describe
+
 
 def add_common(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--workspace", default=".", help="a directory inside the project")
@@ -66,7 +68,7 @@ def add_workspace_args(parser: argparse.ArgumentParser) -> None:
     subs = parser.add_subparsers(dest="ws_command", metavar="workspace-command",
                                  required=True)
     for name, help_text, adder in _SUBCOMMANDS:
-        child = subs.add_parser(name, help=help_text)
+        child = subs.add_parser(name, help=help_text, description=describe(help_text))
         _inherit(child, parser)
         add_common(child)
         adder(child)

@@ -18,6 +18,7 @@ import json
 import os
 import sys
 
+from canon._version import __version__
 from canon.blocks import BlockLoad, load_blocks
 from canon.canon_check import canon_check
 from canon.registry import SURFACE_CATALOG
@@ -26,9 +27,9 @@ from canon.surface import render_surface
 from canon.validator import validate_record
 
 PROTOCOL = "2025-06-18"
-# The version of record is the one in pyproject.toml. Kept equal by a test, so
-# a harness reading serverInfo and a lane reading install metadata agree.
-__version__ = "0.4.0"
+# `__version__` comes from canon/_version.py, which a test holds equal to
+# pyproject.toml, so a harness reading serverInfo and a lane reading install
+# metadata agree.
 
 ENV_HOME = "CANON_HOME"
 ENV_WORKSPACE = "CANON_WORKSPACE"
@@ -248,5 +249,14 @@ def serve(stdin=None, stdout=None) -> int:
     return 0
 
 
+def main(argv=None) -> int:
+    """`python -m canon.local_mcp`: parse argv, then serve on stdio."""
+    from canon.mcp_entry import run_server
+
+    return run_server(module="canon.local_mcp", server_name="canon",
+                      description="Serve canon's read-only record tools over MCP on stdio.",
+                      serve=serve, argv=argv)
+
+
 if __name__ == "__main__":
-    raise SystemExit(serve())
+    raise SystemExit(main())

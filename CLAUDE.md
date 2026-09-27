@@ -220,6 +220,12 @@ that door and still writes nothing:
 - `src/canon/cli.py` and `[project.scripts]` give `canon mcp`, `canon check` and
   `canon blocks`. Reconcile is absent on purpose: it rewrites instruction files
   and raises durable gates.
+- `src/canon/_version.py` holds the one version number. `canon.__version__`,
+  `canon --version` and the serverInfo of both MCP servers read it, and
+  `tests/test_local_mcp.py` holds it equal to pyproject.toml.
+  `src/canon/mcp_entry.py` parses argv for `python -m canon.local_mcp` and
+  `python -m canon.context_mcp`, so `--help` and `--version` exit without
+  serving and an unknown argument exits 2.
 - `project-docs/MCP-DECISIONS.md` records D-68 the door reads and never writes
   (with the byte-digest control behind that claim), D-69 the probe vocabulary,
   D-70 the status/doctor split and how doctor can be false, D-71 the roots come

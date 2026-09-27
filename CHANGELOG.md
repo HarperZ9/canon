@@ -2,7 +2,21 @@
 
 ## Unreleased
 
-Nothing yet.
+Fixes found by checking the 0.3.0 and 0.4.0 releases as a user gets them.
+
+- `canon --version` (and `-V`) prints the installed version, and
+  `canon --json --version` prints it as a result object. 0.4.0 answered
+  `canon --version` with "FAIL canon: invalid arguments". `canon.__version__`
+  holds the same number, read from one module that a test holds equal to
+  pyproject.toml.
+- `canon --help` describes the tool and each command. 0.4.0 showed
+  "<name> placeholder" for all fifteen. Each subcommand's own `--help`
+  (`canon workspace id --help`, `canon context purge --help` and the rest)
+  now opens with the same one-line description.
+- `python -m canon.local_mcp` and `python -m canon.context_mcp` read their
+  arguments before serving: `--help` and `--version` print and exit 0, and an
+  unknown argument exits 2 with a message. Before, both started a stdio server
+  whatever the arguments were.
 
 ## 0.4.0 - 2026-09-26
 

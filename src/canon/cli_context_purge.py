@@ -24,6 +24,7 @@ from typing import TextIO
 
 from .cli_context_text import plan_text, report_text
 from .cli_format import make_result, write_result
+from .cli_parser import describe
 from .context_audit import ContextIntegrityError
 from .context_migrate import META_TABLE, VERSION_TABLE, ContextStoreIdentityError
 from .context_purge import ContextPurgeError, ContextPurgeNotFound, ContextPurgeStale, select
@@ -73,7 +74,7 @@ def add_context_args(parser) -> None:
 
 
 def _child(subs, parent, name, help_text):
-    child = subs.add_parser(name, help=help_text)
+    child = subs.add_parser(name, help=help_text, description=describe(help_text))
     child._canon_stdout = parent._canon_stdout  # type: ignore[attr-defined]
     child._canon_stderr = parent._canon_stderr  # type: ignore[attr-defined]
     child.add_argument("--db", default=None,

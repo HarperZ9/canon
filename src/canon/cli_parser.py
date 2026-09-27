@@ -4,6 +4,33 @@ import argparse
 import sys
 from typing import TextIO
 
+from ._version import DISTRIBUTION, __version__
+
+DESCRIPTION = (
+    "Keep one record of your memory bank and personality, and render each "
+    "tool's instruction file from it."
+)
+EPILOG = "Run 'canon <command> --help' for the options of one command."
+# One line per command, shown in `canon --help` and at the top of that
+# command's own --help.
+COMMAND_HELP = {
+    "mcp": "serve the read-only record tools over MCP on stdio",
+    "check": "print the aggregate check and exit 1 when it does not pass",
+    "blocks": "list the authored block set as JSON",
+    "init": "preview or create canon's local state directory (--apply)",
+    "compile": "compile a continuity capsule from records and atoms",
+    "preview": "report what a capsule would hold without writing anything",
+    "doctor": "diagnose whether a target is ready for a continuity handoff",
+    "export": "export a capsule as Canon Markdown, JSON or a file bundle",
+    "rescue": "make a local handoff when a provider session is unavailable",
+    "undo": "list or apply the undo receipts canon wrote in a workspace",
+    "bootstrap": "run the session bootstrap for a target and write its witness",
+    "workspace": "manage this project's identity, records and imports",
+    "handoff": "print a resume brief for the next agent, within its budget",
+    "switch": "write your blocks and the brief into the target's file",
+    "context": "purge captured context events or apply a retention policy",
+}
+
 
 class ParserExit(Exception):
     def __init__(self, status: int) -> None:
@@ -43,6 +70,32 @@ class CanonArgumentParser(argparse.ArgumentParser):
         return file
 
 
+class _VersionAction(argparse.Action):
+    """`--version`: print the one version number and stop parsing.
+
+    Plain text by default. After `--json` it is a result object like every
+    other command's, so a script reading JSON does not special-case it.
+    """
+
+    def __init__(self, option_strings: list[str], dest: str = argparse.SUPPRESS,
+                 help: str | None = None) -> None:
+        super().__init__(option_strings=option_strings, dest=dest,
+                         default=argparse.SUPPRESS, nargs=0, help=help)
+
+    def __call__(self, parser, namespace, values, option_string=None) -> None:
+        stdout = getattr(parser, "_canon_stdout", sys.stdout)
+        if getattr(namespace, "json_output", False):
+            from .cli_format import make_result, write_result
+
+            result = make_result(ok=True, command="version", failure_code="ok",
+                                 message=f"canon {__version__}",
+                                 data={"distribution": DISTRIBUTION, "version": __version__})
+            write_result(result, stdout=stdout, stderr=stdout, json_output=True, color=False)
+        else:
+            stdout.write(f"canon {__version__}\n")
+        parser.exit(0)
+
+
 def build_canon_parser(
     commands: tuple[str, ...],
     *,
@@ -50,17 +103,24 @@ def build_canon_parser(
     stderr: TextIO | None = None,
 ) -> CanonArgumentParser:
     parser = CanonArgumentParser(
-        prog="canon", description="Canon bootstrap command surface.",
+        prog="canon", description=DESCRIPTION, epilog=EPILOG,
         stdout=stdout, stderr=stderr,
     )
     parser.add_argument("--json", action="store_true", dest="json_output", help="emit machine-readable JSON")
     parser.add_argument("--no-color", action="store_true", help="disable colored output")
+    parser.add_argument("-V", "--version", action=_VersionAction, help="print the installed version and exit")
     subparsers = parser.add_subparsers(dest="command", metavar="command", required=True, title="commands")
     for command in commands:
-        subparser = subparsers.add_parser(command, help=f"{command} placeholder")
+        text = COMMAND_HELP[command]
+        subparser = subparsers.add_parser(command, help=text, description=describe(text))
         _inherit_streams(subparser, parser)
         _add_command_args(command, subparser)
     return parser
+
+
+def describe(text: str) -> str:
+    """Turn a one-line command help into the sentence that opens its own --help."""
+    return text[0].upper() + text[1:] + "."
 
 
 def _inherit_streams(subparser: argparse.ArgumentParser, parser: CanonArgumentParser) -> None:
@@ -162,8 +222,9 @@ def _add_rescue_args(parser: argparse.ArgumentParser) -> None:
 
 def _add_undo_args(parser: argparse.ArgumentParser) -> None:
     undo_subparsers = parser.add_subparsers(dest="undo_command", metavar="undo-command", required=True)
-    _add_undo_list_args(undo_subparsers.add_parser("list", help="list local undo receipts"), parser)
-    _add_undo_apply_args(undo_subparsers.add_parser("apply", help="apply a local undo receipt"), parser)
+    for name, text, adder in (("list", "list local undo receipts", _add_undo_list_args),
+                              ("apply", "apply a local undo receipt", _add_undo_apply_args)):
+        adder(undo_subparsers.add_parser(name, help=text, description=describe(text)), parser)
 
 
 def _add_undo_list_args(list_parser: argparse.ArgumentParser, parent: argparse.ArgumentParser) -> None:

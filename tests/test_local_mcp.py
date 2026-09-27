@@ -225,9 +225,13 @@ def test_the_served_version_is_the_packaged_version():
     """One number. A harness reads serverInfo, a lane reads install metadata.
 
     If those disagree, a lane roster reports a version the server never claimed
-    and the mismatch looks like a stale install rather than a typo here.
+    and the mismatch looks like a stale install rather than a typo here. The
+    package's own `canon.__version__` is the number `canon --version` prints,
+    so it is held to the same line.
     """
     from pathlib import Path
+
+    import canon
 
     pyproject = (Path(__file__).resolve().parents[1] / "pyproject.toml"
                  ).read_text(encoding="utf-8")
@@ -235,3 +239,4 @@ def test_the_served_version_is_the_packaged_version():
                     for line in pyproject.splitlines()
                     if line.startswith("version"))
     assert local_mcp.__version__ == declared
+    assert canon.__version__ == declared
