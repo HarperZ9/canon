@@ -48,7 +48,7 @@ def plan_text(plan: dict) -> str:
 def report_text(report: dict) -> str:
     if report["status"] == "nothing_to_purge":
         return _nothing_text(report["already_purged"])
-    if report["status"] in ("scrub_finished", "scrub_incomplete"):
+    if report["status"] in ("scrub_finished", "scrub_incomplete") and not report["records_purged"]:
         return _scrub_text(report)
     counts, scan, audit = report["counts"], report["residual_scan"], report["audit"]
     ordinals = report["tombstone_ordinals"]
@@ -65,8 +65,10 @@ def report_text(report: dict) -> str:
         lines.append(f"kept records still quote the purged text {scan['kept_record_matches']} "
                      "times")
     scrub = report["scrub"]
-    if scrub["vacuum"] != "done" or scrub["wal_checkpoint"] == "busy":
-        lines.append(f"scrub: vacuum {scrub['vacuum']}, WAL checkpoint {scrub['wal_checkpoint']}")
+    before = scrub.get("wal_checkpoint_before", "not_needed")
+    if scrub["vacuum"] != "done" or "busy" in (before, scrub["wal_checkpoint"]):
+        lines.append(f"scrub: vacuum {scrub['vacuum']}, WAL checkpoint before {before}, "
+                     f"after {scrub['wal_checkpoint']}")
     lines.append("residue: " + _residue_words(report["residue"]))
     lines.append("outside canon's reach: " + _reach_words(report["out_of_reach"]))
     lines.append(f"status: {report['status']}")
@@ -128,7 +130,8 @@ def _residue_words(rows: list[dict]) -> str:
 def _reach_words(rows: list[dict]) -> str:
     names = {"client_transcripts": "client transcripts",
              "earlier_query_results": "excerpts earlier queries returned",
-             "model_provider": "the model provider", "backups_and_copies": "backups and copies"}
+             "model_provider": "the model provider", "backups_and_copies": "backups and copies",
+             "returned_content_digests": "content digests earlier results returned"}
     words = []
     for row in rows:
         label = names.get(row["class"], row["class"])

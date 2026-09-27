@@ -1,6 +1,8 @@
 """Explicit one-hop source-reference sidecars for context query results."""
 from __future__ import annotations
 
+from .workspace.scrub import scrub
+
 
 def related_events(records, hits, workspace, project, limit):
     events = _scoped_events(records, workspace, project)
@@ -123,7 +125,8 @@ def _ref_target(source):
 
 
 def _source_summary(source):
-    return {key: str(source[key])[:4096] for key in (
+    """The source a relation followed, scrubbed like any text a query returns."""
+    return {key: scrub(str(source[key])).text[:4096] for key in (
         "source_id", "source_kind", "ref", "locator", "extraction_status", "source_status")
             if key in source}
 

@@ -258,3 +258,82 @@ already purged still removes answers stored after that purge, so a `Stop` that
 raced the purge leaves nothing behind. A retention policy that retains an
 answer, or purges only its derived records, while another entry removes the
 answer with its prompt is refused and points at `keep_responses`.
+
+## D-164 An answer is paired inside the write that stores it
+
+The capture hook used to look the prompt up in one transaction and store the
+answer in the next, so a purge that landed between them left an answer that
+restates the purged prompt, with no message. `ContextStore.ingest` now refuses
+an assistant event whose `responds_to` names a record that is not a live event
+in the same workspace and project, inside the `BEGIN IMMEDIATE` transaction
+that would store it, and raises `ContextPairingError` saying whether the prompt
+was purged. The hook maps it to its purged-prompt or no-prompt message, and
+`canon.context.ingest` returns it as an error. The check applies to every
+ingest, so an answer can no longer be stored for a prompt that was never
+captured. An assistant event without `responds_to` is not paired and is not
+checked. Answers stored by the first 0.4.0 code without this check are still
+removed by the rerun D-163 describes.
+
+## D-165 keep_responses keeps every answer under a bulk selector
+
+This replaces the first sentence of D-163. With `keep_responses`, `before_ord`
+and `all` leave out every event whose `message_role` is `assistant`, whether
+its prompt is selected, was purged, was never captured or is not named. The
+earlier rule kept only answers whose prompt the selector also removed, which
+purged an orphan answer under a flag the docs describe as keeping answers. An
+answer named by its own event id is still removed as named.
+
+## D-166 What a query returns is scrubbed whole, and transcript paths are counted
+
+A query excerpt is scrubbed before it is cut at 2000 characters; cutting first
+let part of a secret that straddled the cut through, because the scrubber no
+longer recognised its shape. Pending references and the sources of related
+events are scrubbed before they are returned, and the hook prints each pending
+reference scrubbed and on one line. Transcript locators are no longer listed as
+pending: canon never reads a transcript, and the path, which names the project
+directory and often the account, went into every later prompt's context.
+`coverage.transcript_locators_not_listed` counts them. `canon.context.get`
+still returns the whole record, scrubbed, paths included.
+
+## D-167 Every ingest is redacted
+
+Only the capture hook redacted; `canon.context.ingest` stored what it was sent.
+`ContextStore.ingest` now scrubs the message text, extraction and
+interpretation text, and each attachment's and source's `ref`, `locator` and
+`caption` (a `canon_event_ref` keeps its `ref`, which names a record), and adds
+the hits to `coverage.redactions`. Text the hook already scrubbed has no hits
+left, so its bytes and its redelivery are unchanged. An event with a
+secret-shaped value that a caller stored raw before this change and sends again
+is refused as a collision, since its redacted form differs from what is stored.
+
+## D-168 The residual scan reads the database's own text encoding
+
+A database another tool created as UTF-16 stores text as UTF-16, and a scan
+for UTF-8 forms found nothing and reported `purged` over residue. The scan now
+reads `PRAGMA encoding`, builds its windows in that encoding, and names it in
+the report. For UTF-16 the kept text is counted row by row, since a UTF-16
+value can hold any byte and no separator is safe to join on.
+
+## D-169 A report says what the scrub did
+
+A purge report is `purged` only when the chain verifies, the scan found
+nothing and the scrub finished; a scrub that did not finish is
+`scrub_incomplete` over MCP as on the command line. The freed-cluster note is
+chosen by what VACUUM did: a plan speaks of the rewrite still to come, and a
+report whose VACUUM did not run says so. A report that removed nothing names
+residue and reach like any other. Out of reach now also names the unsalted
+`source_hash` values that ingest and query results carried. The scrub reports
+the WAL checkpoint before VACUUM (`wal_checkpoint_before`) beside the one
+after. A plan reads under a deferred transaction, so a reader holding a
+rollback-journal database does not block a dry run, and a dry run succeeds
+while a scrub is pending, since a confirmed run finishes it. An apply that
+cannot get its write lock within the connection timeout refuses as
+`store_busy` with nothing changed.
+
+## D-170 The hook reads its input as UTF-8
+
+On Windows, Python decodes a piped stdin with the locale's code page, so a
+prompt's non-ASCII text was stored mangled or failed with a decode error. The
+hook now reads the process's stdin as bytes and decodes UTF-8 (a byte-order
+mark is allowed); input that is not UTF-8 is refused with a message. An
+injected text stream, as the tests use, is read as given.

@@ -3,9 +3,9 @@
 A selection resolves against a `ScopeView`, the events of one workspace and
 project with their derived records and the answers paired with each of them.
 With `keep_responses`, the bulk selectors (`before_ord` and `all`) leave out
-each answer whose prompt they also select or an earlier purge removed, so the
-flag keeps the answer whichever selector names the prompt. An answer named by
-its own event id is purged as named.
+every answer, meaning every event with `message_role: "assistant"`, whether
+its prompt is selected, was purged earlier, was never captured or is not named
+at all (D-165). An answer named by its own event id is purged as named.
 """
 from __future__ import annotations
 
@@ -74,16 +74,12 @@ def select(*, event_id=None, before_ord=None, all_events=False, keep_responses=F
 def _bulk(view: ScopeView, ids: list[str], keep_responses: bool) -> list[Target]:
     chosen = set(ids)
     if keep_responses:
-        chosen = {eid for eid in chosen if not _answers_a_removed_prompt(view, eid, chosen)}
+        chosen = {eid for eid in chosen if not _is_answer(view, eid)}
     return [Target(eid, "event", REASON_OWNER) for eid in sorted(chosen)]
 
 
-def _answers_a_removed_prompt(view: ScopeView, event_id: str, chosen: set[str]) -> bool:
-    data = view.events[event_id].record.data
-    prompt = data.get("responds_to")
-    if data.get("message_role") != "assistant" or not isinstance(prompt, str):
-        return False
-    return prompt in chosen or was_purged(view, prompt)
+def _is_answer(view: ScopeView, event_id: str) -> bool:
+    return view.events[event_id].record.data.get("message_role") == "assistant"
 
 
 def scope_view(state: StoreState, workspace: str, project: str) -> ScopeView:

@@ -102,4 +102,5 @@ class _FakeConn:
 def test_a_vacuum_that_does_not_run_is_named_for_its_cause(error, label) -> None:
     result = scrub_database(_FakeConn(error), 0.0)
 
-    assert result == {"journal_mode": "delete", "vacuum": label, "wal_checkpoint": "not_needed"}
+    assert result == {"journal_mode": "delete", "vacuum": label,
+                      "wal_checkpoint_before": "not_needed", "wal_checkpoint": "not_needed"}
