@@ -2,10 +2,10 @@
   "author": {
     "name": "Zain Dana Harper"
   },
-  "description": "Canon local context with explicit database and scope bindings.",
+  "description": "Search and read project context from a local database you choose, scoped to one project.",
   "license": "FSL-1.1-MIT",
   "mcpServers": "./mcp.json",
   "name": "canon-local",
   "skills": "./skills/",
-  "version": "0.5.0"
+  "version": "0.6.0"
 }

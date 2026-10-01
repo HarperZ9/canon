@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import TextIO
 
 from .cli_context_text import plan_text, report_text
+from .client_mcp_store import SnapshotBusy, table_names
 from .cli_format import make_result, write_result
 from .cli_parser import describe
 from .context_audit import ContextIntegrityError
@@ -156,18 +157,15 @@ def _database(parsed, environ) -> Path:
 
 
 def _require_store(path: Path) -> None:
-    """Read the schema through a read-only connection, so a file that is not a
-    canon context store is refused without a byte written to it."""
+    """Read the schema without a byte written to the file or beside it, so a
+    file that is not a canon context store is refused untouched."""
     try:
-        conn = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, timeout=10)
-        try:
-            names = {row[0] for row in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'")}
-        finally:
-            conn.close()
+        names = table_names(path.resolve())
+    except SnapshotBusy as exc:
+        raise _Refusal("store_busy", "the context database is busy; try again") from exc
     except sqlite3.OperationalError:
         raise
-    except sqlite3.DatabaseError as exc:
+    except (sqlite3.DatabaseError, ValueError) as exc:
         raise _Refusal("store_invalid", _NOT_A_STORE) from exc
     if not set(_STORE_TABLES) <= names:
         raise _Refusal("store_invalid", _NOT_A_STORE)

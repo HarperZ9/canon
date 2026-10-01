@@ -7,5 +7,5 @@ this line and the pyproject line together or the suite fails.
 """
 from __future__ import annotations
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"
 DISTRIBUTION = "flywheel-canon"

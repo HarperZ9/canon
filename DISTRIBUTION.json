@@ -1,9 +1,9 @@
 {
-  "asset_name": "canon-0.5.0-source-plugin.zip",
-  "asset_sha256": "01d6efa2a029a8bc49593bfab6746d6571e042fa2b158964da8a8c3f6d17450d",
-  "asset_url": "https://github.com/HarperZ9/canon/releases/download/v0.5.0/canon-0.5.0-source-plugin.zip",
+  "asset_name": "canon-0.6.0-source-plugin.zip",
+  "asset_sha256": "769e161abeea4dca99e3f342a6ebed628c78933363a1049ebb2fa766b66bcd46",
+  "asset_url": "https://github.com/HarperZ9/canon/releases/download/v0.6.0/canon-0.6.0-source-plugin.zip",
   "checksum_asset": "SHA256SUMS",
-  "checksum_sha256": "9e7b49edaa5d1617645e1fe04485a2ef6b62a1c48019bdaeaf6b29041bb68c5f",
+  "checksum_sha256": "7e53f78a26e52e038e745706cef48f9b4798739ac84077b1ffb5695808d1682b",
   "does_not_prove": [
     "marketplace approval",
     "model quality",
@@ -11,22 +11,22 @@
     "runtime availability on user devices"
   ],
   "edition": "source-runtime-required",
-  "native_download_url": "https://github.com/HarperZ9/canon/releases/download/v0.5.0/canon-0.5.0-win-x64.mcpb",
+  "native_download_url": "https://github.com/HarperZ9/canon/releases/download/v0.6.0/canon-0.6.0-win-x64.mcpb",
   "original_payload_sha256": {
-    ".claude-plugin/plugin.json": "cb007b0fe340cb3c59984e52f291dc4b954f4d53a176a1625ff933801d715452",
-    ".codex-plugin/plugin.json": "b7e004adaed0691cf8713b8d71bdb7eaf4c1bfcc9f74a4d784343066ee2d844f",
+    ".claude-plugin/plugin.json": "c0cf7b244f871226d262f58dc2ec9e850b8a754c562c18a7f37495da3e7f421c",
+    ".codex-plugin/plugin.json": "9445bfb926fede5499786686d2ea6837c46a2c75d14f9b99ac1de787fdee7137",
     ".mcp.json": "b0336e4fcac3e4ba5c5c193e36bee2911ed1e7f4320458b7d3a3650e9ebf3417",
     "LICENSE": "bf9819be760200cc89a602f0bdbd783b1361666f3747b3787159a15921ee6641",
-    "PAYLOAD-SHA256SUMS": "66a3f03680a6d8952fddd42145d4eaf6acef5025404cad0f9e18895ae25c7ca6",
-    "PRIVACY.md": "10175e62eb29586eca5633523c2645bc4b0e7e11b09a2ee3ecb84a423223b3f4",
-    "QUALIFICATION.json": "c0422f406571ca9b9cf555e849c4266c9fbcd81dfd25646655b6ccb5cbfc56ad",
-    "README.md": "54fdf84e594c554927bd9bf3bc57b85cf81398c139af54405d93a680b1c0ceee",
+    "PAYLOAD-SHA256SUMS": "b97ad92efb17b8d16fe8408b3d0fad19b46822694ee49e28497af7be56f3fd88",
+    "PRIVACY.md": "6d16c1beacafa0884092123c9204f0f6e47fde320d6ef409fc3aca9aad66cc72",
+    "QUALIFICATION.json": "94cb9e60c806b22f1722b209396ad6ec3a1f416a693adfe5b0a1b07e28bbeffa",
+    "README.md": "b919e5bd90646069cf85a1dd22db48c08ce99745a9490f63c166b850aa750afa",
     "mcp.json": "81a7f21950930303b7a9726a11c67d0cf1386a68bb2b91d891ea1c046d7cffda",
-    "plugin.json": "cb007b0fe340cb3c59984e52f291dc4b954f4d53a176a1625ff933801d715452",
-    "server/serve.py": "dfdd95a31a746e5c55bfe15f27877c752cf5e040d8ccc80d21c8ec820980ceea",
+    "plugin.json": "c0cf7b244f871226d262f58dc2ec9e850b8a754c562c18a7f37495da3e7f421c",
+    "server/serve.py": "7592ec3ebe4b9735344793a3ffe12d53ddac0eb9036c203d69d080fe6b520f31",
     "server/src/canon/__init__.py": "9ee840cf115d095848c49a7aee3494fd3155972c07e20c1773618dce910c440e",
     "server/src/canon/__main__.py": "5c9e8b11de2c67ac9ca012e1c4887af4d42478fbcf40fd3f9faf374d15752cf9",
-    "server/src/canon/_version.py": "08aa686b975bec7f7fe3cb0a3eb83de7ca32a1feb0806848cde9d051239d0930",
+    "server/src/canon/_version.py": "24c6ddcd0f68377c9a73b6c111750e08214a8ffc548a70e3c8aeb3d4caa2c4a3",
     "server/src/canon/adapter.py": "6eb40cdef8094c072bbc442788e2315086ba3b33fb56e8043233d7af462b65b2",
     "server/src/canon/atom.py": "53e27a223ea06aaa8d20211d22c18ac7e7eada7c06e79100a905966ca63f52aa",
     "server/src/canon/backends/__init__.py": "4ce6421793e1cc760aedc4d1c6420b240e23ec5266e9c99d4e71d1a4ab3a5867",
@@ -59,7 +59,7 @@
     "server/src/canon/cli.py": "7aa1221616425f2f054b42245d4575d29570d2fd4b020401010c69fcd53c2bab",
     "server/src/canon/cli_artifacts.py": "e0ec643b07cf97c9797d03119ef859c48c634f96955e4266a6119037aa56b295",
     "server/src/canon/cli_compile.py": "ef8e87b58a3d0d2e5bc7dc2c08659dee8de9e224127cbf0342d4330fe49c8240",
-    "server/src/canon/cli_context_purge.py": "b3b518c028d195802407a5645e4dad9d886ffea44414a8e53c0873e600a6552f",
+    "server/src/canon/cli_context_purge.py": "c43099330011d8f6de0ba7bc417a699afbc561baf18f14a58af9e55092de3b5a",
     "server/src/canon/cli_context_text.py": "a95f02f6269fc68835a3147a27ef9bc1d5eae9ce3771422839d621f57fc0f16a",
     "server/src/canon/cli_export.py": "25c25bb4af239a2d655776ab2126372867050954d934ceae9555cab86ecb8569",
     "server/src/canon/cli_export_support.py": "8cf7a47fff126892f6c7444554f910c11e98290f2d40835426544ea5f4bb8403",
@@ -79,8 +79,8 @@
     "server/src/canon/client_capture_input.py": "e08514c1f15024f5a03e36a7ba487d859db5e18d20b13a11c40fc52a74104287",
     "server/src/canon/client_capture_payload.py": "bf7eb61f11d998ec306ff3bdb19b34632671fd395f6a652e51ed53f7f84a6e19",
     "server/src/canon/client_capture_stop.py": "b7c0670eb4ff566e3123689430eb2e7b0aeb5218a249a66fc04218e291c2ff23",
-    "server/src/canon/client_mcp.py": "76c86cadb1c005f7eff264e77662f97dab4be6830900676c7ed82069b523f6ca",
-    "server/src/canon/client_mcp_store.py": "3c3048a672cbe32c3066b6d84bb4b8c69c9aa5f07ea3b3156f06ed5c77225da5",
+    "server/src/canon/client_mcp.py": "357566a855483bf8004fd83498403240de1eda023f03aba76bfd39c2707fcf96",
+    "server/src/canon/client_mcp_store.py": "8a29bd6444efa35fa4896a92df629309e0a609c03902f55ca852dbe33bc60882",
     "server/src/canon/concurrency.py": "6109bb27297c24783eeb9108ccf47ca75973223a9f2d269f6307038bdf46aabc",
     "server/src/canon/concurrency_capability.py": "37999515c06ca47da8b8061098f7bbbbe41bf97340b9247032037d35ec4e3218",
     "server/src/canon/concurrency_errors.py": "0e47ce1506e101c7bea37fded6fdee05fa92ae531ad464d2a90a248bc76b3a92",
@@ -91,7 +91,7 @@
     "server/src/canon/concurrency_windows_api.py": "ad04a4b1fd18fdc733bc987e0b326d88f5ee171efbddbb576c5e7ce7c6af31a2",
     "server/src/canon/context_access.py": "28b299010e76d995fdbbe0c55d670573183ef0ea20b07b660193ac75db8ec3cf",
     "server/src/canon/context_audit.py": "6e6e6efa99b126ad9e48e2f78a57df1f6d285e6740fa42b0d9235a17c4272478",
-    "server/src/canon/context_mcp.py": "21d43cf0ed6c0ce3d500fc3be0d5cc5cfcd9f528f0bfcb6b0aac3b36d937dc51",
+    "server/src/canon/context_mcp.py": "5177979bfda09155daed4e9e1592a4f3f6ceffe6c39a1d9d49ce6a0115b07c59",
     "server/src/canon/context_migrate.py": "4e585eb449dede263f6f7f34320470da73954cfaebc1f48d1f6cf9b2f3bcd2f8",
     "server/src/canon/context_purge.py": "e925366e870febf5a81d79d005a73144be06d46c416a94523a11a16f8e928c01",
     "server/src/canon/context_purge_report.py": "59f0cb0825060e88869eaaebc2de275c41e082d4e2d078fdad32ba4a3fdc3c2d",
@@ -113,7 +113,7 @@
     "server/src/canon/import_review.py": "12080db90b0c4dc5a2cc4d79800ae1b0438aae7898e04986cc79e1730c8dd71b",
     "server/src/canon/import_review_safety.py": "f9dbbce534178d97d992ffca6c8913e0f47acd812853aa48e0dc0459e62fe9ca",
     "server/src/canon/layering.py": "3ffd267d42038851ae334d2531f7c538ede2830960bda0a0f3ba294907409a12",
-    "server/src/canon/local_mcp.py": "83e873e86a75cb06f43da4da0e3c8528a8e4cbeda1583a8d2271ac4871af84ce",
+    "server/src/canon/local_mcp.py": "8fc5644a92495684dd893b0aaab109edbc53834a5279c9fac2f2d847adb777b6",
     "server/src/canon/mcp_entry.py": "7ff5851716371d703612f7e5dda56259a6a2fdcfcd6191cc0baec49b12bcae60",
     "server/src/canon/omission.py": "0885544669778fac06f74687444aa3d421d5068ddf9b08153ab759313c884a52",
     "server/src/canon/path_policy.py": "233dcd705f51f6148da08e2ad87a68cd7179811d98400373dc93d6490d79444a",
@@ -136,6 +136,7 @@
     "server/src/canon/source_safe_read.py": "2688d364fedec23a03f728a3eadccf3ce4c1ecb12ead9dc4d40c559ef558b82e",
     "server/src/canon/source_state.py": "2e5b2fc4491730f1c30ee47c3a5d08d917f15d2d104fdc2cb591e64142e3fffb",
     "server/src/canon/source_state_cache.py": "e93a5ad072cce80cc4f77deb8d9c7323dcb61d3177e78603a0c072777a1b2093",
+    "server/src/canon/sqlite_wal.py": "b6cd8692fccb4268688e448e4225e93fddb5d1beda0056026c98de494323b9f8",
     "server/src/canon/surface.py": "c262ebdb254807f901357230b4549fea8b2eada5e81b4e9c0b475955e1fb8599",
     "server/src/canon/textblock.py": "2fe0edf9f8d88372167103c2b0d03edc6f5435346ba551a01392709dc4ad4671",
     "server/src/canon/textblock_scope.py": "dfadbb998ae5a3156446fdfabd9289ad4b97777cadaba385a2ca8d3d5635c1cc",
@@ -193,30 +194,30 @@
     "server/src/canon/workspace/target_fidelity.py": "c1e03ed52d8262f95ae94a37380adc5b03efe526d0d71c46fafdbd0c0fb601de",
     "server/src/canon/workspace/targets.py": "5474039514e92c7c7157f33e2e9429adf34adad12cf1fcfaa0d5d199de37c1b6",
     "server/src/canon/writing_gate.py": "273155faca4eda1d038f454107bd418857a35bf3d72e3019dc8ba99cfc75e59e",
-    "skills/canon/SKILL.md": "c4e12abfb9a4174ea246ed919223f9cb5a937caafefb86cf48741da88406be5c"
+    "skills/canon/SKILL.md": "45b135e69b62171af645f3265c1a78d6ee8be9f546a1747fa70e53227c3e2a47"
   },
   "packaging_changes": {
     ".claude-plugin/marketplace.json": {
-      "distribution_sha256": "30fff571b6ac3a1ef45b45f5f9909aae895bddc4bf540ceaba0fb942179cf2a0",
+      "distribution_sha256": "f08f83d22e8b1db2f6570add6d251103b4cb327ec5727c04d904c4105bc63bd0",
       "original_sha256": null
     },
     ".claude-plugin/plugin.json": {
-      "distribution_sha256": "697f004ec9640eb5e549c65a3aea46d948e8771990fb40897a9a5cac377290cb",
-      "original_sha256": "cb007b0fe340cb3c59984e52f291dc4b954f4d53a176a1625ff933801d715452"
+      "distribution_sha256": "40425f7e250994bca9a43eeb460bdc7040b5d2ac3fc6a684ba13de42f5d8d7b1",
+      "original_sha256": "c0cf7b244f871226d262f58dc2ec9e850b8a754c562c18a7f37495da3e7f421c"
     },
     ".mcp.json": {
       "distribution_sha256": "1705254daac7a88dd05a6972b583ff6e6bd5a0980a91715e3b35da18711f96bc",
       "original_sha256": "b0336e4fcac3e4ba5c5c193e36bee2911ed1e7f4320458b7d3a3650e9ebf3417"
     },
     "README.md": {
-      "distribution_sha256": "b46ddf933d43d3f6c900af202673bde5cb42fa7f0beb1e62b049d83c9d896a12",
-      "original_sha256": "54fdf84e594c554927bd9bf3bc57b85cf81398c139af54405d93a680b1c0ceee"
+      "distribution_sha256": "9d5b500a4b0210235899ddfb2c8f9b181c8a26482f9183f52b54fc823b81340a",
+      "original_sha256": "b919e5bd90646069cf85a1dd22db48c08ce99745a9490f63c166b850aa750afa"
     }
   },
   "product": "canon",
-  "release_url": "https://github.com/HarperZ9/canon/releases/tag/v0.5.0",
+  "release_url": "https://github.com/HarperZ9/canon/releases/tag/v0.6.0",
   "runtime_requirement": "Python 3.11 or later, available as `python3`",
   "schema": "marketplace-source-distribution/v1",
-  "source_release_commit": "7bbd7ad0a565dba81ad16812e4070930a3cd3ae5",
-  "version": "0.5.0"
+  "source_release_commit": "c3ff3cd322657d37cb095d0d619a4119e0b964fd",
+  "version": "0.6.0"
 }

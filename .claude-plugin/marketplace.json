@@ -1,12 +1,12 @@
 {
-  "description": "Canon local context with explicit database and scope bindings.",
+  "description": "Search and read project context from a local database you choose, scoped to one project.",
   "name": "canon-local",
   "owner": {
     "name": "Zain Dana Harper"
   },
   "plugins": [
     {
-      "description": "Canon local context with explicit database and scope bindings.",
+      "description": "Search and read project context from a local database you choose, scoped to one project.",
       "name": "canon-local",
       "source": "./"
     }
