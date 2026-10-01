@@ -14,7 +14,7 @@ def bindings(prefix):
 
 def manifests(version, native=False):
     plugin = {'name': 'canon-local', 'version': version,
-              'description': 'Canon local context with explicit database and scope bindings.',
+              'description': 'Search and read project context from a local database you choose, scoped to one project.',
               'author': {'name': 'Zain Dana Harper'}, 'license': 'FSL-1.1-MIT'}
     command = '${PLUGIN_ROOT}/server/canon-local.exe' if native else 'python3'
     args = [] if native else ['-I', '-S', '-B', '${PLUGIN_ROOT}/server/serve.py']
