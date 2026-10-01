@@ -12,6 +12,8 @@ contract, so no external linter is imported.
 """
 from __future__ import annotations
 
+import pytest
+
 from canon.registry import (
     ROOT_HOME,
     ROOT_WORKSPACE,
@@ -21,9 +23,14 @@ from canon.registry import (
 from canon.schema import KIND_PERSONALITY_BLOCK, Provenance, Record
 from canon.surface import render_surface
 from canon.writing_gate import (
+    ACCEPTED_FORUM_PROSE_SCHEMAS,
     DEFAULT_STE_PROFILE,
+    FORUM_CLARIFY_SCHEMA,
+    FORUM_CLARIFY_TOOL,
+    FORUM_HUMANIZE_SCHEMA,
     GateResult,
     STE_PROFILE_BY_HARNESS_SCOPE,
+    forum_clarify_pre_cleaner,
     gate_surface,
     gate_text,
     ste_profile_for,
@@ -132,3 +139,85 @@ def test_rendered_surface_fails_then_passes():
 
     passing = gate_surface(CLAUDE_WS, rendered, checker=_checker([]))
     assert passing.ok
+
+
+# -- the Forum clarify pre-cleaner ------------------------------------------
+
+def _forum(schema, output="cleaned text"):
+    """A fake wired Forum clarify call returning the result envelope shape of
+    forum.clarify.clarify_text: a `schema` id and the rewritten `output`."""
+    calls: list[str] = []
+
+    def clarify(text: str):
+        calls.append(text)
+        return {"schema": schema, "engine": "forum-builtin", "output": output,
+                "edits": ["simplified phrasing"]}
+
+    clarify.calls = calls  # type: ignore[attr-defined]
+    return clarify
+
+
+def test_forum_constants_name_the_clarify_tool_and_both_schemas():
+    assert FORUM_CLARIFY_TOOL == "forum.prose.clarify"
+    assert FORUM_CLARIFY_SCHEMA == "forum.prose-clarification/v1"
+    assert FORUM_HUMANIZE_SCHEMA == "forum.prose-humanization/v1"
+    assert ACCEPTED_FORUM_PROSE_SCHEMAS == {
+        "forum.prose-clarification/v1", "forum.prose-humanization/v1"}
+
+
+def test_forum_clarify_pre_cleaner_feeds_output_to_the_checker():
+    clarify = _forum(FORUM_CLARIFY_SCHEMA, output="Use the tool.")
+    checker = _checker([])
+    result = gate_text("In order to utilize the tool", "readme",
+                       checker=checker,
+                       pre_clean=forum_clarify_pre_cleaner(clarify))
+    assert clarify.calls == ["In order to utilize the tool"]
+    assert result.cleaned == "Use the tool."
+    assert checker.calls == [("Use the tool.", "readme")]
+
+
+def test_forum_clarify_pre_cleaner_accepts_the_deprecated_humanize_schema():
+    # During the alias window a caller may still wire forum.prose.humanize.
+    pre_clean = forum_clarify_pre_cleaner(_forum(FORUM_HUMANIZE_SCHEMA, "ok."))
+    assert pre_clean("anything") == "ok."
+
+
+def test_forum_clarify_pre_cleaner_rejects_an_unknown_schema():
+    pre_clean = forum_clarify_pre_cleaner(_forum("forum.prose-other/v2"))
+    with pytest.raises(ValueError, match="unexpected Forum prose schema"):
+        pre_clean("text")
+
+
+def test_forum_clarify_pre_cleaner_rejects_a_missing_schema():
+    pre_clean = forum_clarify_pre_cleaner(lambda text: {"output": text})
+    with pytest.raises(ValueError, match="unexpected Forum prose schema"):
+        pre_clean("text")
+
+
+def test_forum_clarify_pre_cleaner_rejects_a_non_string_output():
+    pre_clean = forum_clarify_pre_cleaner(_forum(FORUM_CLARIFY_SCHEMA, None))
+    with pytest.raises(ValueError, match="no string output"):
+        pre_clean("text")
+
+
+def test_a_rejected_envelope_never_reaches_the_checker():
+    checker = _checker([])
+    with pytest.raises(ValueError):
+        gate_text("text", "readme", checker=checker,
+                  pre_clean=forum_clarify_pre_cleaner(_forum("bogus/v1")))
+    assert checker.calls == []
+
+
+def test_real_forum_clarify_envelopes_pass_the_adapter():
+    # Runs only where Forum with clarify is installed; canon never depends on it.
+    clarify_mod = pytest.importorskip("forum.clarify")
+    humanize_mod = pytest.importorskip("forum.humanize")
+    if not hasattr(humanize_mod, "HUMANIZE_SCHEMA"):
+        pytest.skip("installed Forum predates the clarify rename")
+    text = "in order to utilize the tool"
+    clarify = forum_clarify_pre_cleaner(
+        lambda t: clarify_mod.clarify_text(t, engine="forum-builtin"))
+    humanize = forum_clarify_pre_cleaner(
+        lambda t: humanize_mod.humanize_text(t, engine="forum-builtin"))
+    assert clarify(text) == "To use the tool."
+    assert humanize(text) == "To use the tool."
