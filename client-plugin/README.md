@@ -1,5 +1,15 @@
 # Canon local client
 
+Canon keeps project context in a local database you choose and lets your assistant search and read it, scoped to one workspace and project.
+
+## Try it
+
+- Check that the Canon context store is healthy.
+- Search Canon for decisions about the release checklist.
+- Show the full Canon record behind the first search result.
+
+## Details
+
 Canon supplies local context tools to an MCP client using the model the operator chooses. It includes no model, inference endpoint, network listener or background service.
 
 ## Bind the connection
