@@ -31,6 +31,14 @@ store or change its journal mode, and it still creates no file next to it.
   the file with a SQLite read-only connection, which created `-wal` and `-shm`
   files next to a WAL-mode file with no open connection, including a file it
   then refused as not a store.
+- **New.** Every MCP tool on the client, context and local servers carries a
+  title and the readOnlyHint, destructiveHint, idempotentHint and openWorldHint
+  annotations, matched to what the tool does. Hints describe a tool to the
+  client. The launch grant still decides whether a write runs. A test fails
+  if a listed tool lacks a title or a boolean hint.
+- **New.** The client plugin ships a privacy policy that covers what it reads,
+  stores and sends, how long data stays, and where to report problems. The
+  plugin README opens with what the tool does and three example prompts.
 - Limits. A copy is consistent when no file changes between the stat checks
   before and after it; the check compares size and modification time, so a
   change that keeps both within one timestamp tick is not detected. A store
