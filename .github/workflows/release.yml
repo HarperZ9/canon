@@ -95,7 +95,8 @@ jobs:
         run: |
           python -m venv /tmp/sd
           /tmp/sd/bin/pip install --upgrade pip build
-          /tmp/sd/bin/python -m build --wheel --outdir /tmp/sdout "$(echo dist/*.tar.gz)"
+          python -c "import pathlib,tarfile; archive=next(pathlib.Path('dist').glob('*.tar.gz')); tarfile.open(archive).extractall('/tmp/sdsrc', filter='data')"
+          /tmp/sd/bin/python -m build --wheel --outdir /tmp/sdout "$(echo /tmp/sdsrc/*)"
           ls -l /tmp/sdout
 
       - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
