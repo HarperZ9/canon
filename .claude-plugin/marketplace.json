@@ -1,0 +1,14 @@
+{
+  "description": "Canon local context with explicit database and scope bindings.",
+  "name": "canon-local",
+  "owner": {
+    "name": "Zain Dana Harper"
+  },
+  "plugins": [
+    {
+      "description": "Canon local context with explicit database and scope bindings.",
+      "name": "canon-local",
+      "source": "./"
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "author": {
+    "name": "Zain Dana Harper"
+  },
+  "description": "Canon local context with explicit database and scope bindings.",
+  "license": "FSL-1.1-MIT",
+  "name": "canon-local",
+  "userConfig": {
+    "context_db": {
+      "description": "Absolute SQLite file path with an existing parent folder. The read-only profile requires an existing Canon database.",
+      "required": true,
+      "title": "Canon context database",
+      "type": "file"
+    },
+    "context_write": {
+      "default": false,
+      "description": "Allow ingestion into the selected database and scope. May initialize a new database. Purge remains unavailable.",
+      "title": "Allow context writes",
+      "type": "boolean"
+    },
+    "project_id": {
+      "description": "Explicit project scope for this connection. This is a data selector, not authentication.",
+      "required": true,
+      "title": "Project ID",
+      "type": "string"
+    },
+    "workspace_id": {
+      "description": "Explicit workspace scope for this connection. This is a data selector, not authentication.",
+      "required": true,
+      "title": "Workspace ID",
+      "type": "string"
+    }
+  },
+  "version": "0.5.0"
+}
