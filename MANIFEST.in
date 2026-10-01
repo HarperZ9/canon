@@ -20,3 +20,5 @@ include tools/*.py tools/*.json
 # The checkout block set, which tests/test_blocks.py validates and renders.
 recursive-include blocks *.json *.md
 recursive-include examples *.json
+recursive-include client-plugin *.py *.md *.json
+include scripts/*.py

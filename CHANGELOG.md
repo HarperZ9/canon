@@ -1,8 +1,23 @@
 # Changelog
 
-## Unreleased
+## 0.5.0 - 2026-10-01
 
-Nothing yet.
+Canon can serve one explicitly selected context database to a local MCP client
+through a launch-scoped profile. The default profile reads an existing store;
+an operator launch grant adds context ingest. Tool arguments and stored text
+cannot grant writes or select another workspace or project. This profile does
+not expose purge, capture hooks, instruction-file export or reconcile.
+
+Source plugin packages support Claude Code, Codex and portable stdio clients.
+Windows x64 ZIP and MCPB packages include Python. MCPB setup requires the database,
+workspace and project bindings and keeps context writes off by default. The
+package includes no model and starts no publisher-hosted inference service.
+
+The build records source and runtime digests and refuses release packaging unless
+the clean checkout matches its version tag. Synthetic workflow checks exercise
+persistence across process restarts, retrieval, provenance and permission refusals.
+These checks do not establish marketplace admission or acceptance on every client.
+See `docs/client-packages.md` for setup, privacy limits and release qualification.
 
 ## 0.4.2 - 2026-09-26
 

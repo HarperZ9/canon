@@ -1,0 +1,9 @@
+{
+  "author": {
+    "name": "Zain Dana Harper"
+  },
+  "description": "Canon local context with explicit database and scope bindings.",
+  "license": "FSL-1.1-MIT",
+  "name": "canon-local",
+  "version": "0.5.0"
+}
