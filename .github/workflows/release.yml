@@ -10,7 +10,7 @@ name: release
 #
 # To release, bump the version in pyproject.toml and src/canon/_version.py,
 # merge, and push a tag that matches it:
-#   git tag -a v0.4.2 -m "canon 0.4.2" && git push origin v0.4.2
+#   git tag -a v0.5.0 -m "canon 0.5.0" && git push origin v0.5.0
 # The tag push starts a run, and so does publishing a GitHub release for that
 # tag. The second run builds and checks the same version again, and its
 # publish step skips the files PyPI already has.
@@ -39,8 +39,13 @@ jobs:
           python -m pip install --upgrade build
           python -m build
 
+      - name: verify the full source suite before publishing
+        run: |
+          python -m pip install -e ".[dev]"
+          python -m pytest
+
       - name: the tag must match the declared version
-        if: github.event_name != 'workflow_dispatch'
+        if: startsWith(github.ref, 'refs/tags/v')
         run: |
           PKG_VER=$(python -c "import tomllib;print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
           TAG_VER="${GITHUB_REF_NAME#v}"
@@ -102,7 +107,7 @@ jobs:
     needs: build
     # Stays skipped until the trusted publisher exists and PYPI_ENABLED is 'true',
     # so a tag builds and smokes without a failing publish run beforehand.
-    if: ${{ vars.PYPI_ENABLED == 'true' }}
+    if: ${{ vars.PYPI_ENABLED == 'true' && startsWith(github.ref, 'refs/tags/v') }}
     runs-on: ubuntu-latest
     environment: pypi
     permissions:

@@ -18,6 +18,12 @@ you dropped, environment quirks) and keeps it apart from every other project.
 
 ## What it does
 
+**Local client packages.** The [client package guide](https://github.com/HarperZ9/canon/blob/main/docs/client-packages.md)
+connects an explicit context database to Claude Code, Codex or another local stdio
+MCP client. Reads are the default; storing new context requires an operator launch
+grant. Windows packages include Python. Your client supplies the model; Canon
+stores and retrieves context without running a model or hosting inference.
+
 - **One envelope, eight kinds.** An authored personality block, a raw or
   extracted memory, a synthesized persona, a decision record, and a reference to
   an external research artifact share one record shape with a provenance receipt
@@ -119,7 +125,7 @@ in advance. Anything else fails the gate rather than logging a warning.
 
 ## What canon carries
 
-![A table of twelve rows: what canon carries, how many of it there are, and where each number is read from. Eight record kinds share one envelope: five under the v1 record tag and three workspace-state kinds under their own tag. Two scopes layer, workspace over global. Seven surfaces sit on the write allow-list: a global and a workspace file for Claude Code, an AGENTS.md for Codex, a workspace SOUL.md for Hermes, a GEMINI.md, the Copilot instructions file, and one Cursor rule. Four storage adapters implement the backend protocol, and five capability tokens describe what each one can carry. Twenty-two schema pins name the seams that carry a version. The aggregate check folds four legs, and four gate functions share the same zero or one exit code. 167 source modules hold 27,909 lines, and 102 test files hold 1777 tests. Two surfaces named in the roadmap are absent from the catalog, a global SOUL.md and a global GEMINI.md, so canon does not render them.](https://raw.githubusercontent.com/HarperZ9/canon/main/docs/art/record-table.svg)
+![A table of twelve rows: what canon carries, how many of it there are, and where each number is read from. Eight record kinds share one envelope: five under the v1 record tag and three workspace-state kinds under their own tag. Two scopes layer, workspace over global. Seven surfaces sit on the write allow-list: a global and a workspace file for Claude Code, an AGENTS.md for Codex, a workspace SOUL.md for Hermes, a GEMINI.md, the Copilot instructions file, and one Cursor rule. Four storage adapters implement the backend protocol, and five capability tokens describe what each one can carry. Twenty-two schema pins name the seams that carry a version. The aggregate check folds four legs, and four gate functions share the same zero or one exit code. 169 source modules hold 28,239 lines, and 106 test files hold 1836 tests. Two surfaces named in the roadmap are absent from the catalog, a global SOUL.md and a global GEMINI.md, so canon does not render them.](https://raw.githubusercontent.com/HarperZ9/canon/main/docs/art/record-table.svg)
 
 Every count is asserted against the module that defines it in
 [`tests/test_repo_art.py`](https://github.com/HarperZ9/canon/blob/main/tests/test_repo_art.py).

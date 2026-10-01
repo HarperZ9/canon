@@ -66,15 +66,16 @@ def test_the_readme_states_the_identity_version_change() -> None:
     assert "--capture prompts+responses" in readme
 
 
-def test_the_version_is_0_4_2_everywhere_it_is_declared() -> None:
+def test_the_release_version_matches_every_entrypoint_and_dated_heading() -> None:
     declared = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     version = declared["project"]["version"]
     changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
     headings = re.findall(r"^## (.+?)\r?$", changelog, re.MULTILINE)
 
-    assert version == "0.4.2"
+    from canon import client_mcp
+
+    assert version == "0.5.0"
     assert canon.__version__ == context_mcp.__version__ == local_mcp.__version__ == version
-    # An Unreleased stub on top, then the dated 0.4.2 entry, then 0.4.1.
-    assert headings[0] == "Unreleased"
-    assert re.fullmatch(r"0\.4\.2 - \d{4}-\d{2}-\d{2}", headings[1]), headings[1]
-    assert headings[2].startswith("0.4.1 - ")
+    assert client_mcp.__version__ == version
+    assert re.fullmatch(re.escape(version) + r" - \d{4}-\d{2}-\d{2}", headings[0]), headings[0]
+    assert headings[1].startswith("0.4.2 - ")

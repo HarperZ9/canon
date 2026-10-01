@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "flywheel-canon"
-version = "0.4.2"
+version = "0.5.0"
 description = "A provider-neutral memory-bank, personality container, and continuity capsule CLI."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -21,6 +21,7 @@ Issues = "https://github.com/HarperZ9/canon/issues"
 
 [project.scripts]
 canon = "canon.cli:main"
+canon-client = "canon.client_mcp:main"
 
 [project.optional-dependencies]
 # setuptools builds the sdist that tests/test_packaging.py inspects.
