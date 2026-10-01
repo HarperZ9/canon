@@ -42,9 +42,10 @@ def test_committed_source_manifests_match_generated_contract():
     root_plugin = json.loads((ROOT / '.claude-plugin/plugin.json').read_text())
     plugin = json.loads(package.manifests(version)['.claude-plugin/plugin.json'])
     assert root_plugin == {**plugin, 'skills': './client-plugin/skills/'}
-    root_mcp = (ROOT / '.mcp.json').read_bytes()
-    assert root_mcp == package.manifests(version)['.mcp.json'].replace(
+    root_mcp = json.loads((ROOT / '.mcp.json').read_text())
+    expected_mcp = package.manifests(version)['.mcp.json'].replace(
         b'/server/serve.py', b'/client-plugin/server/serve.py')
+    assert root_mcp == json.loads(expected_mcp)
 
 
 @checkout_only
