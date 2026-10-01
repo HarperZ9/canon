@@ -56,6 +56,21 @@ TOOLS = [
      "inputSchema": {"type": "object", "properties": {}}},
 ]
 
+# Every tool on this server reads; none writes a file or contacts a network.
+_TITLES = {
+    "canon.status": "Canon server status",
+    "canon.doctor": "Canon readiness check",
+    "canon.blocks": "List authored Canon blocks",
+    "canon.render": "Render a Canon region",
+    "canon.validate": "Validate Canon records",
+    "canon.check": "Run the Canon verdict",
+}
+for _tool in TOOLS:
+    _tool["title"] = _TITLES[_tool["name"]]
+    _tool["annotations"] = {"title": _tool["title"], "readOnlyHint": True,
+                            "destructiveHint": False, "idempotentHint": True,
+                            "openWorldHint": False}
+
 
 def _text(obj) -> dict:
     return {"content": [{"type": "text", "text": json.dumps(obj, indent=2)}]}
