@@ -65,6 +65,9 @@ def _path_key(path):
         return _stat_key(path.stat())
     except FileNotFoundError:
         return None
+    except PermissionError:
+        # Windows refuses access to a file whose deletion is still pending.
+        raise _Retry() from None
 
 
 def _hot_journal(path):
@@ -74,6 +77,8 @@ def _hot_journal(path):
             head = stream.read(1)
     except FileNotFoundError:
         return False
+    except PermissionError:
+        return True  # a journal the writer is deleting on Windows; retry
     return head not in (b"", b"\x00")
 
 
@@ -85,11 +90,19 @@ def _read(path, limit, optional=False):
         if optional:
             return None, None
         raise
+    except PermissionError:
+        # A WAL that a closing writer is deleting refuses access on Windows.
+        if optional:
+            raise _Retry() from None
+        raise
     with stream:
         before = os.fstat(stream.fileno())
         if before.st_size > limit or not (optional or before.st_size):
             raise ValueError("client snapshot must be nonempty and at most 256 MiB")
-        data = stream.read(limit + 1)
+        # Request only the bytes fstat reported, plus one to see growth. Asking
+        # for the whole bound allocates 256 MiB per read, which on Windows
+        # costs ~50 ms and widens the window in which a writer forces a retry.
+        data = stream.read(before.st_size + 1)
         after = os.fstat(stream.fileno())
     if _stat_key(before) != _stat_key(after) or len(data) != before.st_size:
         raise _Retry()

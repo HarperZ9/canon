@@ -165,3 +165,68 @@ def test_stray_wal_sidecars_beside_a_delete_mode_store_are_read_past(tmp_path, s
     reader = ClientServer(config(db))
     assert call(reader, "get", record_id=stored["event_record_id"])[1]["record"]
     assert snapshot(tmp_path) == before
+
+
+def test_snapshot_reads_request_the_file_size_not_the_bound(tmp_path, monkeypatch):
+    # Asking for the 256 MiB bound allocates it on every read; on Windows that
+    # took ~50 ms per file and let a busy writer starve the reader.
+    db = tmp_path / "ctx.db"
+    writer = ClientServer(config(db, "--allow-context-write"))
+    external = held_wal_connection(db)
+    try:
+        call(writer, "ingest", event=numbered_event(1))
+        requested, real_open = [], client_mcp_store.open_shared
+
+        class Recording:
+            def __init__(self, stream):
+                self._stream = stream
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                self._stream.close()
+
+            def fileno(self):
+                return self._stream.fileno()
+
+            def read(self, size=-1):
+                requested.append(size)
+                return self._stream.read(size)
+
+        monkeypatch.setattr(client_mcp_store, "open_shared",
+                            lambda path: Recording(real_open(path)))
+        response, found = call(ClientServer(config(db)), "query", query="azure")
+    finally:
+        external.close()
+    assert response["isError"] is False and found["hits"]
+    assert requested and max(requested) <= db.stat().st_size + 1
+
+
+@pytest.mark.parametrize("suffix", ["-wal", "-journal"])
+def test_a_sidecar_being_deleted_on_windows_is_retried_not_failed(tmp_path, monkeypatch, suffix):
+    # Windows answers a file whose deletion is pending with ERROR_ACCESS_DENIED.
+    db = tmp_path / "ctx.db"
+    writer = ClientServer(config(db, "--allow-context-write"))
+    external = held_wal_connection(db) if suffix == "-wal" else None
+    try:
+        stored = call(writer, "ingest", event=numbered_event(1))[1]
+        if suffix == "-journal":
+            (tmp_path / "ctx.db-journal").write_bytes(b"")
+        denied, real_open = [], client_mcp_store.open_shared
+
+        def flaky(path):
+            if str(path).endswith(suffix) and len(denied) < 2:
+                denied.append(path)
+                raise PermissionError(13, "Access is denied", str(path))
+            return real_open(path)
+
+        monkeypatch.setattr(client_mcp_store, "open_shared", flaky)
+        response, got = call(ClientServer(config(db)), "get",
+                             record_id=stored["event_record_id"])
+    finally:
+        if external:
+            external.close()
+    assert len(denied) == 2
+    assert response["isError"] is False, got
+    assert got["record"]["id"] == stored["event_record_id"]

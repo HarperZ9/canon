@@ -20,6 +20,12 @@ store or change its journal mode, and it still creates no file next to it.
 - **Fix.** The read path still never opens the store through SQLite, so it
   creates no `-journal`, `-wal` or `-shm` file. On Windows it opens files so
   that a writer can still delete its journal or WAL while the client reads.
+- **Fix.** Each snapshot read asks for the bytes the file holds, not for the
+  256 MiB bound. The larger request allocated the whole bound on every read.
+  On Windows that cost about 50 ms per file, so a writer that stored records
+  back to back kept the reader retrying until it reported the store busy. A
+  `-wal` or `-journal` file that a writer is deleting answers "access denied"
+  on Windows; the read now retries in that case instead of failing.
 - **Fix.** `canon context purge` and `canon context retention` check that a
   file is a Canon store without creating sidecar files beside it. 0.5.0 opened
   the file with a SQLite read-only connection, which created `-wal` and `-shm`
