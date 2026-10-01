@@ -71,6 +71,10 @@ def test_the_release_version_matches_every_entrypoint_and_dated_heading() -> Non
     version = declared["project"]["version"]
     changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
     headings = re.findall(r"^## (.+?)\r?$", changelog, re.MULTILINE)
+    # Work merged after a release sits under one leading Unreleased heading;
+    # the newest dated heading below it must still name the declared version.
+    if headings and headings[0] == "Unreleased":
+        headings = headings[1:]
 
     from canon import client_mcp
 

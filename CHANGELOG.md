@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- **Change.** The writing gate's pre-cleaner now targets Forum's
+  `forum.prose.clarify` tool, which replaced `forum.prose.humanize`.
+  `forum_clarify_pre_cleaner` wraps a clarify call that the caller wires and
+  returns the result's `output`. Canon still imports no Forum code.
+- **Compatibility.** During Forum's alias window the adapter accepts both
+  `forum.prose-clarification/v1` and the deprecated
+  `forum.prose-humanization/v1` schema ids. Any other schema id, or a result
+  with no string `output`, raises `ValueError` before the checker runs.
+
 ## 0.6.0 - 2026-10-01
 
 The read-only context client keeps working while other processes write to the

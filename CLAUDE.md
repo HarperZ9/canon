@@ -128,6 +128,10 @@ read-only gates a build keys on:
   an empty `hard` list, the exact signal `check_writing --gate` keys on. The
   register binds each surface to a profile (instruction files `readme`, SOUL.md
   `chat`); the strict `procedure` profile is unused here (an honest null).
+  `forum_clarify_pre_cleaner` adapts a caller-wired Forum `forum.prose.clarify`
+  call into the optional pre-cleaner. It accepts `forum.prose-clarification/v1`
+  and the deprecated `forum.prose-humanization/v1` while Forum keeps the
+  humanize alias, and raises on any other schema.
 - `project-docs/V2-DECISIONS.md` — D-37 the profile-per-surface register, D-38
   the injected gate seam, D-39 the empty-hard-list pass signal, D-40 drift scores
   the interior and mirrors the batch writer (and why `pool_for` went public),

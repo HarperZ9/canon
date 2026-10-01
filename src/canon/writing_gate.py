@@ -32,9 +32,24 @@ from canon.registry import Surface
 # imports writing_profiles.
 WritingChecker = Callable[[str, str], Mapping]
 
-# A cheap pre-clean applied before the check (forum_prose_humanize is the wired
-# instance). Optional: the gate is the same with or without it.
+# A cheap pre-clean applied before the check. The wired instance is Forum's
+# clarify tool (forum.prose.clarify), adapted by forum_clarify_pre_cleaner.
+# Optional: the gate is the same with or without it.
 PreCleaner = Callable[[str], str]
+
+# Forum's prose pre-cleaner. Forum renamed humanize to clarify and keeps the
+# humanize names as deprecated aliases for one release. canon imports no engine,
+# so the caller wires the call (the MCP tool, `forum clarify`, POST /clarify, or
+# forum.clarify.clarify_text) and canon validates the result envelope.
+FORUM_CLARIFY_TOOL = "forum.prose.clarify"
+FORUM_CLARIFY_SCHEMA = "forum.prose-clarification/v1"
+# Deprecated: the schema id the humanize alias returns during the alias window.
+FORUM_HUMANIZE_SCHEMA = "forum.prose-humanization/v1"
+ACCEPTED_FORUM_PROSE_SCHEMAS: frozenset[str] = frozenset(
+    {FORUM_CLARIFY_SCHEMA, FORUM_HUMANIZE_SCHEMA})
+
+# text -> Forum's clarify result mapping, carrying `schema` and `output`.
+ForumClarify = Callable[[str], Mapping]
 
 HARD_KEY = "hard"
 
@@ -46,6 +61,34 @@ STE_PROFILE_BY_HARNESS_SCOPE: dict[tuple[str, str], str] = {
 }
 
 DEFAULT_STE_PROFILE = "readme"
+
+
+def forum_clarify_pre_cleaner(clarify: ForumClarify) -> PreCleaner:
+    """Adapt a wired Forum clarify call into a PreCleaner.
+
+    The returned callable passes the text to `clarify` and returns the result's
+    `output`. It accepts both schema ids in ACCEPTED_FORUM_PROSE_SCHEMAS, so a
+    caller still on the deprecated humanize alias keeps working during the alias
+    window. Any other schema id, or an `output` that is not a string, raises
+    ValueError. Like the gate's `hard` key, a malformed envelope is a wiring
+    fault for the caller to see, and the gate does not score text it cannot
+    trust came from Forum.
+    """
+    def pre_clean(text: str) -> str:
+        payload = clarify(text)
+        schema = payload.get("schema")
+        if schema not in ACCEPTED_FORUM_PROSE_SCHEMAS:
+            accepted = ", ".join(sorted(ACCEPTED_FORUM_PROSE_SCHEMAS))
+            raise ValueError(
+                f"unexpected Forum prose schema {schema!r}; expected one of "
+                f"{accepted}")
+        output = payload.get("output")
+        if not isinstance(output, str):
+            raise ValueError(
+                f"Forum prose result has no string output (schema {schema})")
+        return output
+
+    return pre_clean
 
 
 def ste_profile_for(surface: Surface) -> str:

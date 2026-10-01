@@ -48,8 +48,14 @@ canon owns three things: the `WritingChecker` callable's shape
 and the `gate_text` pipeline. The caller supplies the real checker as
 `lambda text, name: check_writing.check_text(text, writing_profiles.load(name))`,
 so profile loading stays on the caller's side and canon never touches the linter.
-An optional `PreCleaner` (the wired instance is `forum_prose_humanize`) runs
-before the check as a cheap pre-clean.
+An optional `PreCleaner` runs before the check as a cheap pre-clean. The wired
+instance is Forum's `forum.prose.clarify` tool, adapted by
+`forum_clarify_pre_cleaner` (amended 2026-10-01; it was `forum_prose_humanize`
+before Forum renamed humanize to clarify). The adapter returns the result's
+`output` and accepts two schema ids during Forum's alias window:
+`forum.prose-clarification/v1` and the deprecated `forum.prose-humanization/v1`.
+Any other schema id, or an `output` that is not a string, raises `ValueError`
+before the checker runs, the same fail-closed posture as D-39.
 **Consequence:** canon stays dependency-free and the gate is provable with a fake
 checker. The real linter and canon's gate agree on the verdict by construction,
 since both read the same `hard` signal.
