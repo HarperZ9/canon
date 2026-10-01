@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.6.0 - 2026-10-01
+
+The read-only context client keeps working while other processes write to the
+store or change its journal mode, and it still creates no file next to it.
+
+- **Fix.** A read-only client no longer fails while an authorized writer is in
+  a transaction or switches the store between DELETE and WAL journal mode.
+  0.5.0 refused a request whenever a `-journal`, `-wal` or `-shm` file existed
+  or the store was in WAL mode, so a reader running beside an active writer
+  returned errors. The client now reads WAL stores by applying the committed
+  frames of the `-wal` file to its in-memory copy, using SQLite's WAL recovery
+  rules (salts, running checksums, last valid commit). A zeroed `-journal`
+  header from a writer that has not started to commit does not block a read.
+  While a writer commits, or a file changes during the copy, the read retries
+  for up to 5 seconds and then reports the store busy.
+- **Fix.** A running client sees records an authorized client writes later in
+  either journal mode, because every request takes a fresh copy.
+- **Fix.** The read path still never opens the store through SQLite, so it
+  creates no `-journal`, `-wal` or `-shm` file. On Windows it opens files so
+  that a writer can still delete its journal or WAL while the client reads.
+- **Fix.** `canon context purge` and `canon context retention` check that a
+  file is a Canon store without creating sidecar files beside it. 0.5.0 opened
+  the file with a SQLite read-only connection, which created `-wal` and `-shm`
+  files next to a WAL-mode file with no open connection, including a file it
+  then refused as not a store.
+- Limits. A copy is consistent when no file changes between the stat checks
+  before and after it; the check compares size and modification time, so a
+  change that keeps both within one timestamp tick is not detected. A store
+  under steady write load for the whole retry window is reported busy. The
+  256 MiB snapshot bound now counts the database and its WAL together.
+
 ## 0.5.0 - 2026-10-01
 
 Canon can serve one explicitly selected context database to a local MCP client

@@ -1,21 +1,37 @@
 """Existing ContextStore query semantics with a non-initializing read connection.
 
-Reads deserialize a bounded stable file snapshot into memory, never open the
-live SQLite path, and never mint identity or migrate schema. WAL databases and
-active journal sidecars are refused. Checkpoint and return to DELETE journal
-mode outside this entrypoint. Python's SQLite must provide deserialize().
+Reads deserialize a bounded, stable snapshot of the database file into memory.
+The read path never opens the live SQLite path, so it never creates a sidecar
+file, takes a lock, mints identity or migrates schema. A WAL-mode store is read
+by applying the committed frames of its write-ahead log to the snapshot in
+memory. While a writer holds a rollback journal, or a file changes during the
+copy, the read retries until SNAPSHOT_RETRY_SECONDS have passed and is then
+refused as busy. Python's SQLite must provide deserialize().
 """
 from contextlib import contextmanager
 from pathlib import Path
 import os
 import sqlite3
+import time
 
 from .context_audit import verified_state
 from .context_migrate import compare_store_id, store_identity
 from .context_store import ContextStore
 from .path_policy import is_reparse_point, is_windows_ads_path
+from .sqlite_wal import (ROLLBACK_HEADER, SQLITE_MAGIC, WAL_HEADER, open_shared,
+                         wal_image)
 
 MAX_SNAPSHOT_BYTES = 256 * 1024 * 1024
+SNAPSHOT_RETRY_SECONDS = 5.0
+_BUSY = "context database stayed busy with another writer; try again"
+
+
+class SnapshotBusy(ValueError):
+    """A writer was active for the whole retry window."""
+
+
+class _Retry(Exception):
+    """A transient state seen during one snapshot attempt."""
 
 
 def checked_path(path):
@@ -37,26 +53,78 @@ def _stat_key(info):
     return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns
 
 
-def _no_sidecars(path):
-    if any(Path(str(path) + suffix).exists() for suffix in ("-wal", "-shm", "-journal")):
-        raise ValueError("client requires an idle DELETE-journal database")
+def _sidecar(path, suffix):
+    side = Path(str(path) + suffix)
+    if is_reparse_point(side):
+        raise ValueError("context database sidecar is a linked file")
+    return side
+
+
+def _path_key(path):
+    try:
+        return _stat_key(path.stat())
+    except FileNotFoundError:
+        return None
+
+
+def _hot_journal(path):
+    """A rollback journal with a live header means a writer may be mid-commit."""
+    try:
+        with open_shared(_sidecar(path, "-journal")) as stream:
+            head = stream.read(1)
+    except FileNotFoundError:
+        return False
+    return head not in (b"", b"\x00")
+
+
+def _read(path, limit, optional=False):
+    """File bytes and a stat key, or (None, None) for a missing optional file."""
+    try:
+        stream = open_shared(path)
+    except FileNotFoundError:
+        if optional:
+            return None, None
+        raise
+    with stream:
+        before = os.fstat(stream.fileno())
+        if before.st_size > limit or not (optional or before.st_size):
+            raise ValueError("client snapshot must be nonempty and at most 256 MiB")
+        data = stream.read(limit + 1)
+        after = os.fstat(stream.fileno())
+    if _stat_key(before) != _stat_key(after) or len(data) != before.st_size:
+        raise _Retry()
+    return data, _stat_key(after)
+
+
+def _attempt(path):
+    if _hot_journal(path):
+        raise _Retry()
+    data, key = _read(path, MAX_SNAPSHOT_BYTES)
+    if data[:16] != SQLITE_MAGIC or data[18:20] not in (ROLLBACK_HEADER, WAL_HEADER):
+        raise ValueError("context database is not a SQLite database")
+    wal_path = _sidecar(path, "-wal")
+    wal, wal_key = None, None
+    if data[18:20] == WAL_HEADER:
+        wal, wal_key = _read(wal_path, MAX_SNAPSHOT_BYTES - len(data), optional=True)
+    checked_path(path)
+    if _hot_journal(path) or _path_key(path) != key:
+        raise _Retry()
+    if data[18:20] == WAL_HEADER and _path_key(wal_path) != wal_key:
+        raise _Retry()
+    return wal_image(data, wal) if data[18:20] == WAL_HEADER else data
 
 
 def _snapshot(path):
-    _no_sidecars(path)
-    with path.open("rb") as stream:
-        before = os.fstat(stream.fileno())
-        if not 0 < before.st_size <= MAX_SNAPSHOT_BYTES:
-            raise ValueError("client snapshot must be nonempty and at most 256 MiB")
-        data = stream.read(MAX_SNAPSHOT_BYTES + 1)
-        after = os.fstat(stream.fileno())
-    checked_path(path)
-    _no_sidecars(path)
-    if _stat_key(before) != _stat_key(after) or _stat_key(after) != _stat_key(path.stat()):
-        raise ValueError("context database changed during snapshot")
-    if len(data) != before.st_size or data[18:20] != b"\x01\x01":
-        raise ValueError("client requires a checkpointed DELETE-journal database")
-    return data
+    deadline = time.monotonic() + SNAPSHOT_RETRY_SECONDS
+    delay = 0.005
+    while True:
+        try:
+            return _attempt(path)
+        except _Retry:
+            if time.monotonic() >= deadline:
+                raise SnapshotBusy(_BUSY) from None
+            time.sleep(delay)
+            delay = min(delay * 2, 0.1)
 
 
 def _read_connection(path):
@@ -69,6 +137,41 @@ def _read_connection(path):
     except Exception:
         conn.close()
         raise
+
+
+def table_names(path):
+    """Table names of an existing SQLite file, read without creating any file.
+
+    A rollback-journal file, or a WAL file whose -wal and -shm both exist, is
+    read through a read-only SQLite connection, which creates nothing there. A
+    WAL file missing either sidecar has no open connection: it is read from a
+    memory snapshot, or, above the snapshot bound, as immutable.
+    """
+    path = checked_path(path)
+    with open_shared(path) as stream:
+        head = stream.read(100)
+    if head[:16] != SQLITE_MAGIC:
+        raise sqlite3.DatabaseError("file is not a database")
+    sidecars = [_sidecar(path, suffix).exists() for suffix in ("-wal", "-shm")]
+    uri = path.resolve().as_uri() + "?mode=ro"
+    if head[18:20] != WAL_HEADER or all(sidecars):
+        conn = sqlite3.connect(uri, uri=True, timeout=10)
+    elif path.stat().st_size + _wal_size(path) <= MAX_SNAPSHOT_BYTES:
+        conn = _read_connection(path)
+    else:
+        conn = sqlite3.connect(uri + "&immutable=1", uri=True)
+    try:
+        return {row[0] for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
+    finally:
+        conn.close()
+
+
+def _wal_size(path):
+    try:
+        return _sidecar(path, "-wal").stat().st_size
+    except FileNotFoundError:
+        return 0
 
 
 class ClientBackend:

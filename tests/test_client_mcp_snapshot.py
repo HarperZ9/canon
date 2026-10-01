@@ -34,7 +34,9 @@ def test_wal_toggle_after_snapshot_does_not_create_reader_sidecars(tmp_path, mon
     monkeypatch.setattr(client_mcp_store.sqlite3, "connect", toggle_before_memory_connect)
     assert call(reader, "query", query="azure")[0]["isError"] is False
     assert set(snapshot(tmp_path)) == {"ctx.db"}
-    assert call(reader, "health")[0]["isError"] is True
+    # The store is now in WAL mode; the reader keeps working and adds no file.
+    assert call(reader, "health")[0]["isError"] is False
+    assert set(snapshot(tmp_path)) == {"ctx.db"}
 
 
 def test_snapshot_size_limit_is_a_refusal(tmp_path, monkeypatch):
@@ -47,33 +49,49 @@ def test_snapshot_size_limit_is_a_refusal(tmp_path, monkeypatch):
     assert snapshot(tmp_path) == before
 
 
-@pytest.mark.parametrize("suffix", ["-journal", "-wal", "-shm"])
-def test_sidecars_refused_without_modification(tmp_path, suffix):
+def test_hot_journal_refused_as_busy_without_modification(tmp_path, monkeypatch):
     db = tmp_path / "ctx.db"
     ClientServer(config(db, "--allow-context-write"))
-    (tmp_path / ("ctx.db" + suffix)).write_bytes(b"synthetic external activity")
+    (tmp_path / "ctx.db-journal").write_bytes(b"synthetic external activity")
     before = snapshot(tmp_path)
-    with pytest.raises(ValueError, match="idle DELETE-journal"):
+    monkeypatch.setattr(client_mcp_store, "SNAPSHOT_RETRY_SECONDS", 0.1)
+    with pytest.raises(client_mcp_store.SnapshotBusy, match="busy"):
         ClientServer(config(db))
     assert snapshot(tmp_path) == before
 
 
-def test_mutation_during_snapshot_refused(tmp_path, monkeypatch):
-    db = tmp_path / "ctx.db"
-    ClientServer(config(db, "--allow-context-write"))
-    original = client_mcp_store._no_sidecars
-    calls = 0
+def _mutate_on(db, attempts):
+    """Append to the database during the snapshot read of the chosen attempts."""
+    original, seen = client_mcp_store._hot_journal, []
 
-    def mutate_after_read(path):
-        nonlocal calls
-        calls += 1
-        if calls == 2:
-            with path.open("ab") as stream:
+    def hook(path):
+        seen.append(path)
+        if len(seen) % 2 == 0 and len(seen) // 2 in attempts:
+            with db.open("ab") as stream:
                 stream.write(b"external concurrent mutation")
         return original(path)
+    return hook, seen
 
-    monkeypatch.setattr(client_mcp_store, "_no_sidecars", mutate_after_read)
-    with pytest.raises(ValueError, match="changed during snapshot"):
+
+def test_mutation_during_snapshot_is_retried(tmp_path, monkeypatch):
+    db = tmp_path / "ctx.db"
+    writer = ClientServer(config(db, "--allow-context-write"))
+    hook, seen = _mutate_on(db, attempts={1})
+    monkeypatch.setattr(client_mcp_store, "_hot_journal", hook)
+    reader = ClientServer(config(db))
+    assert len(seen) >= 4  # the first attempt was retried
+    monkeypatch.undo()
+    assert call(reader, "health")[1]["ok"] is True
+    assert writer
+
+
+def test_mutation_on_every_attempt_is_refused_as_busy(tmp_path, monkeypatch):
+    db = tmp_path / "ctx.db"
+    ClientServer(config(db, "--allow-context-write"))
+    hook, _ = _mutate_on(db, attempts=range(1, 10_000))
+    monkeypatch.setattr(client_mcp_store, "_hot_journal", hook)
+    monkeypatch.setattr(client_mcp_store, "SNAPSHOT_RETRY_SECONDS", 0.1)
+    with pytest.raises(client_mcp_store.SnapshotBusy, match="busy"):
         ClientServer(config(db))
 
 

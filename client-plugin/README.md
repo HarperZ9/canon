@@ -8,7 +8,7 @@ Supply `--context-db` with an absolute SQLite file path whose parent exists, and
 
 The default profile exposes health, query and get. Add `--context-write=true` or `--allow-context-write` to permit ingestion. A tool call or environment variable cannot grant writes. Purge is unavailable in this client, including when the legacy purge environment variable is present.
 
-Read access requires an existing identity-bearing Canon database. Reads use an in-memory snapshot capped at 256 MiB and require Python's SQLite `deserialize` support. WAL databases and SQLite sidecar files are refused. Close active writers and prepare a checkpointed database through a separate owner-controlled workflow before connecting; this client does not repair or migrate those files. A writable launch can initialize a new selected database. See the [client guide](https://github.com/HarperZ9/canon/blob/main/docs/client-packages.md) for configuration and limits.
+Read access requires an existing identity-bearing Canon database. Reads use an in-memory snapshot capped at 256 MiB and require Python's SQLite `deserialize` support. Reads create no SQLite sidecar file and work in DELETE or WAL journal mode, also while another process changes the mode; a request retries for up to 5 seconds while a writer commits, then reports the store busy. This client does not repair or migrate the database. A writable launch can initialize a new selected database. See the [client guide](https://github.com/HarperZ9/canon/blob/main/docs/client-packages.md) for configuration and limits.
 
 ## Install
 

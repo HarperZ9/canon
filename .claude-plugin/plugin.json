@@ -6,5 +6,5 @@
   "license": "FSL-1.1-MIT",
   "name": "canon-local",
   "skills": "./client-plugin/skills/",
-  "version": "0.5.0"
+  "version": "0.6.0"
 }

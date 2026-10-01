@@ -193,15 +193,14 @@ def test_v1_store_is_not_migrated_by_client(tmp_path):
     assert snapshot(tmp_path) == before
 
 
-def test_wal_store_refused_without_sidecar_creation(tmp_path):
+def test_wal_store_read_without_sidecar_creation(tmp_path):
     db = tmp_path / "wal.db"
     ClientServer(config(db, "--allow-context-write"))
     conn = sqlite3.connect(db)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.close()
     before = snapshot(tmp_path)
-    with pytest.raises(ValueError, match="DELETE-journal"):
-        ClientServer(config(db))
+    assert call(ClientServer(config(db)), "health")[1]["ok"] is True
     assert snapshot(tmp_path) == before
 
 
