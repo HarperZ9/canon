@@ -74,8 +74,8 @@ def test_the_release_version_matches_every_entrypoint_and_dated_heading() -> Non
 
     from canon import client_mcp
 
-    assert version == "0.5.0"
+    assert version == "0.6.0"
     assert canon.__version__ == context_mcp.__version__ == local_mcp.__version__ == version
     assert client_mcp.__version__ == version
     assert re.fullmatch(re.escape(version) + r" - \d{4}-\d{2}-\d{2}", headings[0]), headings[0]
-    assert headings[1].startswith("0.4.2 - ")
+    assert headings[1].startswith("0.5.0 - ")

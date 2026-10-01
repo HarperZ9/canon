@@ -70,14 +70,19 @@ startup. Select an existing store for read-only use. A newly approved writable
 store needs a writable parent directory. If a tool refuses a different workspace
 or project, change the launch binding only after deciding to grant that scope.
 If integrity checks fail, preserve the files and investigate before further use.
-The client requires a checkpointed database in SQLite DELETE journal mode.
-It refuses WAL mode and journal sidecars because they can carry changes absent
-from the database file. Checkpoint the store and change its journal mode through an authorized
-maintenance workflow before connecting; the client will not do that for you.
-This extra step is unnecessary for an ordinary Canon 0.4.2 store, which uses
-DELETE mode by default. Read snapshots are limited to 256 MiB and require a
-Python SQLite build with `Connection.deserialize`; the native package includes
-that support. Larger stores require a different authorized retrieval workflow.
+A read-only launch copies the database file into memory for each request and
+never opens the file through SQLite, so it creates no `-journal`, `-wal` or
+`-shm` file and takes no lock. It reads a store in DELETE or WAL journal mode,
+including a store whose journal mode another process changes while the client
+runs. For a WAL store it applies the committed frames of the `-wal` file to the
+copy in memory, by the same rules SQLite uses to recover a WAL. Each request
+sees the records an authorized writer committed before it started. While a
+writer is committing, or a file changes during the copy, the client retries for
+up to 5 seconds and then refuses the request as busy; a journal left by a writer
+that crashed keeps the store busy until a writer opens it. Read snapshots,
+database and WAL together, are limited to 256 MiB and require a Python SQLite
+build with `Connection.deserialize`; the native package includes that support.
+Larger stores require a different authorized retrieval workflow.
 Windows binaries are unsigned; signing and clean-machine client acceptance remain
 limits of this release.
 

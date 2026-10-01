@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import io
 import json
+import sqlite3
 
 from canon.cli import run_cli
 from canon.context_retention import POLICY_SCHEMA
@@ -159,3 +160,39 @@ def test_retention_plans_and_applies_a_policy_file(tmp_path) -> None:
     code, out, _ = _run(args + ["--yes"])
     assert code == 0 and "purged 4 records" in out
     assert store.get(WORKSPACE, PROJECT, prompt)["status"] == "not_found_in_searched_sources"
+
+
+def _foreign_wal_database(tmp_path, *, store=False):
+    db = tmp_path / "context.sqlite"
+    if store:
+        ContextStore(db).ingest(prompt_payload("turn-1", "Prompt about the tide tables"))
+    conn = sqlite3.connect(db)
+    assert conn.execute("PRAGMA journal_mode=WAL").fetchone()[0] == "wal"
+    if not store:
+        conn.execute("CREATE TABLE unrelated(value TEXT)")
+        conn.commit()
+    conn.close()
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["context.sqlite"]
+    return db
+
+
+def test_a_wal_mode_file_that_is_not_a_store_is_refused_without_new_files(tmp_path) -> None:
+    db = _foreign_wal_database(tmp_path)
+    before = {p.name: p.read_bytes() for p in tmp_path.iterdir()}
+
+    code, out, _ = _run(["--json", *_purge_args(db, "--all", "--dry-run")])
+
+    assert (code, json.loads(out)["failure_code"]) == (8, "store_invalid")
+    assert {p.name: p.read_bytes() for p in tmp_path.iterdir()} == before
+
+
+def test_the_store_check_on_a_large_idle_wal_file_creates_no_files(tmp_path, monkeypatch) -> None:
+    from canon import client_mcp_store
+    db = _foreign_wal_database(tmp_path)
+    before = {p.name: p.read_bytes() for p in tmp_path.iterdir()}
+    monkeypatch.setattr(client_mcp_store, "MAX_SNAPSHOT_BYTES", 1)
+
+    code, out, _ = _run(["--json", *_purge_args(db, "--all", "--dry-run")])
+
+    assert (code, json.loads(out)["failure_code"]) == (8, "store_invalid")
+    assert {p.name: p.read_bytes() for p in tmp_path.iterdir()} == before
