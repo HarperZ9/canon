@@ -267,3 +267,41 @@ def test_read_profile_never_opens_live_sqlite_path(tmp_path, monkeypatch):
     assert call(server, "health")[1]["ok"] is True
     assert call(server, "query", query="azure")[1]["hits"] == []
     assert calls
+
+
+def _code(server, operation, **args):
+    response, body = call(server, operation, **args)
+    assert response["isError"] is True
+    assert set(body) == {"error", "hint"}, body
+    return body["error"]
+
+
+def test_refusals_carry_fixed_codes_without_argument_values(tmp_path):
+    db = tmp_path / "ctx.db"
+    writer = ClientServer(config(db, "--allow-context-write"))
+    secret = "planted-secret-value"
+    assert _code(writer, "query", query="azure", workspace_id=secret) == "SCOPE_MISMATCH"
+    assert _code(writer, "query", query="azure", project_id=secret) == "SCOPE_MISMATCH"
+    assert _code(writer, "query", query="azure", unknown=secret) == "ARGUMENT_REFUSED"
+    assert _code(writer, "query", query=7) == "ARGUMENT_REFUSED"
+    assert _code(writer, "query", query="azure", top_k=99) == "ARGUMENT_REFUSED"
+    assert _code(writer, "query", query="azure", expected_store_id=secret) == "STORE_ID_MISMATCH"
+    reader = ClientServer(config(db))
+    assert _code(reader, "ingest", event=event()) == "WRITE_NOT_GRANTED"
+    for server in (writer, reader):
+        response = server.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                                  "params": {"name": "canon.context.nope", "arguments": {}}})
+        assert json.loads(response["result"]["content"][0]["text"])["error"] == "ARGUMENT_REFUSED"
+    texts = [call(writer, "query", query="azure", workspace_id=secret)[0]["content"][0]["text"],
+             call(reader, "ingest", event={"message_text": secret})[0]["content"][0]["text"]]
+    assert all(secret not in text for text in texts)
+
+
+def test_busy_store_and_unknown_failures_map_to_fixed_text():
+    from canon.client_mcp import refusal_payload
+    from canon.client_mcp_store import SnapshotBusy
+    assert refusal_payload(SnapshotBusy("x"))["error"] == "STORE_BUSY"
+    assert refusal_payload(sqlite3.OperationalError("database is locked"))["error"] == "STORE_BUSY"
+    leaked = refusal_payload(ValueError("stored text planted-secret-value"))
+    assert leaked == {"error": "context request refused or store unavailable"}
+    assert refusal_payload(sqlite3.OperationalError("no such table: planted")) == leaked

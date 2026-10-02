@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Change.** A refused client tool call returns a fixed code and hint
+  (`ARGUMENT_REFUSED`, `SCOPE_MISMATCH`, `STORE_ID_MISMATCH`, `STORE_BUSY`,
+  `WRITE_NOT_GRANTED`) in place of one generic string. Codes come from the
+  exception type or the client's own refusal, never from exception text.
 - **Fix.** The plugin folder now carries the server source at
   `client-plugin/server/src/canon`, so a Claude plugin directory install, which
   receives only that folder, starts. `python scripts/build_client_package.py
