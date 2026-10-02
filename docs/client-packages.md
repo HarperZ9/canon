@@ -14,6 +14,11 @@ Canon tools to another client using the model you choose there.
   desktop extensions. Enter the database file, workspace ID and project ID during
   setup. **Allow context writes** starts off.
 
+- In Claude Code, the plugin asks for the database path, workspace ID and
+  project ID when you enable it, and offers **Allow context writes**, which
+  starts off. Turn writes on for the first launch when the database does not
+  exist yet. The plugin passes those values as launch arguments.
+
 Download assets from the [versioned releases](https://github.com/HarperZ9/canon/releases)
 and verify the supplied SHA256SUMS before extraction. Keep the complete package
 together. Local MCP compatibility does not establish admission to a marketplace

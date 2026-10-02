@@ -24,9 +24,21 @@ Read access requires an existing identity-bearing Canon database. Reads use an i
 
 The source ZIP requires Python 3.11 or newer. Extract the complete ZIP. Configure a stdio client with a trusted absolute Python executable and arguments `-I -S -B /absolute/path/server/serve.py`, followed by the three binding flags. The checked-in plugin folder uses the repository's adjacent `src` directory; the source ZIP contains its own source tree.
 
-Claude manifests use `${CLAUDE_PLUGIN_ROOT}`. Portable and Codex manifests use `${PLUGIN_ROOT}`. Their binding placeholders use `CANON_CONTEXT_DB`, `CANON_WORKSPACE_ID` and `CANON_PROJECT_ID`; the client must resolve these to explicit argument values. Replace `python3` with a trusted absolute Python path where necessary. No client configuration is edited automatically.
+In Claude Code, enabling the plugin asks for the database path, workspace ID and project ID, and for **Allow context writes**, which defaults to off. Turn writes on for the first launch when the database does not exist yet. The Claude manifest passes these values as `${user_config.*}` arguments. Portable and Codex manifests use `${PLUGIN_ROOT}` with the placeholders `CANON_CONTEXT_DB`, `CANON_WORKSPACE_ID` and `CANON_PROJECT_ID`; the client must resolve these to explicit argument values. Replace `python3` with a trusted absolute Python path where necessary. No client configuration is edited automatically.
 
 The Windows x64 native ZIP includes the Python runtime. Extract all files and point the client at the absolute `server/canon-local.exe` path with the same binding flags. The MCPB offers the database, workspace and project settings and an **Allow context writes** option that defaults to off. Restart the connection after changing settings. Native ZIP and MCPB contain identical executable bytes.
+
+## Data and network
+
+| Question | Answer |
+| --- | --- |
+| What it reads | The SQLite database and the workspace and project scope you select |
+| What it stores | Context you ingest, in that database, only when writes are allowed |
+| Network calls | None. The server opens no socket and runs no other program |
+| Telemetry | None |
+| Retention | Content stays in your database file until you remove it |
+
+Query results go to the connected client, and that client's model provider handles them under its own privacy policy. See [PRIVACY.md](PRIVACY.md).
 
 ## Troubleshooting and limits
 
