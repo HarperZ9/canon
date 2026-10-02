@@ -34,6 +34,33 @@ def test_manifests_bind_arguments_and_default_to_read_only():
     assert b'${PLUGIN_ROOT}' in docs['mcp.json']
 
 
+def test_claude_manifest_carries_directory_listing_and_prompts_for_bindings():
+    docs = package.manifests('0.5.0')
+    claude = json.loads(docs['.claude-plugin/plugin.json'])
+    portable = json.loads(docs['plugin.json'])
+    for key in ('homepage', 'documentationUrl', 'supportUrl', 'privacyPolicyUrl', 'termsOfServiceUrl'):
+        assert claude[key].startswith('https://')
+    assert claude['repository'] == 'https://github.com/HarperZ9/canon'
+    assert claude['displayName'] == 'Canon' and 5 <= len(claude['keywords']) <= 8
+    assert set(claude['userConfig']) == {'context_db', 'workspace_id', 'project_id', 'context_write'}
+    assert claude['userConfig']['context_write']['default'] is False
+    assert not set(claude) - set(portable) & {'name', 'version', 'license', 'author', 'description'}
+    assert 'userConfig' not in portable and 'icon' not in portable
+    args = json.loads(docs['.mcp.json'])['mcpServers']['canon']['args']
+    assert [a for a in args if '${' in a] == ['${CLAUDE_PLUGIN_ROOT}/server/serve.py',
+        '${user_config.context_db}', '${user_config.workspace_id}', '${user_config.project_id}',
+        '--context-write=${user_config.context_write}']
+    assert '${CANON_CONTEXT_DB}' in json.loads(docs['mcp.json'])['mcpServers']['canon']['args']
+
+
+@checkout_only
+def test_committed_icon_is_a_square_png_the_directory_accepts():
+    data = (ROOT / 'client-plugin/.claude-plugin/icon.png').read_bytes()
+    assert data[:8] == bytes([137, 80, 78, 71, 13, 10, 26, 10]) and data[12:16] == b'IHDR'
+    width, height = int.from_bytes(data[16:20], 'big'), int.from_bytes(data[20:24], 'big')
+    assert width == height and 512 <= width <= 2048 and len(data) < 2 * 1024 * 1024
+
+
 @checkout_only
 def test_committed_source_manifests_match_generated_contract():
     version = package.qualify('dev')[0]
@@ -41,7 +68,8 @@ def test_committed_source_manifests_match_generated_contract():
         assert json.loads((ROOT / 'client-plugin' / name).read_text()) == json.loads(expected)
     root_plugin = json.loads((ROOT / '.claude-plugin/plugin.json').read_text())
     plugin = json.loads(package.manifests(version)['.claude-plugin/plugin.json'])
-    assert root_plugin == {**plugin, 'skills': './client-plugin/skills/'}
+    assert root_plugin == {**plugin, 'icon': './client-plugin/.claude-plugin/icon.png',
+                           'skills': './client-plugin/skills/'}
     root_mcp = json.loads((ROOT / '.mcp.json').read_text())
     expected_mcp = package.manifests(version)['.mcp.json'].replace(
         b'/server/serve.py', b'/client-plugin/server/serve.py')

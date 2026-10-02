@@ -59,7 +59,7 @@ def qualify(root, mode):
 
 def inputs(root, mode):
     files = {}
-    for directory, extensions in (('src/canon', {'.py'}), ('client-plugin', {'.py', '.md', '.json'}),
+    for directory, extensions in (('src/canon', {'.py'}), ('client-plugin', {'.py', '.md', '.json', '.png'}),
                                    ('scripts', {'.py', '.ps1', '.sh'})):
         files.update({f'{directory}/{name}': data for name, data in entries(root / directory, extensions).items()})
     for name in ('pyproject.toml', 'LICENSE', 'CHANGELOG.md'):

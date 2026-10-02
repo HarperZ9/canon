@@ -7,11 +7,12 @@
         "-B",
         "${CLAUDE_PLUGIN_ROOT}/client-plugin/server/serve.py",
         "--context-db",
-        "${CANON_CONTEXT_DB}",
+        "${user_config.context_db}",
         "--workspace-id",
-        "${CANON_WORKSPACE_ID}",
+        "${user_config.workspace_id}",
         "--project-id",
-        "${CANON_PROJECT_ID}"
+        "${user_config.project_id}",
+        "--context-write=${user_config.context_write}"
       ],
       "command": "python3",
       "type": "stdio"

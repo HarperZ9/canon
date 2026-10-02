@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **Change.** The Claude plugin manifest carries the directory listing fields:
+  display name, keywords, homepage, documentation, support, privacy and terms
+  links, and a 1024 px icon at `client-plugin/.claude-plugin/icon.png`.
+- **Change.** The Claude plugin asks for the database path, workspace ID,
+  project ID and write permission through `userConfig` and passes them as
+  `${user_config.*}` launch arguments. The portable and Codex manifests keep
+  the `CANON_*` placeholders.
 - **Change.** The writing gate's pre-cleaner now targets Forum's
   `forum.prose.clarify` tool, which replaced `forum.prose.humanize`.
   `forum_clarify_pre_cleaner` wraps a clarify call that the caller wires and
