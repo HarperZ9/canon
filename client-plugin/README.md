@@ -22,7 +22,7 @@ Read access requires an existing identity-bearing Canon database. Reads use an i
 
 ## Install
 
-The source ZIP requires Python 3.11 or newer. Extract the complete ZIP. Configure a stdio client with a trusted absolute Python executable and arguments `-I -S -B /absolute/path/server/serve.py`, followed by the three binding flags. The checked-in plugin folder uses the repository's adjacent `src` directory; the source ZIP contains its own source tree.
+The source ZIP requires Python 3.11 or newer. Extract the complete ZIP. Configure a stdio client with a trusted absolute Python executable and arguments `-I -S -B /absolute/path/server/serve.py`, followed by the three binding flags. The plugin folder carries its own copy of the server source under `server/src`, so an install of this folder alone runs; the source ZIP carries the same tree.
 
 In Claude Code, enabling the plugin asks for the database path, workspace ID and project ID, and for **Allow context writes**, which defaults to off. Turn writes on for the first launch when the database does not exist yet. The Claude manifest passes these values as `${user_config.*}` arguments. Portable and Codex manifests use `${PLUGIN_ROOT}` with the placeholders `CANON_CONTEXT_DB`, `CANON_WORKSPACE_ID` and `CANON_PROJECT_ID`; the client must resolve these to explicit argument values. Replace `python3` with a trusted absolute Python path where necessary. No client configuration is edited automatically.
 

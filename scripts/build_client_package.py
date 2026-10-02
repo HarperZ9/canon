@@ -5,13 +5,49 @@ from pathlib import Path
 import zipfile
 
 from client_manifests import encoded, manifests
-from client_package_inputs import entries, hashes, inputs, qualify as qualify_root, unchanged
+from client_package_inputs import VENDORED, entries, hashes, inputs, qualify as qualify_root, unchanged
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 def qualify(mode):
     return qualify_root(ROOT, mode)
+
+
+def vendored_files(root=ROOT):
+    """The server source the plugin folder carries, keyed by path under server/src.
+
+    The same files the source ZIP places under server/src: every .py file in
+    src/canon. Bytes use LF line endings so a CRLF checkout compares equal.
+    """
+    return {'canon/' + name: data.replace(b'\r\n', b'\n')
+            for name, data in entries(Path(root) / 'src/canon', {'.py'}).items()}
+
+
+def committed_vendored(root=ROOT):
+    folder = Path(root) / VENDORED
+    if not folder.is_dir():
+        return {}
+    return {path.relative_to(folder).as_posix(): path.read_bytes().replace(b'\r\n', b'\n')
+            for path in sorted(folder.rglob('*'))
+            if path.is_file() and '__pycache__' not in path.parts and path.suffix != '.pyc'}
+
+
+def sync_vendored(root=ROOT):
+    """Rewrite client-plugin/server/src from src/canon, removing stale files."""
+    folder = Path(root) / VENDORED
+    wanted = vendored_files(root)
+    for name in set(committed_vendored(root)) - set(wanted):
+        (folder / name).unlink()
+    for name, data in wanted.items():
+        target = folder / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if not target.is_file() or target.read_bytes().replace(b'\r\n', b'\n') != data:
+            target.write_bytes(data)
+    for path in sorted(folder.rglob('*'), reverse=True):
+        if path.is_dir() and not any(path.iterdir()):
+            path.rmdir()
+    return sorted(wanted)
 
 
 def archive(files, target):
@@ -73,9 +109,16 @@ def build(output, native=False, mode='dev'):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('output')
+    parser.add_argument('output', nargs='?')
     parser.add_argument('--native', action='store_true')
     parser.add_argument('--mode', choices=('dev', 'release'), default='dev')
+    parser.add_argument('--sync-vendored', action='store_true',
+                        help='rewrite client-plugin/server/src from src/canon and exit')
     args = parser.parse_args()
+    if args.sync_vendored:
+        print(f'{len(sync_vendored())} files in {VENDORED}')
+        raise SystemExit(0)
+    if not args.output:
+        parser.error('output is required unless --sync-vendored is given')
     for item in build(args.output, args.native, args.mode):
         print(item)

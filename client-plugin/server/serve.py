@@ -3,8 +3,10 @@ from pathlib import Path
 import sys
 
 if not getattr(sys, 'frozen', False):
-    vendored = Path(__file__).resolve().parent / 'src'
-    source = vendored if vendored.is_dir() else Path(__file__).resolve().parents[2] / 'src'
+    source = Path(__file__).resolve().parent / 'src'
+    if not (source / 'canon' / 'client_mcp.py').is_file():
+        sys.stderr.write('canon: the server code is missing from the plugin folder. Reinstall the plugin.\n')
+        raise SystemExit(1)
     sys.path.insert(0, str(source))
 
 from canon.client_mcp import main

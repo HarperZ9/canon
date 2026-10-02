@@ -29,7 +29,8 @@ Stored data persists until the owner removes it through a separate authorized wo
 ## Retention and support
 
 Canon keeps no copy of your data outside the database you selected. Content stays in
-that database until you remove it with Canon's purge command or delete the file.
+that database until you delete the file. This plugin has no purge tool; the separate
+Canon command-line tool can purge records if you install it.
 Canon sends nothing over a network and collects no usage statistics.
 
 Support and security reports: https://github.com/HarperZ9/canon/issues
