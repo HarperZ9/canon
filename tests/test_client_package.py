@@ -206,3 +206,59 @@ def test_head_comparison_checks_bytes_even_without_hidden_flags(release_tree):
     (release_tree / name).write_text('__version__ = "0.5.0"\n# edited\n')
     with pytest.raises(ValueError, match='bytes differ from HEAD'):
         source.verify_head_inputs(release_tree, {name: (release_tree / name).read_bytes()})
+
+
+@checkout_only
+def test_vendored_server_source_matches_src():
+    committed, expected = package.committed_vendored(), package.vendored_files()
+    drift = sorted(set(committed) ^ set(expected)) + sorted(
+        name for name in set(committed) & set(expected) if committed[name] != expected[name])
+    assert not drift, ('client-plugin/server/src differs from src/canon; run '
+                       '`python scripts/build_client_package.py --sync-vendored`: ' + ', '.join(drift[:10]))
+
+
+def _launch(folder, values):
+    """The Claude launch from .mcp.json with the plugin root and user settings filled in."""
+    entry = json.loads((folder / '.mcp.json').read_text())['mcpServers']['canon']
+    def fill(arg):
+        arg = arg.replace('${CLAUDE_PLUGIN_ROOT}', folder.as_posix())
+        for key, value in values.items():
+            arg = arg.replace('${user_config.' + key + '}', value)
+        return arg
+    assert entry['command'] == 'python3'
+    return [sys.executable] + [fill(arg) for arg in entry['args']]
+
+
+def _rpc(command, cwd):
+    requests = [{'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': {
+                    'protocolVersion': '2025-06-18', 'capabilities': {},
+                    'clientInfo': {'name': 'isolated-launch-test', 'version': '1'}}},
+                {'jsonrpc': '2.0', 'id': 2, 'method': 'tools/list'}]
+    return subprocess.run(command, input=''.join(json.dumps(r) + '\n' for r in requests),
+                          capture_output=True, text=True, timeout=120, cwd=cwd)
+
+
+@checkout_only
+def test_plugin_folder_alone_starts_and_lists_tools(tmp_path):
+    import shutil
+    folder = tmp_path / 'installed' / 'canon-local'
+    shutil.copytree(ROOT / 'client-plugin', folder, ignore=shutil.ignore_patterns('__pycache__'))
+    values = {'context_db': (tmp_path / 'context.db').as_posix(), 'workspace_id': 'w',
+              'project_id': 'p', 'context_write': 'true'}
+    done = _rpc(_launch(folder, values), tmp_path)
+    replies = [json.loads(line) for line in done.stdout.splitlines() if line.strip()]
+    tools = [tool['name'] for reply in replies if reply.get('id') == 2 for tool in reply['result']['tools']]
+    assert {'canon.context.health', 'canon.context.query', 'canon.context.get'} <= set(tools), done.stderr
+    shutil.rmtree(folder / 'server' / 'src')
+    missing = _rpc(_launch(folder, values), tmp_path)
+    assert missing.returncode == 1
+    assert 'server code is missing from the plugin folder' in missing.stderr
+
+
+@checkout_only
+def test_plugin_folder_stays_inside_directory_file_limits():
+    files = [path for path in (ROOT / 'client-plugin').rglob('*')
+             if path.is_file() and '__pycache__' not in path.parts]
+    assert len(files) <= 512
+    images = {'.png', '.jpg', '.jpeg', '.gif', '.webp'}
+    assert [p.name for p in files if p.suffix not in images and p.stat().st_size >= 256 * 1024] == []

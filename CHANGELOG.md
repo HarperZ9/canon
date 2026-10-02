@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Fix.** The plugin folder now carries the server source at
+  `client-plugin/server/src/canon`, so a Claude plugin directory install, which
+  receives only that folder, starts. `python scripts/build_client_package.py
+  --sync-vendored` regenerates it from `src/canon`, and a test fails when the two
+  differ. The launcher no longer falls back to the repository's `src` and exits
+  with a clear message when the copy is missing.
+- **Change.** Each client tool description now says what the tool does and when
+  to call it. PRIVACY.md no longer points to a purge command the plugin lacks.
 - **Change.** The Claude plugin manifest carries the directory listing fields:
   display name, keywords, homepage, documentation, support, privacy and terms
   links, and a 1024 px icon at `client-plugin/.claude-plugin/icon.png`.

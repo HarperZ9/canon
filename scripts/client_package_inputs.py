@@ -8,6 +8,9 @@ import subprocess
 import tomllib
 
 
+VENDORED = 'client-plugin/server/src/'
+
+
 def git(root, *args):
     return subprocess.check_output(['git', *args], cwd=root, text=True).strip()
 
@@ -62,6 +65,8 @@ def inputs(root, mode):
     for directory, extensions in (('src/canon', {'.py'}), ('client-plugin', {'.py', '.md', '.json', '.png'}),
                                    ('scripts', {'.py', '.ps1', '.sh'})):
         files.update({f'{directory}/{name}': data for name, data in entries(root / directory, extensions).items()})
+    # The vendored server copy is derived from src/canon; the build reads src/canon itself.
+    files = {name: data for name, data in files.items() if not name.startswith(VENDORED)}
     for name in ('pyproject.toml', 'LICENSE', 'CHANGELOG.md'):
         files[name] = (root / name).read_bytes()
     for name in ('.claude-plugin/plugin.json', '.mcp.json'):
