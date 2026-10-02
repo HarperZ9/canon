@@ -24,7 +24,7 @@ Stored data persists until the owner removes it through a separate authorized wo
 
 **Files it writes.** With writes off, it writes no file. With writes on, it writes context you store into the database file you chose. While a write runs, SQLite keeps a temporary journal file next to the database (the database name plus `-journal`, or `-wal` and `-shm` in WAL mode). Stored context stays in the database until you remove it. The server keeps no other copy.
 
-**Environment variables and credentials.** Canon's own code reads no environment variables and no credentials. When the server reads its launch arguments, Python's argument parser reads the usual terminal and language settings: `COLUMNS`, `LINES`, `LANG`, `LANGUAGE`, `LC_ALL` and `LC_MESSAGES`. The `-I` flag makes Python ignore its own `PYTHON*` variables.
+**Environment variables and credentials.** Canon's own code reads no environment variables and no credentials. When the server reads its launch arguments, Python's argument parser reads the usual terminal and language settings: `COLUMNS`, `LINES`, `LANG`, `LANGUAGE`, `LC_ALL` and `LC_MESSAGES`. On Windows, Canon loads Python's `ctypes` module for its database file lock. In some Python releases, 3.13.14 among them, loading `ctypes` also reads `APPDATA`, `PYTHONUSERBASE` and `_PYTHON_PROJECT_BASE`; Canon does not use those values. The `-I` flag makes Python ignore its own `PYTHON*` variables.
 
 ## Retention and support
 
