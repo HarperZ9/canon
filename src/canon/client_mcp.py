@@ -10,11 +10,12 @@ import argparse
 from dataclasses import dataclass
 import json
 from pathlib import Path
+import sqlite3
 import sys
 
 from ._version import __version__
-from .client_mcp_store import ClientStore, checked_path
-from .context_migrate import compare_store_id
+from .client_mcp_store import ClientStore, SnapshotBusy, checked_path
+from .context_migrate import ContextStoreIdentityError, compare_store_id
 from .context_records import scope
 from .context_store import ContextStore
 from .workspace.scrub import scrub_value
@@ -57,6 +58,41 @@ _ANNOTATIONS = {
     "ingest": {"title": "Add a Canon context event", "readOnlyHint": False,
                "destructiveHint": False, "idempotentHint": False, "openWorldHint": False},
 }
+
+
+# Fixed, content-free refusal codes. A tool error carries a code and its hint,
+# never exception text, which can hold stored content, argument values or paths.
+_REFUSALS = {
+    "ARGUMENT_REFUSED": "unknown tool, or an unexpected, missing or mistyped argument",
+    "SCOPE_MISMATCH": "workspace_id or project_id differs from the launch binding",
+    "STORE_ID_MISMATCH": "expected_store_id differs from the bound database",
+    "STORE_BUSY": "a writer is committing to the database; retry",
+    "WRITE_NOT_GRANTED": "this launch is read-only; turn on Allow context writes and restart",
+}
+_FALLBACK = "context request refused or store unavailable"
+
+
+class Refusal(ValueError):
+    """A refusal whose message is one of the fixed codes in _REFUSALS."""
+
+    def __init__(self, code):
+        super().__init__(code)
+        self.code = code
+
+
+def refusal_payload(exc):
+    """The tool error body for exc: a fixed code and hint, or the generic fallback."""
+    if isinstance(exc, Refusal):
+        code = exc.code
+    elif isinstance(exc, ContextStoreIdentityError):
+        code = "STORE_ID_MISMATCH"
+    elif isinstance(exc, SnapshotBusy) or (
+            isinstance(exc, sqlite3.OperationalError) and str(exc) in ("database is locked",
+                                                                       "database is busy")):
+        code = "STORE_BUSY"
+    else:
+        return {"error": _FALLBACK}
+    return {"error": code, "hint": _REFUSALS[code]}
 
 
 @dataclass(frozen=True)
@@ -124,12 +160,14 @@ class ClientServer:
 
     def call(self, name, args):
         available = {tool["name"] for tool in self.tools()}
+        if name == "canon.context.ingest" and self.writer is None:
+            raise Refusal("WRITE_NOT_GRANTED")
         if not isinstance(name, str) or name not in available or not isinstance(args, dict):
-            raise ValueError("tool or arguments refused")
+            raise Refusal("ARGUMENT_REFUSED")
         operation = name.removeprefix("canon.context.")
         props, required = _SHAPES[operation]
         if set(args) - set(props) or set(required) - set(args):
-            raise ValueError("unexpected or missing arguments")
+            raise Refusal("ARGUMENT_REFUSED")
         _validate_types(args, props)
         if operation == "health":
             return {**self.reader.health(self.store_id), "context_write": self.config.context_write,
@@ -146,7 +184,7 @@ class ClientServer:
         for key in ("workspace_id", "project_id"):
             value = getattr(self.config, key)
             if key in clean and clean[key] != value:
-                raise ValueError("scope differs from launch binding")
+                raise Refusal("SCOPE_MISMATCH")
             clean[key] = value
         return clean
 
@@ -170,12 +208,12 @@ class ClientServer:
     def _tool_result(self, params):
         try:
             if not isinstance(params, dict) or set(params) - {"name", "arguments"}:
-                raise ValueError("invalid tool call")
+                raise Refusal("ARGUMENT_REFUSED")
             value = self.call(params.get("name"), params.get("arguments", {}))
             return {"content": [{"type": "text", "text": json.dumps(value)}], "isError": False}
-        except Exception:
-            # Exceptions can contain stored content, argument values or local paths.
-            value = {"error": "context request refused or store unavailable"}
+        except Exception as exc:
+            # Codes only: exception text can contain stored content, argument values or paths.
+            value = refusal_payload(exc)
             return {"content": [{"type": "text", "text": json.dumps(value)}], "isError": True}
 
 
@@ -184,9 +222,9 @@ def _validate_types(args, properties):
     for key, value in args.items():
         shape = properties[key]
         if type(value) is not types[shape["type"]]:
-            raise ValueError("argument type refused")
+            raise Refusal("ARGUMENT_REFUSED")
         if "minimum" in shape and not shape["minimum"] <= value <= shape["maximum"]:
-            raise ValueError("argument bounds refused")
+            raise Refusal("ARGUMENT_REFUSED")
 
 
 def _error(mid, code, message):
