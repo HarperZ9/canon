@@ -1,9 +1,20 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/HarperZ9/canon/main/docs/art/hero-dark.svg">
+  <img src="https://raw.githubusercontent.com/HarperZ9/canon/main/docs/art/hero-light.svg" alt="canon: One memory record, rendered into every model and tool's own file. Layered rings drawn in fine lines, each slightly deformed, tighten around a bright core." width="100%">
+</picture>
+
 # canon
+
+One memory record, rendered into every model and tool's own file.
+
+```
+python -m pip install flywheel-canon
+```
+
+
 
 One record for your memory bank and your personality, shared across every model
 and every tool.
-
-![canon: one memory record, rendered into every tool's own file. Own one region of the file. Leave every byte outside it alone.](https://raw.githubusercontent.com/HarperZ9/canon/main/docs/art/canon-header.svg)
 
 You keep the same working relationship whether you open Claude Code, Claude CLI,
 ChatGPT, Codex, or a web surface: the same authored voice, the same accumulated
