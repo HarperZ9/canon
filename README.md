@@ -11,7 +11,10 @@ One memory record, rendered into every model and tool's own file.
 python -m pip install flywheel-canon
 ```
 
-
+[![version: 0.6.0](https://raw.githubusercontent.com/HarperZ9/canon/main/docs/art/badges/version.svg)](https://pypi.org/project/flywheel-canon/)
+[![ci: passing on main, 2026-10-02](https://raw.githubusercontent.com/HarperZ9/canon/main/docs/art/badges/ci.svg)](https://github.com/HarperZ9/canon/actions/workflows/ci.yml)
+[![license: FSL-1.1-MIT](https://raw.githubusercontent.com/HarperZ9/canon/main/docs/art/badges/license.svg)](https://github.com/HarperZ9/canon/blob/main/LICENSE)
+![python: 3.11+](https://raw.githubusercontent.com/HarperZ9/canon/main/docs/art/badges/python.svg)
 
 One record for your memory bank and your personality, shared across every model
 and every tool.
