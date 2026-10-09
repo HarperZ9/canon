@@ -60,6 +60,51 @@ The [animated explainer](https://harperz9.github.io/repo-explainers/canon.html)
 walks through a small repository's focus and a decision with its rejected alternative, a secret refused before storage, the size-budgeted brief, a switch that writes it between canon's markers in AGENTS.md, and an edit inside that region turned into a proposal. Every value on it is output from this repository. Its
 source is [docs/explainer/index.html](https://github.com/HarperZ9/canon/blob/main/docs/explainer/index.html).
 
+## Watch
+
+No concept film fits this tool closely yet. The walkthrough below covers it in text, with real commands and output.
+
+Video walkthrough: coming with the next release.
+
+## Walkthrough
+
+Install it, run it once, then use the main feature. Each command below is real, and so is its output.
+
+1. **Install.** Install from PyPI. Python 3.11 or newer; no network call and no model.
+
+   ```text
+   $ python -m pip install flywheel-canon
+   $ cd your-repo
+   ```
+
+2. **First run: record the focus.** Tell canon what you are working on.
+
+   ```text
+   $ canon workspace focus --goal "Ship the JSON export" --area src/export
+   focus set: workspace-focus focus: Ship the JSON export
+   ```
+
+3. **Hand off to another agent.** Write a brief for the next agent from what canon holds.
+
+   ```text
+   $ canon handoff --to codex
+   # Resume brief: exporter
+   It holds what was recorded, not everything that happened in earlier sessions.
+   ## Focus
+   Goal: Ship the JSON export
+   ## Decisions
+   - Keep the CSV writer [accepted] (decision-2): Add JSON beside CSV
+     Why: Downstream scripts parse CSV
+     Rejected: Replace CSV. Reason: breaks three scripts
+   ```
+
+4. **Switch tools.** Write the same record into another tool's instruction file, between markers canon owns.
+
+   ```text
+   $ canon switch --to codex --create
+   Codex CLI: created AGENTS.md
+   ```
+
 ## Moving a project between models
 
 Switching a repository from one agent to another usually means explaining the
