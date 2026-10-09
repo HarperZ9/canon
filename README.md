@@ -54,6 +54,12 @@ stores and retrieves context without running a model or hosting inference.
   cross-provider transport. It adds the one record they share and the renderer
   that projects each surface.
 
+## See it work, step by step
+
+The [animated explainer](https://harperz9.github.io/repo-explainers/canon.html)
+walks through a small repository's focus and a decision with its rejected alternative, a secret refused before storage, the size-budgeted brief, a switch that writes it between canon's markers in AGENTS.md, and an edit inside that region turned into a proposal. Every value on it is output from this repository. Its
+source is [docs/explainer/index.html](https://github.com/HarperZ9/canon/blob/main/docs/explainer/index.html).
+
 ## Moving a project between models
 
 Switching a repository from one agent to another usually means explaining the
