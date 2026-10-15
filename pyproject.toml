@@ -24,7 +24,7 @@ classifiers = [
 dependencies = []
 
 [project.urls]
-Homepage = "https://harperz9.github.io/canon.html"
+Homepage = "https://github.com/HarperZ9/canon"
 Source = "https://github.com/HarperZ9/canon"
 Changelog = "https://github.com/HarperZ9/canon/blob/main/CHANGELOG.md"
 Issues = "https://github.com/HarperZ9/canon/issues"
