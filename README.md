@@ -1,40 +1,98 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/HarperZ9/canon/main/docs/art/hero-dark.svg">
-  <img src="https://raw.githubusercontent.com/HarperZ9/canon/main/docs/art/hero-light.svg" alt="canon: One memory record, rendered into every model and tool's own file. Layered rings drawn in fine lines, each slightly deformed, tighten around a bright core." width="100%">
+  <img src="https://raw.githubusercontent.com/HarperZ9/canon/main/docs/art/hero-light.svg" alt="canon: One local record of your agent instructions and project state, written into each coding agent's own file. Layered rings drawn in fine lines, each slightly deformed, tighten around a bright core." width="100%">
 </picture>
 
 # canon
 
-One memory record, rendered into every model and tool's own file.
+One local record of your agent instructions and project state, written into
+each coding agent's own file.
 
-```
+canon is for people who move one repository between coding agents: Claude Code,
+Codex CLI, Gemini CLI, GitHub Copilot and Cursor. You record what the project is
+doing, the open work, and each decision with the alternatives you dropped and
+why. canon keeps that as typed records on your machine and writes a resume brief
+into the file the next agent reads at startup (`CLAUDE.md`, `AGENTS.md`,
+`GEMINI.md`, `.github/copilot-instructions.md` or `.cursor/rules/canon.mdc`). It
+writes only between its own markers in that file. When you or an agent edit
+inside those markers, the next switch turns each edit into a proposal for you to
+accept or reject.
+
+It runs no model and makes no network call. Records live in `~/.canon/store`,
+outside the repository, and each project's records stay apart from every other
+project's.
+
+## Install and first run
+
+Python 3.11 or newer. No runtime dependencies.
+
+```bash
 python -m pip install flywheel-canon
+cd your-repo
+canon workspace focus --goal "Ship the JSON export" --area src/export
+canon workspace decide --title "Keep the CSV writer" --decision "Add JSON beside CSV" \
+    --context "Downstream scripts parse CSV" --reject "Replace CSV" "breaks three scripts"
+canon handoff --to codex
+canon switch --to codex --create
 ```
 
-[![version: 0.6.0](https://raw.githubusercontent.com/HarperZ9/canon/main/docs/art/badges/version.svg)](https://pypi.org/project/flywheel-canon/)
-[![ci: passing on main, 2026-10-02](https://raw.githubusercontent.com/HarperZ9/canon/main/docs/art/badges/ci.svg)](https://github.com/HarperZ9/canon/actions/workflows/ci.yml)
-![python: 3.11+](https://raw.githubusercontent.com/HarperZ9/canon/main/docs/art/badges/python.svg)
+The handoff prints the brief the next agent gets:
 
-One record for your memory bank and your personality, shared across every model
-and every tool.
+```text
+## Focus
+Goal: Ship the JSON export
+Branch: main
+Areas: src/export
 
-You keep the same working relationship whether you open Claude Code, Claude CLI,
-ChatGPT, Codex, or a web surface: the same authored voice, the same accumulated
-memory, the same decisions. Today that lives in a dozen files with a dozen
-shapes (`CLAUDE.md`, `AGENTS.md`, `SOUL.md`, `GEMINI.md`) plus per-tool memory
-stores that do not talk to each other. canon gives all of them one typed record
-to draw from and write back to, and renders each tool's file from that record.
+## Decisions
+- Keep the CSV writer [accepted] (decision-2): Add JSON beside CSV
+  Why: Downstream scripts parse CSV
+  Rejected: Replace CSV. Reason: breaks three scripts
+```
 
-When you move one repository from one agent to the next, canon also carries
-that project's working state (focus, open work, decisions with the alternatives
-you dropped, environment quirks) and keeps it apart from every other project.
+The switch creates `AGENTS.md` with that brief between
+`<!-- canon:begin scope=workspace -->` and `<!-- canon:end -->`, and prints
+`Codex CLI: created AGENTS.md`. To pick up where a Claude Code or Codex session
+left off, `canon workspace import` proposes records from its transcript, and
+nothing reaches a brief until you accept it.
 
-## What it does
+`canon mcp` serves six read-only tools over MCP on stdio (status, doctor, blocks,
+render, validate, check). Nothing on that server writes a file.
+
+## How it compares
+
+[Ruler](https://github.com/intellectronica/ruler) and
+[rulesync](https://github.com/dyoshikawa/rulesync) keep one set of rule files and
+generate each agent's configuration from it. canon covers that case and adds
+project state: focus, work items, decisions with their rejected alternatives,
+and constraints, held as records with a source hash on each. It fits the brief to
+each agent's size budget and names what it left out. It refuses to store
+secret-shaped values in workspace records.
+
+[Mem0](https://github.com/mem0ai/mem0) and
+[Basic Memory](https://github.com/basicmachines-co/basic-memory) are memory
+services an agent queries while it works. canon writes the file the agent reads
+before it starts, so it works with agents that have no memory integration.
+
+## Limits
+
+- The session importers use fixed patterns, and the Claude Code and Codex
+  transcript formats they read are not stable interfaces.
+- The secret scrubber finds secrets by shape. A secret with no recognisable shape
+  gets through.
+- A brief holds only what was recorded or imported, never the whole history of
+  earlier sessions.
+- The store is plaintext on disk. Purged text can stay in freed disk space until
+  it is reused.
+- No agent file can load a block for some files only. canon writes such a block
+  for every file with an `Applies to:` line and declares that downgrade.
+
+## The record
 
 **Local client packages.** The [client package guide](https://github.com/HarperZ9/canon/blob/main/docs/client-packages.md)
 connects an explicit context database to Claude Code, Codex or another local stdio
-MCP client. Reads are the default; storing new context requires an operator launch
-grant. Windows packages include Python. Your client supplies the model; Canon
+MCP client. Reads are the default; storing new context needs a write permission
+you grant at launch. Windows packages include Python. Your client supplies the model; Canon
 stores and retrieves context without running a model or hosting inference.
 
 - **One envelope, eight kinds.** An authored personality block, a raw or
@@ -48,55 +106,12 @@ stores and retrieves context without running a model or hosting inference.
 - **Deterministic by construction.** Ordering uses a clock-free ordinal, so a
   rebuild from the same records is byte-identical. The wall clock is kept only
   as a non-authoritative convenience.
-- **An assembly, not a rewrite.** canon aims at proven engines rather than
-  replacing them: a memory fact-engine, an authored-block store, and a
-  cross-provider transport. It adds the one record they share and the renderer
-  that projects each surface.
 
 ## See it work, step by step
 
 The [animated explainer](https://harperz9.github.io/repo-explainers/canon.html)
 walks through a small repository's focus and a decision with its rejected alternative, a secret refused before storage, the size-budgeted brief, a switch that writes it between canon's markers in AGENTS.md, and an edit inside that region turned into a proposal. Every value on it is output from this repository. Its
 source is [docs/explainer/index.html](https://github.com/HarperZ9/canon/blob/main/docs/explainer/index.html).
-
-## Walkthrough
-
-Install it, run it once, then use the main feature. Each command below is real, and so is its output.
-
-1. **Install.** Install from PyPI. Python 3.11 or newer; no network call and no model.
-
-   ```text
-   $ python -m pip install flywheel-canon
-   $ cd your-repo
-   ```
-
-2. **First run: record the focus.** Tell canon what you are working on.
-
-   ```text
-   $ canon workspace focus --goal "Ship the JSON export" --area src/export
-   focus set: workspace-focus focus: Ship the JSON export
-   ```
-
-3. **Hand off to another agent.** Write a brief for the next agent from what canon holds.
-
-   ```text
-   $ canon handoff --to codex
-   # Resume brief: exporter
-   It holds what was recorded, not everything that happened in earlier sessions.
-   ## Focus
-   Goal: Ship the JSON export
-   ## Decisions
-   - Keep the CSV writer [accepted] (decision-2): Add JSON beside CSV
-     Why: Downstream scripts parse CSV
-     Rejected: Replace CSV. Reason: breaks three scripts
-   ```
-
-4. **Switch tools.** Write the same record into another tool's instruction file, between markers canon owns.
-
-   ```text
-   $ canon switch --to codex --create
-   Codex CLI: created AGENTS.md
-   ```
 
 ## Moving a project between models
 
@@ -188,7 +203,7 @@ in advance. Anything else fails the gate rather than logging a warning.
 Every count is asserted against the module that defines it in
 [`tests/test_repo_art.py`](https://github.com/HarperZ9/canon/blob/main/tests/test_repo_art.py).
 
-## Status
+## What is built
 
 F0 is the record of record: the canonical schema, its validator, and the
 per-scope layering. F1 adds the storage seam: a `MemoryBackend` protocol with
