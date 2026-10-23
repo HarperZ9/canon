@@ -21,8 +21,9 @@ Canon tools to another client using the model you choose there.
 
 Download assets from the [versioned releases](https://github.com/HarperZ9/canon/releases)
 and verify the supplied SHA256SUMS before extraction. Keep the complete package
-together. Local MCP compatibility does not establish admission to a marketplace
-or availability in a browser-only ChatGPT or Claude session.
+together. The package runs as a local MCP server for desktop and CLI clients;
+browser-only ChatGPT and Claude sessions and app marketplaces need their own
+listing.
 
 ## Launch and permissions
 
@@ -40,29 +41,29 @@ the placeholders with your own approved values:
 For the source package, use an absolute Python executable and pass
 `-I -S -B <absolute-package-directory>/server/serve.py` before those arguments.
 For an installed Python package, `canon-client` or `python -m canon.client_mcp` accepts the same
-binding arguments. No command changes your client's settings automatically.
+binding arguments. You edit your client's settings yourself; canon leaves them as
+they are.
 
 The default profile offers context health, query and get. It reads an existing
-Canon context database into an audited in-memory snapshot without initializing or
-migrating the on-disk store. A launch with
-`--context-write=true` or `--allow-context-write` adds ingest and may create a
-database. Change that setting outside the conversation and restart the server.
-A tool call, retrieved instruction or ambient legacy purge setting cannot enable
-the grant. Workspace and project identifiers are scope selectors, not user
-authentication.
+Canon context database into an audited in-memory snapshot and leaves the on-disk
+store as it is. A launch with `--context-write=true` or `--allow-context-write`
+adds ingest and may create a database. Writes are a launch setting: change it in
+the client's server configuration and restart the server. Tool calls, retrieved
+instructions and the legacy purge setting leave it as launched. Workspace and
+project identifiers select scope; they carry no user authentication.
 
-This profile does not expose purge, automatic client capture, export into
-instruction files, or reconcile. The existing Canon CLI and legacy MCP entrypoints
-retain their separate behavior. Use the documented CLI workflow when you need
-those actions; installing this client package does not enable them.
+Purge, automatic client capture, export into instruction files and reconcile run
+from the Canon CLI and the legacy MCP entrypoints, which keep their own behavior.
+This client package offers the tools listed above.
 
 ## Privacy and troubleshooting
 
-Canon runs locally and includes no model, hosted endpoint or publisher inference
-compute. A client may send returned context to its configured model provider.
-Review that client's data policy before connecting a private context store.
-Context ingest and retrieval retain the redaction and provenance protections from
-0.4.2; redaction is pattern based and cannot identify every sensitive fact.
+Canon runs on your machine as a store and retriever; your client supplies the
+model. A client may send returned context to its configured model provider, so
+review that client's data policy before connecting a private context store.
+Context ingest and retrieval keep the redaction and provenance protections from
+0.4.2. Redaction matches patterns, so a sensitive fact in ordinary words passes
+through.
 
 The selected database remains under the operating system's file permissions.
 Restrict it to your account. Launch grants constrain this adapter's tools; they
@@ -111,5 +112,5 @@ them does not measure recall quality, establish adoption or prove every client
 can install the package.
 
 Report reproducible setup issues through [Canon issues](https://github.com/HarperZ9/canon/issues).
-Include the version, platform and a synthetic reproduction. Do not attach private
-databases, credentials or conversation contents.
+Include the version, platform and a synthetic reproduction, and keep private
+databases, credentials and conversation contents out of the report.
