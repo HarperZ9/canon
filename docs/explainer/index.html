@@ -175,9 +175,9 @@ ol.walkthrough p{margin:0 0 .3rem;max-width:44rem}
   </div>
   <ul class="uses">
     <li><b>Project state, bound to the project</b>Focus, work items, decisions and constraints are records that name their project. A read that finds another project's record fails.</li>
-    <li><b>Decisions with their alternatives</b>A dropped alternative cannot be recorded without its reason.</li>
+    <li><b>Decisions with their alternatives</b>Each dropped alternative is stored with the reason it was dropped.</li>
     <li><b>Secrets stay out</b>Keys, tokens and secret-named assignments are redacted, and a record that still looks like one is refused.</li>
-    <li><b>Writes it owns, nothing more</b>canon rewrites only the span between its markers, in a fixed list of seven paths.</li>
+    <li><b>Writes it owns</b>canon rewrites the span between its own markers, in a fixed list of seven paths, and leaves the rest of each file byte for byte.</li>
   </ul>
   <p class="src">Source: <a href="https://github.com/HarperZ9/canon/blob/802165f61e73640afee0fe59e2e13957f7039843/README.md">README.md</a> at 802165f (release 0.6.0)</p>
 </section>
@@ -206,23 +206,23 @@ ol.walkthrough p{margin:0 0 .3rem;max-width:44rem}
       <li class="step" tabindex="-1" data-scene="k0" data-state="s"><div class="card">
         <span class="num">01</span><h3>Record the focus</h3>
         <p>The project is shipping a JSON export, working in <code>src/export</code>. <code>canon workspace focus</code> stores that as a focus record for this project.</p>
-        <p>The project id comes from the repository: here from <code>git config canon.project exporter</code>. Without one it comes from the remote, or from a nonce canon keeps in <code>.git</code>.</p>
+        <p>The project id comes from the repository: here from <code>git config canon.project exporter</code>. If that is unset it comes from the remote, or from a nonce canon keeps in <code>.git</code>.</p>
         <p class="src">Source: README.md, "Moving a project between models"; <a href="https://github.com/HarperZ9/canon/blob/802165f61e73640afee0fe59e2e13957f7039843/src/canon/cli_workspace.py">src/canon/cli_workspace.py</a></p>
       </div></li>
       <li class="step" tabindex="-1" data-scene="k1" data-state="s"><div class="card">
         <span class="num">02</span><h3>Record a decision with what you dropped</h3>
         <p>The team keeps the CSV writer and adds JSON beside it, because downstream scripts parse CSV. The alternative, replacing CSV, was dropped because it breaks three scripts.</p>
-        <p><code>--reject</code> takes the alternative and its reason together. Give one without the other and the command refuses.</p>
+        <p><code>--reject</code> takes the alternative and its reason together, and refuses a call that is missing either.</p>
         <p class="src">Source: README.md, "Moving a project between models"</p>
       </div></li>
       <li class="step" tabindex="-1" data-scene="k2" data-state="s"><div class="card">
         <span class="num">03</span><h3>A secret is refused before it is stored</h3>
-        <p>Someone records a decision whose text includes <code>api_key=sk-live-...</code>. The workspace store checks every record for secret shapes and refuses this one, naming the shape it found. Nothing is written.</p>
+        <p>Someone records a decision whose text includes <code>api_key=sk-live-...</code>. The workspace store checks every record for secret shapes and refuses this one, naming the shape it found. The store stays as it was.</p>
         <p class="src">Source: README.md, "Secrets stay out of workspace records"; <a href="https://github.com/HarperZ9/canon/blob/802165f61e73640afee0fe59e2e13957f7039843/src/canon/workspace">src/canon/workspace</a></p>
       </div></li>
       <li class="step" tabindex="-1" data-scene="k3" data-state="s"><div class="card">
         <span class="num">04</span><h3>A brief for the next agent</h3>
-        <p><code>canon handoff --to codex</code> lists focus, open work, recent decisions and constraints, in that order, inside the target's size budget. It says plainly that it holds what was recorded, not everything that happened in earlier sessions.</p>
+        <p><code>canon handoff --to codex</code> lists focus, open work, recent decisions and constraints, in that order, inside the target's size budget. The brief states that it holds what was recorded or imported from earlier sessions.</p>
         <p class="src">Source: <a href="https://github.com/HarperZ9/canon/blob/802165f61e73640afee0fe59e2e13957f7039843/src/canon/cli_handoff.py">src/canon/cli_handoff.py</a></p>
       </div></li>
       <li class="step" tabindex="-1" data-scene="k4" data-state="s"><div class="card">
@@ -232,7 +232,7 @@ ol.walkthrough p{margin:0 0 .3rem;max-width:44rem}
       </div></li>
       <li class="step" tabindex="-1" data-scene="k5" data-state="s"><div class="card">
         <span class="num">06</span><h3>An edit inside the region becomes a proposal</h3>
-        <p>An agent changes the goal in <code>AGENTS.md</code> to an XML export. The next switch does not overwrite that edit. It turns it into a proposal and stops until you accept or reject it.</p>
+        <p>An agent changes the goal in <code>AGENTS.md</code> to an XML export. The next switch keeps that edit, turns it into a proposal and waits until you accept or reject it.</p>
         <p class="src">Source: README.md, "Switch in one command"</p>
       </div></li>
     </ol>
@@ -243,7 +243,7 @@ ol.walkthrough p{margin:0 0 .3rem;max-width:44rem}
   <h2 id="walkthrough">Walkthrough</h2>
   <p class="measure">Install it, run it once, then use the main feature. Each command below is real, and so is its output.</p>
   <ol class="walkthrough">
-    <li><h3>Install</h3><p>Install from PyPI. Python 3.11 or newer; no network call and no model.</p>
+    <li><h3>Install</h3><p>Install from PyPI. canon needs Python 3.11 or newer and runs offline.</p>
 <pre class="cmd"><code>$ python -m pip install flywheel-canon
 $ cd your-repo</code></pre></li>
     <li><h3>First run: record the focus</h3><p>Tell canon what you are working on.</p>
@@ -269,11 +269,11 @@ Goal: Ship the JSON export
 <section class="block wrap" aria-labelledby="limits">
   <h2 id="limits">What it does not do</h2>
   <ul class="limits">
-    <li>The session importers match fixed patterns with no model in the loop, and the session formats they read are not stable interfaces.</li>
+    <li>The session importers match fixed text patterns, and the session formats they read belong to their vendors and can change.</li>
     <li>The secret scrubber recognises secrets by shape. A secret in an unfamiliar shape can pass.</li>
-    <li>A brief knows only what was recorded or imported. It is not a transcript of earlier sessions.</li>
-    <li>No target file can load a block for some files only, so a block scoped to certain files is written for all of them with an Applies to line.</li>
-    <li>canon stores and retrieves context. It runs no model and hosts no inference; your client supplies the model.</li>
+    <li>A brief holds what was recorded or imported. For the full history, read the session transcripts.</li>
+    <li>Target files load every block for every file, so a block scoped to certain files is written with an Applies to line the model reads as advice.</li>
+    <li>canon stores and retrieves context; your client supplies the model.</li>
   </ul>
   <p class="src">Source: README.md at 802165f, "Moving a project between models" and "What it does"</p>
 </section>
@@ -281,9 +281,9 @@ Goal: Ship the JSON export
 <section class="block wrap recall" aria-labelledby="recall">
   <h2 id="recall">Check what stuck</h2>
   <p class="measure">Answer each one in your head before you open it.</p>
-  <details><summary>What does canon require along with a rejected alternative?</summary><p>Its reason. --reject takes both, and one without the other is refused.</p></details>
+  <details><summary>What does canon require along with a rejected alternative?</summary><p>Its reason. --reject takes both and refuses a call missing either.</p></details>
   <details><summary>A decision's text contains api_key=sk-live-... . What is stored?</summary><p>Nothing. The store names the secret shape it found and refuses the record.</p></details>
-  <details><summary>Which part of AGENTS.md does canon rewrite?</summary><p>Only the span between its begin and end markers. Everything outside is left byte for byte.</p></details>
+  <details><summary>Which part of AGENTS.md does canon rewrite?</summary><p>The span between its begin and end markers. Everything outside stays byte for byte.</p></details>
   <details><summary>An agent edits the goal inside canon's region. What does the next switch do?</summary><p>It turns the edit into a proposal and stops, exit 5, until you accept or reject it.</p></details>
 </section>
 </main>

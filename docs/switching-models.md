@@ -27,7 +27,7 @@ To run the latest `main` instead, install from a checkout of the repository:
 python -m pip install -e .
 ```
 
-canon has no runtime dependencies and needs Python 3.11 or newer.
+canon needs Python 3.11 or newer and the standard library.
 
 ## One project, one store
 
@@ -37,15 +37,14 @@ canon workspace id
 ```
 
 canon derives the project's id from its git remote, so two clones of one
-repository share their records and a fork has its own. A repository with no
-remote is identified by a random value canon keeps in its `.git` directory.
-Records live outside the repository, in `~/.canon/store` unless `CANON_STORE`
-or `--store` points elsewhere.
+repository share their records and a fork has its own. A local-only repository
+gets a random value canon keeps in its `.git` directory. Records live outside
+the repository, in `~/.canon/store`, or wherever `CANON_STORE` or `--store`
+points.
 
-Two different apps started by cloning one starter repository keep its remote,
-so canon cannot tell them apart. The first command you run in a checkout the
-project has not seen prints a notice. If it is a different project, give it
-its own name:
+Two apps cloned from one starter repository share its remote, and with it one
+project id. The first command you run in a new checkout prints a notice. If the
+checkout is a different project, give it its own name:
 
 ```bash
 git config canon.project chat-app
@@ -82,8 +81,9 @@ canon workspace set-status task-2 done
 canon workspace list
 ```
 
-A decision's rejected alternatives cannot be recorded without a reason, because
-an option with no recorded reason is the one the next agent tries again.
+Each rejected alternative is recorded with its reason, and the command refuses
+one that arrives without it. The reason is what stops the next agent from trying
+that option again.
 
 ## Or import what the last session knew
 
@@ -120,10 +120,11 @@ more letters and digits that is not a word followed by a number, such as
 port followed by a path, a query or a fragment stay.
 
 Each importer lists what it drops (thinking blocks, tool output, system
-entries and more) and counts it in its report. A session with content the
-importer has not seen is refused until you declare that drop with
-`--drop-type`, so a change in a tool's format cannot lose data quietly. The
-refusal prints the flag to add, for example `--drop-type brand-new-entry`. A
+entries and more) and counts it in its report. A session with an entry type the
+importer has never seen is refused until you declare that drop with
+`--drop-type`, so a change in a tool's format shows up as a refusal you can
+read. The refusal prints the flag to add, for example
+`--drop-type brand-new-entry`. A
 session that names a different repository is refused unless you pass
 `--accept-foreign-source`.
 
@@ -178,19 +179,19 @@ refuses a switch to Codex while an `AGENTS.override.md` sits beside it, because
 Codex would read the override instead. `--receipt FILE` writes the list of
 every record the brief left out.
 
-If you or an agent edit inside canon's region, the next `switch` does not
-overwrite the edit. Each edit becomes a proposal and the switch waits until
-you accept or reject it. `canon workspace pull --from claude-code` reads the
-edits back without switching.
+If you or an agent edit inside canon's region, the next `switch` keeps the
+edit. Each edit becomes a proposal and the switch waits until you accept or
+reject it. `canon workspace pull --from claude-code` reads the edits back and
+leaves the target files as they are.
 
-## What canon does not do
+## Limits
 
-- The importers use fixed text patterns, not a model. A decision phrased
-  another way is not proposed, and a proposal is a candidate, not a fact.
-- Neither session format is a stable public interface. The importers were
-  checked against public sources on 2026-09-23 and refuse what they do not
-  recognise rather than guess. Gemini CLI, Cursor, ChatGPT and Claude web
-  histories have no importer yet.
+- The importers match fixed text patterns. A decision phrased another way is
+  missed, and each proposal waits for you to accept it.
+- Both session formats belong to their vendors and can change. The importers
+  were checked against public sources on 2026-09-23 and refuse entries they fail
+  to parse. Importers cover Claude Code and Codex; Gemini CLI, Cursor, ChatGPT
+  and Claude web histories are unsupported.
 - The scrubber recognises secrets by their shape. A secret with no recognisable
   shape passes through, and email addresses are not redacted. After `Bearer`,
   `Authorization:` or `X-API-Key:`, a word, a number, a date or a path on the
@@ -212,16 +213,16 @@ edits back without switching.
   (`a8f3k2j9x7m1`, a hex digest), or that mix both cases with `+`, `/` or
   `=`. An identifier such as `kv-prod-eastus2` or `release-2026-10` is left
   alone, and so is a random value whose digits all come at the end.
-- None of the instruction files can load a rule for some files only. A block
-  scoped to files with `applies_to` is written for every file, with an
-  `Applies to:` line the model reads as advice.
+- Instruction files load every rule for every file. A block scoped with
+  `applies_to` is written with an `Applies to:` line, and the model reads that
+  line as advice.
 - The brief budgets are canon's defaults; `--budget-bytes` and `--budget-lines`
   override them. The host file limits come from each tool's public
   documentation and can change. For Codex, canon reads `project_doc_max_bytes`
   from `config.toml` where Codex reads it (under `CODEX_HOME` when that is set,
   else under `~/.codex`), so a limit you raised there is the one canon refuses
   at, and the refusal names the setting.
-- The store trusts the local filesystem. Isolation keeps projects from mixing;
-  it does not defend against someone who can write the store directly.
-- The brief shows what was recorded or imported. It does not know about work in
-  a session nobody recorded.
+- The store trusts the local filesystem. Isolation keeps projects from mixing,
+  and anyone who can write the store directly can change it.
+- The brief shows what was recorded or imported. Work from an unrecorded
+  session is missing from it.

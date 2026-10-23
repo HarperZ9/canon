@@ -20,16 +20,16 @@ key, or broken chain is refused rather than searched as if it were intact.
 Each context record canon 0.4.0 or later writes has a salted commitment as its
 payload hash:
 the salt is stored beside the record and deleted with it, so after a purge the
-audit table no longer confirms what the record held. Records written by 0.3.0
-keep a plain sha256 of the envelope. A purge appends an audit row and a
-tombstone for every record it removes, and a row that reappears under a purged
-key without a new put fails the check.
+audit table holds a commitment that can no longer be opened. Records written by
+0.3.0 keep a plain sha256 of the envelope. A purge appends an audit row and a
+tombstone for every record it removes. A row that reappears under a purged key
+fails the check unless a new put wrote it.
 
-The database may hold only the tables canon creates, SQLite's own sequence and
-statistics tables, and the indexes SQLite makes for their keys. A trigger,
-view, index or table from anywhere else fails the check before any read, write
-or purge, because a trigger could copy each deleted row where a purge does not
-look.
+The database holds the tables canon creates, SQLite's own sequence and
+statistics tables, and the indexes SQLite makes for their keys. Any other
+trigger, view, index or table fails the check before a read, write or purge
+starts. The check exists because a trigger could copy each deleted row to a
+table the purge leaves alone.
 
 The context MCP server exposes five tools:
 
@@ -53,11 +53,12 @@ unless the prompt it names is live in the same workspace and project.
 
 Every query response includes coverage fields and a `does_not_prove` list.
 `found_in_searched_sources` means the bounded searched records matched the query.
-`not_found_in_searched_sources` means those records did not match. It does not
-mean the topic was never discussed. Pending or unextracted attachments are
-returned separately so the caller can see the coverage gap. Recorded transcript
-paths are counted in `coverage.transcript_locators_not_listed` and not listed,
-since canon never reads a transcript.
+`not_found_in_searched_sources` means those records did not match; the topic
+may still live in a client that captured elsewhere. Pending or unextracted
+attachments are returned separately so the caller can see the coverage gap.
+Recorded transcript paths are counted in
+`coverage.transcript_locators_not_listed`, because canon stores a transcript's
+path and leaves the transcript itself unread.
 
 What `canon.context.query`, `canon.context.get` and the capture hook return
 enters the calling model's context. With a hosted provider that text leaves
@@ -94,14 +95,14 @@ stable prompt id is available, the adapter records the delivery as an
 unidentified event and reports that duplicate retry idempotence is unsupported
 for that delivery.
 
-The hook reads one JSON object from stdin and writes hook JSON to stdout. It does
-not call provider APIs, dereference links, open attachment paths, or read a
-transcript file. Transcript paths are stored as locators only, and the context
-the hook returns never lists them.
+The hook reads one JSON object from stdin and writes hook JSON to stdout. That
+object is all it reads: provider APIs, links, attachment paths and transcript
+files stay untouched. A transcript path is stored as a locator, and the context
+the hook returns counts locators in place of listing them.
 
-`container-id` is metadata for the captured event and the returned context
-header. It is not an access-control boundary, isolation primitive, or proof that
-the client saw every message in that container.
+`container-id` is a label for the captured event and the returned context
+header. Access and isolation come from the database path, workspace id and
+project id.
 
 ## Purging and retention
 
@@ -132,16 +133,15 @@ capture; the plan prints each event's ordinal.
 
 How the plan is confirmed:
 
-- `--dry-run` prints the plan and its digest (`plan sha256:...`) and deletes
-  nothing.
-- `--confirm-plan <digest>` applies that plan only. If anything the plan
+- `--dry-run` prints the plan and its digest (`plan sha256:...`) and leaves
+  the store as it is.
+- `--confirm-plan <digest>` applies exactly that plan. If anything the plan
   covers changed since the dry run, such as a new event captured under
-  `--all`, the command refuses the plan as stale and deletes nothing.
-- `--yes` prints the plan it computes when it runs and applies that plan
-  without asking. It applies whatever matches at that moment, which can be
-  more than an earlier dry run showed.
-- With none of these the command prints the plan and applies it only when you
-  type `purge`.
+  `--all`, the command refuses the plan as stale and the store stays as it is.
+- `--yes` computes the plan when it runs, prints it and applies it at once. It
+  applies whatever matches at that moment, which can be more than an earlier
+  dry run showed.
+- Run bare, the command prints the plan and waits for you to type `purge`.
 
 The plan printed to the terminal shows the opening words of each event after
 the secret scrubber has run over them. `--json` output leaves those previews
@@ -151,17 +151,17 @@ The command exits with a failure code, and `--json` output says `ok: false`
 with the report under `data`, when the purge left residue in the database
 files (`residue_found`), when its file scrub did not finish
 (`scrub_incomplete`), or when the audit chain does not verify afterwards
-(`audit_failed`). The report's own `status` says the same over MCP; only a
-purge with a verifying chain, no residue and a finished scrub is `purged`. A
-file that is not a canon context store is refused as `store_invalid` before
-anything writes to it. A dry run succeeds while a scrub is pending, and it
-reads without taking a write lock, so another reader does not block it. An apply
-waits up to 10 seconds for readers to let go and then refuses as
-`store_busy`, having changed nothing.
+(`audit_failed`). The report's own `status` says the same over MCP. `purged`
+means the chain verifies, the residue check came back clean and the scrub
+finished. A file that is not a canon context store is refused as
+`store_invalid` before any write. A dry run succeeds while a scrub is pending
+and reads without a write lock, so other readers keep working. An apply waits
+up to 10 seconds for readers to let go, then refuses as `store_busy` with the
+store unchanged.
 
-After a purge nothing reads the records back, and the audit chain still
-verifies. The report says what canon could not remove from its own files and
-what it cannot reach at all:
+After a purge, queries and gets stop returning the records and the audit chain
+still verifies. The report lists what may remain in canon's files and what sits
+outside them:
 
 - The database is plaintext (decision D-7). After the rows are gone, VACUUM
   rebuilds the database file without them, and the report says whether it ran
@@ -213,25 +213,25 @@ set `keep_responses` to keep answers. A policy file looks like this:
 }
 ```
 
-`retain_content_hash` must be false, because a context tombstone keeps no
-content hash. `purge-derived` needs `"derived_stores": ["sqlite"]`.
+Set `retain_content_hash` to false: a context tombstone holds ids and counts
+and drops the content hash. `purge-derived` needs `"derived_stores": ["sqlite"]`.
 
 Over MCP, `canon.context.purge` takes the same selection as arguments. A call
-without `confirm_plan_sha256` returns the plan and deletes nothing. The model
-that asked for a plan can send its digest straight back, so by default the
-server returns plans only, and the owner applies one with
+returns the plan and its digest. By default the server stops there, because the
+model that asked for a plan could send its digest straight back, and the owner
+applies the plan from a terminal with
 `canon context purge --confirm-plan <digest>`. When the server was started with
 `CANON_CONTEXT_MCP_PURGE=apply`, by the owner or by any process that could set
 that variable, a second call carrying the plan's digest
 applies exactly that plan, and a plan the store has moved past is refused as
-stale. Plans and reports over MCP carry ids, counts and digests, never record
-text or paths. Query excerpts and get results pass through the secret scrubber
+stale. Plans and reports over MCP carry ids, counts and digests; record text and
+paths stay in the store. Query excerpts and get results pass through the secret scrubber
 before they are returned.
 
-Every plan and report says `presence: none`. Canon does not check that the
-owner, rather than an agent, confirmed a plan: any process that can reach the
-command or an apply-enabled server, agents included, can apply a purge. A
-harness that exposes this tool should require an owner's approval for it.
+Every plan and report says `presence: none`: canon leaves unchecked whether a
+person or an agent confirmed the plan. Any process that can reach the command
+or an apply-enabled server, agents included, can apply a purge, so a harness
+that exposes this tool should ask the owner to approve each call.
 
 The first capture or purge this version writes raises the store's identity
 version to 2 (`project-docs/CONTEXT-STORE-IDENTITY.md`). Canon 0.3.0 and older
@@ -248,24 +248,27 @@ the matching command flag. Clients that should share context must use the same
 database and the same workspace/project/container identifiers.
 
 This is a local trusted-client store. A process that can use the configured
-database path can submit, query and purge context for the scopes it names. Do
-not point untrusted clients at the same database without an outer
-access-control boundary.
+database path can submit, query and purge context for the scopes it names. Give
+an untrusted client its own database, or put an access-control layer in front
+of a shared one.
 
 The database is plaintext on disk (decision D-7 in
-`project-docs/F1-DECISIONS.md`). File permissions and disk encryption are its
-only protection, and canon sets no file permissions of its own. On Windows the
-database, its journal and its WAL inherit the access rules of their folder, so
-keep them in a folder only your account can read; `canon.context.health`
-reports `file_access: not_checked` there, since canon does not read ACLs. On
-Linux and macOS SQLite creates each file with the process umask applied, which
-commonly leaves it readable by other accounts whatever the folder allows. Set
-`umask 077` before the first capture, or run `chmod 600` on the database and
-its `-journal`, `-wal` and `-shm` files. Health reports `owner_only` only when
-the database grants nothing to group or other and its folder is not writable
-by group or other, and `shared` otherwise. The path to encryption at rest is a
-cipher-wrapper backend that encrypts each envelope on write and decrypts it on
-read; it is not built.
+`project-docs/F1-DECISIONS.md`). File permissions and disk encryption protect
+it, and canon leaves file permissions to you:
+
+- **Windows:** the database, its journal and its WAL inherit the access rules of
+  their folder. Keep them in a folder your account alone can read.
+  `canon.context.health` reports `file_access: not_checked` here, since canon
+  leaves ACLs unread.
+- **Linux and macOS:** SQLite creates each file with the process umask, which
+  commonly makes it readable by other accounts. Set `umask 077` before the
+  first capture, or run `chmod 600` on the database and its `-journal`, `-wal`
+  and `-shm` files. Health reports `owner_only` when the database grants
+  nothing to group or other and its folder is writable by the owner alone, and
+  `shared` otherwise.
+
+Encryption at rest would come from a cipher-wrapper backend that encrypts each
+envelope on write and decrypts it on read. That backend is unbuilt.
 
 ## Media, links, and source state
 
@@ -285,16 +288,15 @@ the extracted text, and any interpretation as separate fields.
 
 ## Current limitations
 
-- Search is deterministic keyword overlap, not semantic retrieval.
+- Search is deterministic keyword overlap.
 - Historical completeness is unknown unless all relevant clients have been
   configured to capture into the same database.
-- Supersession and freshness checks are not implemented in the context query
-  result, including for opt-in related-event sidecars.
-- `container-id` is descriptive metadata. It does not prove full-container
-  capture and does not authorize a client.
+- The context query result returns every match as current, including
+  opt-in related-event sidecars; supersession and freshness checks are unbuilt.
+- `container-id` is a descriptive label (see above).
 - The hook captures prompt events, and answer events when response capture is
-  on (`docs/client-capture.md`). It does not capture tool calls or reasoning,
-  and it does not provide universal native interception for ChatGPT, Codex,
-  Claude, Flywheel, browsers, editors, or other apps.
-- mneme and Index are natural future integrations for richer recall and source
-  envelopes, but they are not native dependencies of this slice.
+  on (`docs/client-capture.md`). Tool calls and reasoning stay out. Capture
+  covers clients you configure with the hook; other apps need their own
+  adapter.
+- canon runs on its own. mneme and Index are candidate integrations for richer
+  recall and source envelopes.
