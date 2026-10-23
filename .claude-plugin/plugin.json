@@ -15,7 +15,7 @@
     "local-first",
     "retrieval"
   ],
-  "license": "FSL-1.1-MIT",
+  "license": "AGPL-3.0-only",
   "name": "canon-local",
   "privacyPolicyUrl": "https://harperz9.github.io/plugins/canon/privacy.html",
   "repository": "https://github.com/HarperZ9/canon",

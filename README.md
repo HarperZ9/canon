@@ -13,7 +13,6 @@ python -m pip install flywheel-canon
 
 [![version: 0.6.0](https://raw.githubusercontent.com/HarperZ9/canon/main/docs/art/badges/version.svg)](https://pypi.org/project/flywheel-canon/)
 [![ci: passing on main, 2026-10-02](https://raw.githubusercontent.com/HarperZ9/canon/main/docs/art/badges/ci.svg)](https://github.com/HarperZ9/canon/actions/workflows/ci.yml)
-[![license: FSL-1.1-MIT](https://raw.githubusercontent.com/HarperZ9/canon/main/docs/art/badges/license.svg)](https://github.com/HarperZ9/canon/blob/main/LICENSE)
 ![python: 3.11+](https://raw.githubusercontent.com/HarperZ9/canon/main/docs/art/badges/python.svg)
 
 One record for your memory bank and your personality, shared across every model
@@ -381,6 +380,13 @@ gates.
 
 ## License
 
-FSL-1.1-MIT. Functional Source License, source-available now for any purpose
-other than a competing product, and it converts to the MIT license two years
-after each version is released. See [`LICENSE`](https://github.com/HarperZ9/canon/blob/main/LICENSE).
+Canon's code is under the GNU Affero General Public License, version 3 only
+(AGPL-3.0-only). See [`LICENSE`](https://github.com/HarperZ9/canon/blob/main/LICENSE)
+and [`NOTICE`](https://github.com/HarperZ9/canon/blob/main/NOTICE).
+
+Anyone may use, study, change and share Canon. Anyone who distributes a changed
+copy, or runs one as a network service, must offer its source under the same
+licence. That keeps a portable memory record portable in every fork.
+
+Releases up to and including 0.6.0 were published under FSL-1.1-MIT. Those
+releases keep their terms, and each converts to MIT two years after its release.

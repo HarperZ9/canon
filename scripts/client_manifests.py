@@ -40,7 +40,7 @@ def listing(plugin):
 def manifests(version, native=False):
     plugin = {'name': 'canon-local', 'version': version,
               'description': 'Search and read project context from a local database you choose, scoped to one project.',
-              'author': {'name': 'Zain Dana Harper'}, 'license': 'FSL-1.1-MIT'}
+              'author': {'name': 'Zain Dana Harper'}, 'license': 'AGPL-3.0-only'}
     command = '${PLUGIN_ROOT}/server/canon-local.exe' if native else 'python3'
     args = [] if native else ['-I', '-S', '-B', '${PLUGIN_ROOT}/server/serve.py']
     flags = (('context-db', 'CANON_CONTEXT_DB', 'context_db'), ('workspace-id', 'CANON_WORKSPACE_ID', 'workspace_id'),

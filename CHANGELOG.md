@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **Licence.** Future releases are AGPL-3.0-only. Published releases up to
+  0.6.0 keep their FSL-1.1-MIT terms and still convert to MIT two years after
+  each release.
 - **Change.** A refused client tool call returns a fixed code and hint
   (`ARGUMENT_REFUSED`, `SCOPE_MISMATCH`, `STORE_ID_MISMATCH`, `STORE_BUSY`,
   `WRITE_NOT_GRANTED`) in place of one generic string. Codes come from the
