@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.7.0 - 2026-10-22
+
+Canon is now AGPL-3.0-only, the client plugin starts from its own folder, and
+a refused client tool call returns a fixed code.
 
 - **Licence.** Future releases are AGPL-3.0-only. Published releases up to
   0.6.0 keep their FSL-1.1-MIT terms and still convert to MIT two years after
